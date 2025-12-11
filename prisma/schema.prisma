@@ -1,0 +1,1684 @@
+// Prisma schema for Enterprise Accounting Platform
+// Supports multi-company, multi-currency, multi-branch architecture
+
+generator client {
+  provider        = "prisma-client-js"
+  output          = "../src/generated/prisma"
+  engineType      = "library"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================
+// AUTHENTICATION & USER MANAGEMENT
+// ============================================
+
+model User {
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  emailVerified      DateTime?
+  passwordHash       String?
+  name               String?
+  phone              String?
+  avatar             String?
+  isActive           Boolean   @default(true)
+  mfaEnabled         Boolean   @default(false)
+  mfaSecret          String?
+  lastLoginAt        DateTime?
+  lastLoginIp        String?
+  failedLoginAttempts Int      @default(0)
+  lockedUntil        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  accounts           Account[]
+  sessions           Session[]
+  organizationUsers  OrganizationUser[]
+  auditLogs          AuditLog[]
+  approvals          Approval[]         @relation("ApprovalApprover")
+  requestedApprovals Approval[]         @relation("ApprovalRequester")
+  notifications      Notification[]
+  createdVouchers    Voucher[]          @relation("VoucherCreatedBy")
+  approvedVouchers   Voucher[]          @relation("VoucherApprovedBy")
+  expenseClaims      ExpenseClaim[]
+  attendances        Attendance[]
+  leaves             Leave[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String   @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?  @db.Text
+  access_token      String?  @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?  @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  ipAddress    String?
+  userAgent    String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ============================================
+// ORGANIZATION & MULTI-TENANCY
+// ============================================
+
+model Organization {
+  id               String   @id @default(cuid())
+  name             String
+  legalName        String?
+  registrationNo   String?
+  taxId            String?
+  gstNo            String?
+  panNo            String?
+  tanNo            String?
+  logo             String?
+  website          String?
+  email            String?
+  phone            String?
+  address          String?
+  city             String?
+  state            String?
+  country          String   @default("IN")
+  postalCode       String?
+  baseCurrencyId   String?
+  fiscalYearStart  Int      @default(4) // Month number (4 = April for India)
+  dateFormat       String   @default("DD/MM/YYYY")
+  timezone         String   @default("Asia/Kolkata")
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  baseCurrency      Currency?           @relation(fields: [baseCurrencyId], references: [id])
+  branches          Branch[]
+  users             OrganizationUser[]
+  ledgerGroups      LedgerGroup[]
+  ledgers           Ledger[]
+  vouchers          Voucher[]
+  costCenters       CostCenter[]
+  projects          Project[]
+  items             Item[]
+  itemCategories    ItemCategory[]
+  warehouses        Warehouse[]
+  parties           Party[]
+  bankAccounts      BankAccount[]
+  taxConfigs        TaxConfig[]
+  employees         Employee[]
+  payrollStructures PayrollStructure[]
+  fiscalYears       FiscalYear[]
+  budgets           Budget[]
+  approvalWorkflows ApprovalWorkflow[]
+  reportTemplates   ReportTemplate[]
+  auditLogs         AuditLog[]
+  notifications     Notification[]
+  salesOrders       SalesOrder[]
+  purchaseOrders    PurchaseOrder[]
+  quotations        Quotation[]
+  invoices          Invoice[]
+  bills             Bill[]
+  payments          Payment[]
+  receipts          Receipt[]
+
+  @@map("organizations")
+}
+
+model Branch {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  code           String
+  address        String?
+  city           String?
+  state          String?
+  country        String?
+  postalCode     String?
+  phone          String?
+  email          String?
+  gstNo          String?
+  isHeadOffice   Boolean  @default(false)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  warehouses   Warehouse[]
+  vouchers     Voucher[]
+  employees    Employee[]
+  salesOrders    SalesOrder[]
+  purchaseOrders PurchaseOrder[]
+  quotations     Quotation[]
+
+  @@unique([organizationId, code])
+  @@map("branches")
+}
+
+model OrganizationUser {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  roleId         String
+  branchIds      String[] // Array of branch IDs user has access to
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role         Role         @relation(fields: [roleId], references: [id])
+
+  @@unique([organizationId, userId])
+  @@map("organization_users")
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  permissions Json     // Array of permission strings
+  isSystem    Boolean  @default(false) // System roles can't be deleted
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  organizationUsers OrganizationUser[]
+
+  @@map("roles")
+}
+
+// ============================================
+// CURRENCY & EXCHANGE RATES
+// ============================================
+
+model Currency {
+  id            String   @id @default(cuid())
+  code          String   @unique // ISO 4217 code (USD, INR, EUR)
+  name          String
+  symbol        String
+  decimalPlaces Int      @default(2)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  organizations   Organization[]
+  exchangeRatesFrom ExchangeRate[] @relation("FromCurrency")
+  exchangeRatesTo   ExchangeRate[] @relation("ToCurrency")
+  vouchers        Voucher[]
+  invoices        Invoice[]
+  bills           Bill[]
+
+  @@map("currencies")
+}
+
+model ExchangeRate {
+  id             String   @id @default(cuid())
+  fromCurrencyId String
+  toCurrencyId   String
+  rate           Decimal  @db.Decimal(18, 8)
+  effectiveDate  DateTime
+  source         String?  // API source or manual
+  createdAt      DateTime @default(now())
+
+  fromCurrency Currency @relation("FromCurrency", fields: [fromCurrencyId], references: [id])
+  toCurrency   Currency @relation("ToCurrency", fields: [toCurrencyId], references: [id])
+
+  @@unique([fromCurrencyId, toCurrencyId, effectiveDate])
+  @@map("exchange_rates")
+}
+
+// ============================================
+// FISCAL YEAR & PERIODS
+// ============================================
+
+model FiscalYear {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String   // "2024-25"
+  startDate      DateTime
+  endDate        DateTime
+  isClosed       Boolean  @default(false)
+  closedAt       DateTime?
+  closedBy       String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  periods      FiscalPeriod[]
+  vouchers     Voucher[]
+  budgets      Budget[]
+
+  @@unique([organizationId, name])
+  @@map("fiscal_years")
+}
+
+model FiscalPeriod {
+  id           String   @id @default(cuid())
+  fiscalYearId String
+  name         String   // "April 2024", "Q1 2024-25"
+  periodType   String   // MONTH, QUARTER
+  startDate    DateTime
+  endDate      DateTime
+  isClosed     Boolean  @default(false)
+  closedAt     DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  fiscalYear FiscalYear @relation(fields: [fiscalYearId], references: [id], onDelete: Cascade)
+
+  @@map("fiscal_periods")
+}
+
+// ============================================
+// CHART OF ACCOUNTS (LEDGERS)
+// ============================================
+
+model LedgerGroup {
+  id             String   @id @default(cuid())
+  organizationId String
+  parentId       String?
+  name           String
+  nature         String   // ASSETS, LIABILITIES, INCOME, EXPENSES, EQUITY
+  affectsGrossProfit Boolean @default(false)
+  isSystem       Boolean  @default(false)
+  sequence       Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parent       LedgerGroup?  @relation("LedgerGroupHierarchy", fields: [parentId], references: [id])
+  children     LedgerGroup[] @relation("LedgerGroupHierarchy")
+  ledgers      Ledger[]
+
+  @@unique([organizationId, name])
+  @@map("ledger_groups")
+}
+
+model Ledger {
+  id                  String   @id @default(cuid())
+  organizationId      String
+  groupId             String
+  partyId             String?
+  bankAccountId       String?
+  name                String
+  code                String?
+  openingBalance      Decimal  @default(0) @db.Decimal(18, 4)
+  openingBalanceType  String?  // DR or CR
+  currentBalance      Decimal  @default(0) @db.Decimal(18, 4)
+  creditLimit         Decimal? @db.Decimal(18, 4)
+  creditDays          Int?
+  gstRegistrationType String?
+  gstNo               String?
+  panNo               String?
+  tdsApplicable       Boolean  @default(false)
+  tdsRate             Decimal? @db.Decimal(5, 2)
+  isBillwise          Boolean  @default(false) // Track invoicewise
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  group            LedgerGroup       @relation(fields: [groupId], references: [id])
+  party            Party?            @relation(fields: [partyId], references: [id])
+  bankAccount      BankAccount?      @relation(fields: [bankAccountId], references: [id])
+  voucherEntries   VoucherEntry[]
+  budgetLines      BudgetLine[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, groupId])
+  @@map("ledgers")
+}
+
+// ============================================
+// VOUCHERS & JOURNAL ENTRIES
+// ============================================
+
+model Voucher {
+  id               String    @id @default(cuid())
+  organizationId   String
+  branchId         String?
+  fiscalYearId     String
+  currencyId       String?
+  voucherTypeId    String
+  voucherNumber    String
+  date             DateTime
+  referenceNo      String?
+  narration        String?
+  exchangeRate     Decimal   @default(1) @db.Decimal(18, 8)
+  totalDebit       Decimal   @db.Decimal(18, 4)
+  totalCredit      Decimal   @db.Decimal(18, 4)
+  status           String    @default("DRAFT") // DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, CANCELLED
+  isPosted         Boolean   @default(false)
+  postedAt         DateTime?
+  createdById      String
+  approvedById     String?
+  approvedAt       DateTime?
+  attachments      Json?     // Array of attachment URLs
+  metadata         Json?     // Additional flexible data
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch        Branch?       @relation(fields: [branchId], references: [id])
+  fiscalYear    FiscalYear    @relation(fields: [fiscalYearId], references: [id])
+  currency      Currency?     @relation(fields: [currencyId], references: [id])
+  voucherType   VoucherType   @relation(fields: [voucherTypeId], references: [id])
+  createdBy     User          @relation("VoucherCreatedBy", fields: [createdById], references: [id])
+  approvedBy    User?         @relation("VoucherApprovedBy", fields: [approvedById], references: [id])
+  entries       VoucherEntry[]
+  invoicePayments InvoicePayment[]
+
+  @@unique([organizationId, voucherTypeId, voucherNumber, fiscalYearId])
+  @@index([organizationId, date])
+  @@index([organizationId, status])
+  @@map("vouchers")
+}
+
+model VoucherType {
+  id                    String   @id @default(cuid())
+  name                  String
+  code                  String   @unique
+  nature                String   // PAYMENT, RECEIPT, CONTRA, JOURNAL, SALES, PURCHASE, DEBIT_NOTE, CREDIT_NOTE
+  numberingPrefix       String?
+  numberingFormat       String?  // e.g., "PAY/{FY}/{BRANCH}/{NUM}"
+  autoNumbering         Boolean  @default(true)
+  requiresApproval      Boolean  @default(false)
+  approvalWorkflowId    String?
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  vouchers         Voucher[]
+  approvalWorkflow ApprovalWorkflow? @relation(fields: [approvalWorkflowId], references: [id])
+
+  @@map("voucher_types")
+}
+
+model VoucherEntry {
+  id            String   @id @default(cuid())
+  voucherId     String
+  ledgerId      String
+  costCenterId  String?
+  projectId     String?
+  debitAmount   Decimal  @default(0) @db.Decimal(18, 4)
+  creditAmount  Decimal  @default(0) @db.Decimal(18, 4)
+  narration     String?
+  billRef       String?  // Invoice/Bill reference for billwise tracking
+  dueDate       DateTime?
+  sequence      Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  voucher    Voucher     @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  ledger     Ledger      @relation(fields: [ledgerId], references: [id])
+  costCenter CostCenter? @relation(fields: [costCenterId], references: [id])
+  project    Project?    @relation(fields: [projectId], references: [id])
+
+  @@index([voucherId])
+  @@index([ledgerId])
+  @@map("voucher_entries")
+}
+
+// ============================================
+// COST CENTERS & PROJECTS
+// ============================================
+
+model CostCenter {
+  id             String   @id @default(cuid())
+  organizationId String
+  parentId       String?
+  name           String
+  code           String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parent         CostCenter?    @relation("CostCenterHierarchy", fields: [parentId], references: [id])
+  children       CostCenter[]   @relation("CostCenterHierarchy")
+  voucherEntries VoucherEntry[]
+
+  @@unique([organizationId, name])
+  @@map("cost_centers")
+}
+
+model Project {
+  id             String    @id @default(cuid())
+  organizationId String
+  name           String
+  code           String?
+  description    String?
+  startDate      DateTime?
+  endDate        DateTime?
+  budget         Decimal?  @db.Decimal(18, 4)
+  status         String    @default("ACTIVE") // ACTIVE, COMPLETED, ON_HOLD, CANCELLED
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  voucherEntries VoucherEntry[]
+
+  @@unique([organizationId, name])
+  @@map("projects")
+}
+
+// ============================================
+// PARTIES (CUSTOMERS & VENDORS)
+// ============================================
+
+model Party {
+  id               String   @id @default(cuid())
+  organizationId   String
+  type             String   // CUSTOMER, VENDOR, BOTH
+  name             String
+  code             String?
+  contactPerson    String?
+  email            String?
+  phone            String?
+  mobile           String?
+  website          String?
+  billingAddress   String?
+  billingCity      String?
+  billingState     String?
+  billingCountry   String?
+  billingPostal    String?
+  shippingAddress  String?
+  shippingCity     String?
+  shippingState    String?
+  shippingCountry  String?
+  shippingPostal   String?
+  gstNo            String?
+  panNo            String?
+  gstRegistrationType String?
+  creditLimit      Decimal? @db.Decimal(18, 4)
+  creditDays       Int?
+  paymentTerms     String?
+  bankName         String?
+  bankBranch       String?
+  bankAccountNo    String?
+  bankIfsc         String?
+  notes            String?
+  tags             String[]
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ledgers        Ledger[]
+  salesOrders    SalesOrder[]
+  purchaseOrders PurchaseOrder[]
+  quotations     Quotation[]
+  invoices       Invoice[]
+  bills          Bill[]
+  receipts       Receipt[]
+  payments       Payment[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, type])
+  @@map("parties")
+}
+
+// ============================================
+// INVENTORY MANAGEMENT
+// ============================================
+
+model ItemCategory {
+  id             String   @id @default(cuid())
+  organizationId String
+  parentId       String?
+  name           String
+  description    String?
+  hsnCode        String?
+  sacCode        String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parent       ItemCategory?   @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children     ItemCategory[]  @relation("CategoryHierarchy")
+  items        Item[]
+
+  @@unique([organizationId, name])
+  @@map("item_categories")
+}
+
+model Item {
+  id                  String   @id @default(cuid())
+  organizationId      String
+  categoryId          String?
+  name                String
+  sku                 String?
+  barcode             String?
+  description         String?
+  type                String   @default("GOODS") // GOODS, SERVICES
+  hsnCode             String?
+  sacCode             String?
+  primaryUnitId       String
+  purchasePrice       Decimal? @db.Decimal(18, 4)
+  sellingPrice        Decimal? @db.Decimal(18, 4)
+  mrp                 Decimal? @db.Decimal(18, 4)
+  minStock            Decimal? @db.Decimal(18, 4)
+  maxStock            Decimal? @db.Decimal(18, 4)
+  reorderLevel        Decimal? @db.Decimal(18, 4)
+  reorderQty          Decimal? @db.Decimal(18, 4)
+  valuationMethod     String   @default("FIFO") // FIFO, LIFO, WEIGHTED_AVG
+  trackBatch          Boolean  @default(false)
+  trackSerial         Boolean  @default(false)
+  trackExpiry         Boolean  @default(false)
+  purchaseTaxId       String?
+  salesTaxId          String?
+  images              Json?    // Array of image URLs
+  specifications      Json?    // Key-value specifications
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  organization     Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category         ItemCategory?   @relation(fields: [categoryId], references: [id])
+  primaryUnit      UnitOfMeasure   @relation(fields: [primaryUnitId], references: [id])
+  purchaseTax      TaxConfig?      @relation("ItemPurchaseTax", fields: [purchaseTaxId], references: [id])
+  salesTax         TaxConfig?      @relation("ItemSalesTax", fields: [salesTaxId], references: [id])
+  alternateUnits   ItemUnit[]
+  stocks           Stock[]
+  batches          Batch[]
+  stockMovements   StockMovement[]
+  salesOrderItems    SalesOrderItem[]
+  purchaseOrderItems PurchaseOrderItem[]
+  quotationItems     QuotationItem[]
+  invoiceItems       InvoiceItem[]
+  billItems          BillItem[]
+
+  @@unique([organizationId, name])
+  @@unique([organizationId, sku])
+  @@index([organizationId, categoryId])
+  @@map("items")
+}
+
+model UnitOfMeasure {
+  id           String   @id @default(cuid())
+  name         String
+  symbol       String
+  decimalPlaces Int     @default(2)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  items          Item[]
+  itemUnits      ItemUnit[]
+  stockMovements StockMovement[]
+
+  @@unique([name])
+  @@map("units_of_measure")
+}
+
+model ItemUnit {
+  id               String   @id @default(cuid())
+  itemId           String
+  unitId           String
+  conversionFactor Decimal  @db.Decimal(18, 6) // How many primary units in this unit
+  isDefault        Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  item Item          @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  unit UnitOfMeasure @relation(fields: [unitId], references: [id])
+
+  @@unique([itemId, unitId])
+  @@map("item_units")
+}
+
+model Warehouse {
+  id             String   @id @default(cuid())
+  organizationId String
+  branchId       String?
+  name           String
+  code           String?
+  address        String?
+  city           String?
+  state          String?
+  country        String?
+  postalCode     String?
+  contactPerson  String?
+  phone          String?
+  isDefault      Boolean  @default(false)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch         Branch?         @relation(fields: [branchId], references: [id])
+  stocks         Stock[]
+  batches        Batch[]
+  stockMovementsFrom StockMovement[] @relation("MovementFromWarehouse")
+  stockMovementsTo   StockMovement[] @relation("MovementToWarehouse")
+
+  @@unique([organizationId, name])
+  @@map("warehouses")
+}
+
+model Stock {
+  id           String   @id @default(cuid())
+  itemId       String
+  warehouseId  String
+  quantity     Decimal  @db.Decimal(18, 4)
+  reservedQty  Decimal  @default(0) @db.Decimal(18, 4)
+  avgCost      Decimal  @default(0) @db.Decimal(18, 4)
+  lastPurchasePrice Decimal? @db.Decimal(18, 4)
+  lastSalePrice     Decimal? @db.Decimal(18, 4)
+  updatedAt    DateTime @updatedAt
+
+  item      Item      @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, warehouseId])
+  @@map("stocks")
+}
+
+model Batch {
+  id             String    @id @default(cuid())
+  itemId         String
+  warehouseId    String
+  batchNumber    String
+  serialNumber   String?
+  manufacturingDate DateTime?
+  expiryDate     DateTime?
+  quantity       Decimal   @db.Decimal(18, 4)
+  costPrice      Decimal   @db.Decimal(18, 4)
+  sellingPrice   Decimal?  @db.Decimal(18, 4)
+  status         String    @default("ACTIVE") // ACTIVE, EXPIRED, CONSUMED
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  item      Item      @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  stockMovements StockMovement[]
+
+  @@unique([itemId, warehouseId, batchNumber])
+  @@map("batches")
+}
+
+model StockMovement {
+  id              String    @id @default(cuid())
+  itemId          String
+  fromWarehouseId String?
+  toWarehouseId   String?
+  batchId         String?
+  unitId          String
+  movementType    String    // PURCHASE, SALE, TRANSFER, ADJUSTMENT, RETURN, GRN, ISSUE
+  quantity        Decimal   @db.Decimal(18, 4)
+  rate            Decimal   @db.Decimal(18, 4)
+  totalValue      Decimal   @db.Decimal(18, 4)
+  referenceType   String?   // INVOICE, BILL, TRANSFER, ADJUSTMENT
+  referenceId     String?
+  narration       String?
+  date            DateTime
+  createdAt       DateTime  @default(now())
+
+  item          Item       @relation(fields: [itemId], references: [id])
+  fromWarehouse Warehouse? @relation("MovementFromWarehouse", fields: [fromWarehouseId], references: [id])
+  toWarehouse   Warehouse? @relation("MovementToWarehouse", fields: [toWarehouseId], references: [id])
+  batch         Batch?     @relation(fields: [batchId], references: [id])
+  unit          UnitOfMeasure @relation(fields: [unitId], references: [id])
+
+  @@index([itemId, date])
+  @@index([referenceType, referenceId])
+  @@map("stock_movements")
+}
+
+// ============================================
+// SALES & PURCHASE ORDERS
+// ============================================
+
+model SalesOrder {
+  id               String    @id @default(cuid())
+  organizationId   String
+  branchId         String?
+  partyId          String
+  orderNumber      String
+  date             DateTime
+  expectedDate     DateTime?
+  referenceNo      String?
+  status           String    @default("DRAFT") // DRAFT, CONFIRMED, PARTIAL, FULFILLED, CANCELLED
+  billingAddress   String?
+  shippingAddress  String?
+  subtotal         Decimal   @db.Decimal(18, 4)
+  discountAmount   Decimal   @default(0) @db.Decimal(18, 4)
+  taxAmount        Decimal   @default(0) @db.Decimal(18, 4)
+  totalAmount      Decimal   @db.Decimal(18, 4)
+  notes            String?
+  terms            String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch       Branch?          @relation(fields: [branchId], references: [id])
+  party        Party            @relation(fields: [partyId], references: [id])
+  items        SalesOrderItem[]
+  invoices     Invoice[]
+
+  @@unique([organizationId, orderNumber])
+  @@index([organizationId, date])
+  @@map("sales_orders")
+}
+
+model SalesOrderItem {
+  id            String   @id @default(cuid())
+  salesOrderId  String
+  itemId        String
+  description   String?
+  quantity      Decimal  @db.Decimal(18, 4)
+  deliveredQty  Decimal  @default(0) @db.Decimal(18, 4)
+  unitPrice     Decimal  @db.Decimal(18, 4)
+  discountPercent Decimal @default(0) @db.Decimal(5, 2)
+  discountAmount  Decimal @default(0) @db.Decimal(18, 4)
+  taxId         String?
+  taxAmount     Decimal  @default(0) @db.Decimal(18, 4)
+  totalAmount   Decimal  @db.Decimal(18, 4)
+  sequence      Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  salesOrder SalesOrder @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  item       Item       @relation(fields: [itemId], references: [id])
+  tax        TaxConfig? @relation(fields: [taxId], references: [id])
+
+  @@map("sales_order_items")
+}
+
+model Quotation {
+  id               String    @id @default(cuid())
+  organizationId   String
+  branchId         String?
+  partyId          String
+  quotationNumber  String
+  date             DateTime
+  validUntil       DateTime
+  referenceNo      String?
+  status           String    @default("DRAFT") // DRAFT, SENT, ACCEPTED, REJECTED, EXPIRED, CONVERTED
+  billingAddress   String?
+  shippingAddress  String?
+  subtotal         Decimal   @db.Decimal(18, 4)
+  discountAmount   Decimal   @default(0) @db.Decimal(18, 4)
+  taxAmount        Decimal   @default(0) @db.Decimal(18, 4)
+  totalAmount      Decimal   @db.Decimal(18, 4)
+  notes            String?
+  terms            String?
+  convertedToOrder String?   // SalesOrder ID if converted
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch       Branch?            @relation(fields: [branchId], references: [id])
+  party        Party              @relation(fields: [partyId], references: [id])
+  items        QuotationItem[]
+
+  @@unique([organizationId, quotationNumber])
+  @@index([organizationId, date])
+  @@map("quotations")
+}
+
+model QuotationItem {
+  id              String   @id @default(cuid())
+  quotationId     String
+  itemId          String
+  description     String?
+  quantity        Decimal  @db.Decimal(18, 4)
+  unitPrice       Decimal  @db.Decimal(18, 4)
+  discountPercent Decimal  @default(0) @db.Decimal(5, 2)
+  discountAmount  Decimal  @default(0) @db.Decimal(18, 4)
+  taxId           String?
+  taxAmount       Decimal  @default(0) @db.Decimal(18, 4)
+  totalAmount     Decimal  @db.Decimal(18, 4)
+  sequence        Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  quotation Quotation  @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  item      Item       @relation(fields: [itemId], references: [id])
+  tax       TaxConfig? @relation(fields: [taxId], references: [id])
+
+  @@map("quotation_items")
+}
+
+model PurchaseOrder {
+  id               String    @id @default(cuid())
+  organizationId   String
+  branchId         String?
+  partyId          String
+  orderNumber      String
+  date             DateTime
+  expectedDate     DateTime?
+  referenceNo      String?
+  status           String    @default("DRAFT") // DRAFT, SENT, CONFIRMED, PARTIAL, RECEIVED, CANCELLED
+  billingAddress   String?
+  shippingAddress  String?
+  subtotal         Decimal   @db.Decimal(18, 4)
+  discountAmount   Decimal   @default(0) @db.Decimal(18, 4)
+  taxAmount        Decimal   @default(0) @db.Decimal(18, 4)
+  totalAmount      Decimal   @db.Decimal(18, 4)
+  notes            String?
+  terms            String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch       Branch?             @relation(fields: [branchId], references: [id])
+  party        Party               @relation(fields: [partyId], references: [id])
+  items        PurchaseOrderItem[]
+  bills        Bill[]
+
+  @@unique([organizationId, orderNumber])
+  @@index([organizationId, date])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id               String   @id @default(cuid())
+  purchaseOrderId  String
+  itemId           String
+  description      String?
+  quantity         Decimal  @db.Decimal(18, 4)
+  receivedQty      Decimal  @default(0) @db.Decimal(18, 4)
+  unitPrice        Decimal  @db.Decimal(18, 4)
+  discountPercent  Decimal  @default(0) @db.Decimal(5, 2)
+  discountAmount   Decimal  @default(0) @db.Decimal(18, 4)
+  taxId            String?
+  taxAmount        Decimal  @default(0) @db.Decimal(18, 4)
+  totalAmount      Decimal  @db.Decimal(18, 4)
+  sequence         Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  item          Item          @relation(fields: [itemId], references: [id])
+  tax           TaxConfig?    @relation(fields: [taxId], references: [id])
+
+  @@map("purchase_order_items")
+}
+
+// ============================================
+// INVOICES & BILLS
+// ============================================
+
+model Invoice {
+  id               String    @id @default(cuid())
+  organizationId   String
+  partyId          String
+  salesOrderId     String?
+  currencyId       String?
+  invoiceNumber    String
+  date             DateTime
+  dueDate          DateTime
+  type             String    @default("INVOICE") // INVOICE, CREDIT_NOTE, DEBIT_NOTE, PROFORMA
+  status           String    @default("DRAFT") // DRAFT, SENT, PARTIAL, PAID, OVERDUE, CANCELLED
+  billingAddress   String?
+  shippingAddress  String?
+  subtotal         Decimal   @db.Decimal(18, 4)
+  discountAmount   Decimal   @default(0) @db.Decimal(18, 4)
+  taxAmount        Decimal   @default(0) @db.Decimal(18, 4)
+  roundOff         Decimal   @default(0) @db.Decimal(18, 4)
+  totalAmount      Decimal   @db.Decimal(18, 4)
+  amountPaid       Decimal   @default(0) @db.Decimal(18, 4)
+  amountDue        Decimal   @db.Decimal(18, 4)
+  exchangeRate     Decimal   @default(1) @db.Decimal(18, 8)
+  notes            String?
+  terms            String?
+  irnNumber        String?   // India e-invoice IRN
+  qrCode           String?   // QR code for e-invoice
+  eInvoiceStatus   String?   // PENDING, GENERATED, CANCELLED
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  party        Party            @relation(fields: [partyId], references: [id])
+  salesOrder   SalesOrder?      @relation(fields: [salesOrderId], references: [id])
+  currency     Currency?        @relation(fields: [currencyId], references: [id])
+  items        InvoiceItem[]
+  taxes        InvoiceTax[]
+  payments     InvoicePayment[]
+  receipts     Receipt[]
+
+  @@unique([organizationId, invoiceNumber])
+  @@index([organizationId, date])
+  @@index([organizationId, status])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id              String   @id @default(cuid())
+  invoiceId       String
+  itemId          String?
+  description     String
+  hsnCode         String?
+  quantity        Decimal  @db.Decimal(18, 4)
+  unitPrice       Decimal  @db.Decimal(18, 4)
+  discountPercent Decimal  @default(0) @db.Decimal(5, 2)
+  discountAmount  Decimal  @default(0) @db.Decimal(18, 4)
+  taxableAmount   Decimal  @db.Decimal(18, 4)
+  taxId           String?
+  taxAmount       Decimal  @default(0) @db.Decimal(18, 4)
+  totalAmount     Decimal  @db.Decimal(18, 4)
+  sequence        Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  invoice Invoice    @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  item    Item?      @relation(fields: [itemId], references: [id])
+  tax     TaxConfig? @relation(fields: [taxId], references: [id])
+
+  @@map("invoice_items")
+}
+
+model InvoiceTax {
+  id           String   @id @default(cuid())
+  invoiceId    String
+  taxId        String
+  taxableAmount Decimal @db.Decimal(18, 4)
+  taxAmount    Decimal  @db.Decimal(18, 4)
+  createdAt    DateTime @default(now())
+
+  invoice Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  tax     TaxConfig @relation(fields: [taxId], references: [id])
+
+  @@map("invoice_taxes")
+}
+
+model Bill {
+  id               String    @id @default(cuid())
+  organizationId   String
+  partyId          String
+  purchaseOrderId  String?
+  currencyId       String?
+  billNumber       String
+  vendorBillNo     String?
+  date             DateTime
+  dueDate          DateTime
+  type             String    @default("BILL") // BILL, DEBIT_NOTE, CREDIT_NOTE
+  status           String    @default("DRAFT") // DRAFT, PENDING_APPROVAL, APPROVED, PARTIAL, PAID, OVERDUE, CANCELLED
+  subtotal         Decimal   @db.Decimal(18, 4)
+  discountAmount   Decimal   @default(0) @db.Decimal(18, 4)
+  taxAmount        Decimal   @default(0) @db.Decimal(18, 4)
+  tdsAmount        Decimal   @default(0) @db.Decimal(18, 4)
+  roundOff         Decimal   @default(0) @db.Decimal(18, 4)
+  totalAmount      Decimal   @db.Decimal(18, 4)
+  amountPaid       Decimal   @default(0) @db.Decimal(18, 4)
+  amountDue        Decimal   @db.Decimal(18, 4)
+  exchangeRate     Decimal   @default(1) @db.Decimal(18, 8)
+  notes            String?
+  attachments      Json?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  party         Party          @relation(fields: [partyId], references: [id])
+  purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+  currency      Currency?      @relation(fields: [currencyId], references: [id])
+  items         BillItem[]
+  taxes         BillTax[]
+  payments      Payment[]
+
+  @@unique([organizationId, billNumber])
+  @@index([organizationId, date])
+  @@map("bills")
+}
+
+model BillItem {
+  id              String   @id @default(cuid())
+  billId          String
+  itemId          String?
+  description     String
+  hsnCode         String?
+  quantity        Decimal  @db.Decimal(18, 4)
+  unitPrice       Decimal  @db.Decimal(18, 4)
+  discountPercent Decimal  @default(0) @db.Decimal(5, 2)
+  discountAmount  Decimal  @default(0) @db.Decimal(18, 4)
+  taxableAmount   Decimal  @db.Decimal(18, 4)
+  taxId           String?
+  taxAmount       Decimal  @default(0) @db.Decimal(18, 4)
+  totalAmount     Decimal  @db.Decimal(18, 4)
+  sequence        Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  bill Bill       @relation(fields: [billId], references: [id], onDelete: Cascade)
+  item Item?      @relation(fields: [itemId], references: [id])
+  tax  TaxConfig? @relation(fields: [taxId], references: [id])
+
+  @@map("bill_items")
+}
+
+model BillTax {
+  id           String   @id @default(cuid())
+  billId       String
+  taxId        String
+  taxableAmount Decimal @db.Decimal(18, 4)
+  taxAmount    Decimal  @db.Decimal(18, 4)
+  createdAt    DateTime @default(now())
+
+  bill Bill      @relation(fields: [billId], references: [id], onDelete: Cascade)
+  tax  TaxConfig @relation(fields: [taxId], references: [id])
+
+  @@map("bill_taxes")
+}
+
+// ============================================
+// PAYMENTS & RECEIPTS
+// ============================================
+
+model Receipt {
+  id             String   @id @default(cuid())
+  organizationId String
+  partyId        String
+  invoiceId      String?
+  voucherId      String?
+  receiptNumber  String
+  date           DateTime
+  amount         Decimal  @db.Decimal(18, 4)
+  paymentMode    String   // CASH, BANK_TRANSFER, CHEQUE, UPI, CARD
+  bankAccountId  String?
+  chequeNo       String?
+  chequeDate     DateTime?
+  transactionRef String?
+  notes          String?
+  status         String   @default("COMPLETED") // PENDING, COMPLETED, BOUNCED, CANCELLED
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  party        Party        @relation(fields: [partyId], references: [id])
+  invoice      Invoice?     @relation(fields: [invoiceId], references: [id])
+  bankAccount  BankAccount? @relation(fields: [bankAccountId], references: [id])
+
+  @@unique([organizationId, receiptNumber])
+  @@map("receipts")
+}
+
+model Payment {
+  id             String   @id @default(cuid())
+  organizationId String
+  partyId        String
+  billId         String?
+  voucherId      String?
+  paymentNumber  String
+  date           DateTime
+  amount         Decimal  @db.Decimal(18, 4)
+  paymentMode    String   // CASH, BANK_TRANSFER, CHEQUE, NEFT, RTGS, UPI
+  bankAccountId  String?
+  chequeNo       String?
+  chequeDate     DateTime?
+  transactionRef String?
+  notes          String?
+  status         String   @default("COMPLETED") // PENDING, COMPLETED, FAILED, CANCELLED
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  party        Party        @relation(fields: [partyId], references: [id])
+  bill         Bill?        @relation(fields: [billId], references: [id])
+  bankAccount  BankAccount? @relation(fields: [bankAccountId], references: [id])
+
+  @@unique([organizationId, paymentNumber])
+  @@map("payments")
+}
+
+model InvoicePayment {
+  id        String   @id @default(cuid())
+  invoiceId String?
+  billId    String?
+  voucherId String
+  amount    Decimal  @db.Decimal(18, 4)
+  date      DateTime
+  createdAt DateTime @default(now())
+
+  invoice Invoice? @relation(fields: [invoiceId], references: [id])
+  voucher Voucher  @relation(fields: [voucherId], references: [id])
+
+  @@map("invoice_payments")
+}
+
+// ============================================
+// BANKING
+// ============================================
+
+model BankAccount {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  bankName       String
+  branch         String?
+  accountNumber  String
+  ifscCode       String?
+  swiftCode      String?
+  accountType    String   // CURRENT, SAVINGS, CC, OD
+  openingBalance Decimal  @default(0) @db.Decimal(18, 4)
+  currentBalance Decimal  @default(0) @db.Decimal(18, 4)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization      Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ledgers           Ledger[]
+  receipts          Receipt[]
+  payments          Payment[]
+  bankTransactions  BankTransaction[]
+  reconciliations   BankReconciliation[]
+
+  @@unique([organizationId, accountNumber])
+  @@map("bank_accounts")
+}
+
+model BankTransaction {
+  id            String    @id @default(cuid())
+  bankAccountId String
+  date          DateTime
+  description   String?
+  referenceNo   String?
+  debitAmount   Decimal   @default(0) @db.Decimal(18, 4)
+  creditAmount  Decimal   @default(0) @db.Decimal(18, 4)
+  balance       Decimal   @db.Decimal(18, 4)
+  category      String?
+  isReconciled  Boolean   @default(false)
+  reconciledAt  DateTime?
+  matchedVoucherId String?
+  importSource  String?   // MANUAL, BANK_FEED, CSV
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  bankAccount BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+
+  @@index([bankAccountId, date])
+  @@map("bank_transactions")
+}
+
+model BankReconciliation {
+  id            String   @id @default(cuid())
+  bankAccountId String
+  periodStart   DateTime
+  periodEnd     DateTime
+  statementBalance Decimal @db.Decimal(18, 4)
+  bookBalance   Decimal  @db.Decimal(18, 4)
+  difference    Decimal  @db.Decimal(18, 4)
+  status        String   @default("IN_PROGRESS") // IN_PROGRESS, COMPLETED
+  completedAt   DateTime?
+  completedBy   String?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  bankAccount BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+
+  @@map("bank_reconciliations")
+}
+
+// ============================================
+// TAXATION
+// ============================================
+
+model TaxConfig {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  code           String   // GST5, GST12, GST18, VAT, TDS194C
+  taxType        String   // GST, IGST, CGST, SGST, VAT, TDS, TCS, CESS
+  rate           Decimal  @db.Decimal(5, 2)
+  accountId      String?  // Ledger for tax payable/receivable
+  description    String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  salesOrderItems    SalesOrderItem[]
+  purchaseOrderItems PurchaseOrderItem[]
+  quotationItems     QuotationItem[]
+  invoiceItems       InvoiceItem[]
+  invoiceTaxes       InvoiceTax[]
+  billItems          BillItem[]
+  billTaxes          BillTax[]
+  itemsPurchaseTax   Item[]              @relation("ItemPurchaseTax")
+  itemsSalesTax      Item[]              @relation("ItemSalesTax")
+
+  @@unique([organizationId, code])
+  @@map("tax_configs")
+}
+
+model GSTReturn {
+  id             String   @id @default(cuid())
+  organizationId String
+  returnType     String   // GSTR1, GSTR3B, GSTR9
+  period         String   // "Apr-2024", "Q1-2024"
+  filingDate     DateTime?
+  dueDate        DateTime
+  status         String   @default("PENDING") // PENDING, FILED, REVISED
+  totalTaxLiability Decimal? @db.Decimal(18, 4)
+  totalItcClaimed   Decimal? @db.Decimal(18, 4)
+  netPayable        Decimal? @db.Decimal(18, 4)
+  arn               String?  // Acknowledgment Reference Number
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("gst_returns")
+}
+
+// ============================================
+// HR & PAYROLL
+// ============================================
+
+model Employee {
+  id              String    @id @default(cuid())
+  organizationId  String
+  branchId        String?
+  userId          String?
+  employeeCode    String
+  firstName       String
+  lastName        String?
+  email           String?
+  phone           String?
+  dateOfBirth     DateTime?
+  gender          String?
+  maritalStatus   String?
+  address         String?
+  city            String?
+  state           String?
+  country         String?
+  postalCode      String?
+  joiningDate     DateTime
+  confirmationDate DateTime?
+  resignationDate DateTime?
+  relievingDate   DateTime?
+  departmentId    String?
+  designationId   String?
+  reportingTo     String?
+  employmentType  String    @default("FULL_TIME") // FULL_TIME, PART_TIME, CONTRACT, INTERN
+  status          String    @default("ACTIVE") // ACTIVE, ON_NOTICE, RELIEVED, TERMINATED
+  panNo           String?
+  aadharNo        String?
+  uan             String?   // Universal Account Number for PF
+  pfNo            String?
+  esiNo           String?
+  bankName        String?
+  bankBranch      String?
+  bankAccountNo   String?
+  bankIfsc        String?
+  salaryStructureId String?
+  ctc             Decimal?  @db.Decimal(18, 4)
+  documents       Json?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch          Branch?          @relation(fields: [branchId], references: [id])
+  department      Department?      @relation(fields: [departmentId], references: [id])
+  designation     Designation?     @relation(fields: [designationId], references: [id])
+  salaryStructure PayrollStructure? @relation(fields: [salaryStructureId], references: [id])
+  attendances     Attendance[]
+  leaves          Leave[]
+  payslips        Payslip[]
+  expenseClaims   ExpenseClaim[]
+
+  @@unique([organizationId, employeeCode])
+  @@map("employees")
+}
+
+model Department {
+  id          String   @id @default(cuid())
+  name        String
+  code        String?
+  description String?
+  headId      String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employees Employee[]
+
+  @@map("departments")
+}
+
+model Designation {
+  id          String   @id @default(cuid())
+  name        String
+  level       Int?
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employees Employee[]
+
+  @@map("designations")
+}
+
+model PayrollStructure {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  components     Json     // Array of salary components with formulas
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employees    Employee[]
+
+  @@unique([organizationId, name])
+  @@map("payroll_structures")
+}
+
+model Attendance {
+  id           String    @id @default(cuid())
+  employeeId   String
+  userId       String?
+  date         DateTime
+  checkIn      DateTime?
+  checkOut     DateTime?
+  workHours    Decimal?  @db.Decimal(5, 2)
+  overtime     Decimal?  @db.Decimal(5, 2)
+  status       String    @default("PRESENT") // PRESENT, ABSENT, HALF_DAY, LEAVE, HOLIDAY, WEEKEND
+  shiftId      String?
+  notes        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  user     User?    @relation(fields: [userId], references: [id])
+
+  @@unique([employeeId, date])
+  @@map("attendances")
+}
+
+model Leave {
+  id           String   @id @default(cuid())
+  employeeId   String
+  userId       String?
+  leaveTypeId  String
+  fromDate     DateTime
+  toDate       DateTime
+  days         Decimal  @db.Decimal(4, 1)
+  reason       String?
+  status       String   @default("PENDING") // PENDING, APPROVED, REJECTED, CANCELLED
+  approvedBy   String?
+  approvedAt   DateTime?
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  employee  Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  user      User?     @relation(fields: [userId], references: [id])
+  leaveType LeaveType @relation(fields: [leaveTypeId], references: [id])
+
+  @@map("leaves")
+}
+
+model LeaveType {
+  id              String   @id @default(cuid())
+  name            String
+  code            String
+  annualQuota     Decimal  @db.Decimal(4, 1)
+  carryForward    Boolean  @default(false)
+  maxCarryForward Decimal? @db.Decimal(4, 1)
+  encashable      Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  leaves Leave[]
+
+  @@map("leave_types")
+}
+
+model Payslip {
+  id           String   @id @default(cuid())
+  employeeId   String
+  month        Int
+  year         Int
+  basicSalary  Decimal  @db.Decimal(18, 4)
+  earnings     Json     // Array of earning components
+  deductions   Json     // Array of deduction components
+  grossSalary  Decimal  @db.Decimal(18, 4)
+  totalDeductions Decimal @db.Decimal(18, 4)
+  netSalary    Decimal  @db.Decimal(18, 4)
+  workingDays  Int
+  presentDays  Decimal  @db.Decimal(4, 1)
+  lopDays      Decimal  @default(0) @db.Decimal(4, 1)
+  status       String   @default("DRAFT") // DRAFT, PROCESSED, APPROVED, PAID
+  paidAt       DateTime?
+  paidVia      String?
+  transactionRef String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, month, year])
+  @@map("payslips")
+}
+
+model ExpenseClaim {
+  id           String   @id @default(cuid())
+  employeeId   String
+  userId       String
+  claimNumber  String
+  date         DateTime
+  category     String   // TRAVEL, FOOD, ACCOMMODATION, OFFICE_SUPPLIES, OTHER
+  description  String
+  amount       Decimal  @db.Decimal(18, 4)
+  attachments  Json?
+  status       String   @default("PENDING") // PENDING, APPROVED, REJECTED, REIMBURSED
+  approvedBy   String?
+  approvedAt   DateTime?
+  reimbursedAt DateTime?
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@unique([claimNumber])
+  @@map("expense_claims")
+}
+
+// ============================================
+// BUDGETS
+// ============================================
+
+model Budget {
+  id             String   @id @default(cuid())
+  organizationId String
+  fiscalYearId   String
+  name           String
+  description    String?
+  status         String   @default("DRAFT") // DRAFT, ACTIVE, CLOSED
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  fiscalYear   FiscalYear   @relation(fields: [fiscalYearId], references: [id])
+  lines        BudgetLine[]
+
+  @@unique([organizationId, fiscalYearId, name])
+  @@map("budgets")
+}
+
+model BudgetLine {
+  id         String   @id @default(cuid())
+  budgetId   String
+  ledgerId   String
+  month1     Decimal  @default(0) @db.Decimal(18, 4)
+  month2     Decimal  @default(0) @db.Decimal(18, 4)
+  month3     Decimal  @default(0) @db.Decimal(18, 4)
+  month4     Decimal  @default(0) @db.Decimal(18, 4)
+  month5     Decimal  @default(0) @db.Decimal(18, 4)
+  month6     Decimal  @default(0) @db.Decimal(18, 4)
+  month7     Decimal  @default(0) @db.Decimal(18, 4)
+  month8     Decimal  @default(0) @db.Decimal(18, 4)
+  month9     Decimal  @default(0) @db.Decimal(18, 4)
+  month10    Decimal  @default(0) @db.Decimal(18, 4)
+  month11    Decimal  @default(0) @db.Decimal(18, 4)
+  month12    Decimal  @default(0) @db.Decimal(18, 4)
+  annual     Decimal  @default(0) @db.Decimal(18, 4)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  budget Budget @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  ledger Ledger @relation(fields: [ledgerId], references: [id])
+
+  @@unique([budgetId, ledgerId])
+  @@map("budget_lines")
+}
+
+// ============================================
+// APPROVAL WORKFLOWS
+// ============================================
+
+model ApprovalWorkflow {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  entityType     String   // VOUCHER, BILL, PURCHASE_ORDER, EXPENSE_CLAIM, LEAVE
+  conditions     Json?    // Conditions for triggering this workflow
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  steps        ApprovalWorkflowStep[]
+  voucherTypes VoucherType[]
+
+  @@unique([organizationId, name])
+  @@map("approval_workflows")
+}
+
+model ApprovalWorkflowStep {
+  id           String   @id @default(cuid())
+  workflowId   String
+  stepNumber   Int
+  approverType String   // ROLE, USER, MANAGER
+  approverId   String?  // Role ID or User ID
+  amountLimit  Decimal? @db.Decimal(18, 4)
+  isRequired   Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  workflow ApprovalWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@unique([workflowId, stepNumber])
+  @@map("approval_workflow_steps")
+}
+
+model Approval {
+  id           String    @id @default(cuid())
+  entityType   String    // VOUCHER, BILL, etc.
+  entityId     String
+  stepNumber   Int
+  approverId   String
+  requesterId  String
+  status       String    @default("PENDING") // PENDING, APPROVED, REJECTED
+  comments     String?
+  approvedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  approver  User @relation("ApprovalApprover", fields: [approverId], references: [id])
+  requester User @relation("ApprovalRequester", fields: [requesterId], references: [id])
+
+  @@index([entityType, entityId])
+  @@map("approvals")
+}
+
+// ============================================
+// REPORTS & TEMPLATES
+// ============================================
+
+model ReportTemplate {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  type           String   // BALANCE_SHEET, PROFIT_LOSS, CASH_FLOW, TRIAL_BALANCE, CUSTOM
+  config         Json     // Report configuration
+  schedule       Json?    // Scheduled report settings
+  isSystem       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("report_templates")
+}
+
+// ============================================
+// NOTIFICATIONS & AUDIT
+// ============================================
+
+model Notification {
+  id             String    @id @default(cuid())
+  organizationId String?
+  userId         String
+  type           String    // APPROVAL_REQUEST, PAYMENT_DUE, STOCK_LOW, SYSTEM
+  title          String
+  message        String
+  data           Json?
+  isRead         Boolean   @default(false)
+  readAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String?
+  userId         String
+  action         String   // CREATE, UPDATE, DELETE, LOGIN, LOGOUT, EXPORT
+  entityType     String
+  entityId       String?
+  oldData        Json?
+  newData        Json?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
