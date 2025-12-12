@@ -206,9 +206,90 @@ const statusColors: Record<string, string> = {
   PAID: "bg-green-100 text-green-800",
 };
 
+interface SalarySlip {
+  id: string;
+  employee: string;
+  empId: string;
+  department: string;
+  basic: number;
+  hra: number;
+  allowances: number;
+  grossSalary: number;
+  pf: number;
+  tax: number;
+  deductions: number;
+  netSalary: number;
+  status: string;
+}
+
 export default function PayrollPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isSlipDialogOpen, setIsSlipDialogOpen] = useState(false);
+  const [selectedSlip, setSelectedSlip] = useState<SalarySlip | null>(null);
+
+  const handleViewSlip = (slip: SalarySlip) => {
+    setSelectedSlip(slip);
+    setIsSlipDialogOpen(true);
+  };
+
+  const handleDownloadPDF = (slip: SalarySlip) => {
+    // Create a simple text representation for download
+    const content = `
+SALARY SLIP - March 2024
+========================
+
+Employee: ${slip.employee}
+Employee ID: ${slip.empId}
+Department: ${slip.department}
+
+EARNINGS
+--------
+Basic Salary:     ₹${slip.basic.toLocaleString()}
+HRA:              ₹${slip.hra.toLocaleString()}
+Other Allowances: ₹${slip.allowances.toLocaleString()}
+------------------------
+Gross Salary:     ₹${slip.grossSalary.toLocaleString()}
+
+DEDUCTIONS
+----------
+Provident Fund:   ₹${slip.pf.toLocaleString()}
+Income Tax (TDS): ₹${slip.tax.toLocaleString()}
+------------------------
+Total Deductions: ₹${slip.deductions.toLocaleString()}
+
+========================
+NET SALARY:       ₹${slip.netSalary.toLocaleString()}
+========================
+
+Generated on: ${new Date().toLocaleDateString()}
+    `.trim();
+
+    const blob = new Blob([content], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Salary_Slip_${slip.empId}_March_2024.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleSendToEmployee = (slip: SalarySlip) => {
+    // Simulate sending email
+    alert(`Salary slip sent to ${slip.employee}'s registered email address.`);
+  };
+
+  const handleSendAll = () => {
+    alert(`Salary slips sent to all ${salarySlips.length} employees.`);
+  };
+
+  const handleDownloadAll = () => {
+    salarySlips.forEach((slip) => {
+      handleDownloadPDF(slip);
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -469,11 +550,11 @@ export default function PayrollPage() {
                       onChange={(e) => setSearchTerm(e.target.value)}
                     />
                   </div>
-                  <Button variant="outline">
+                  <Button variant="outline" onClick={handleSendAll}>
                     <Send className="mr-2 h-4 w-4" />
                     Send All
                   </Button>
-                  <Button variant="outline" size="icon">
+                  <Button variant="outline" size="icon" onClick={handleDownloadAll} title="Download All">
                     <Download className="h-4 w-4" />
                   </Button>
                 </div>
@@ -534,15 +615,15 @@ export default function PayrollPage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleViewSlip(slip)}>
                               <Eye className="mr-2 h-4 w-4" />
                               View Slip
                             </DropdownMenuItem>
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleDownloadPDF(slip)}>
                               <Download className="mr-2 h-4 w-4" />
                               Download PDF
                             </DropdownMenuItem>
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleSendToEmployee(slip)}>
                               <Send className="mr-2 h-4 w-4" />
                               Send to Employee
                             </DropdownMenuItem>
@@ -555,6 +636,107 @@ export default function PayrollPage() {
               </Table>
             </CardContent>
           </Card>
+
+          {/* Salary Slip View Dialog */}
+          <Dialog open={isSlipDialogOpen} onOpenChange={setIsSlipDialogOpen}>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Salary Slip - March 2024</DialogTitle>
+                <DialogDescription>
+                  {selectedSlip?.employee} ({selectedSlip?.empId})
+                </DialogDescription>
+              </DialogHeader>
+              {selectedSlip && (
+                <div className="space-y-6">
+                  {/* Employee Info */}
+                  <div className="grid grid-cols-2 gap-4 p-4 bg-muted rounded-lg">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Employee Name</p>
+                      <p className="font-medium">{selectedSlip.employee}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Employee ID</p>
+                      <p className="font-medium">{selectedSlip.empId}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Department</p>
+                      <p className="font-medium">{selectedSlip.department}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Pay Period</p>
+                      <p className="font-medium">March 2024</p>
+                    </div>
+                  </div>
+
+                  {/* Earnings & Deductions */}
+                  <div className="grid grid-cols-2 gap-6">
+                    {/* Earnings */}
+                    <div>
+                      <h4 className="font-medium text-green-600 mb-3">Earnings</h4>
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span>Basic Salary</span>
+                          <span>₹{selectedSlip.basic.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span>HRA</span>
+                          <span>₹{selectedSlip.hra.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span>Other Allowances</span>
+                          <span>₹{selectedSlip.allowances.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between font-medium pt-2 border-t">
+                          <span>Gross Salary</span>
+                          <span className="text-green-600">₹{selectedSlip.grossSalary.toLocaleString()}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Deductions */}
+                    <div>
+                      <h4 className="font-medium text-red-600 mb-3">Deductions</h4>
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span>Provident Fund (EPF)</span>
+                          <span>₹{selectedSlip.pf.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span>Income Tax (TDS)</span>
+                          <span>₹{selectedSlip.tax.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span>Professional Tax</span>
+                          <span>₹200</span>
+                        </div>
+                        <div className="flex justify-between font-medium pt-2 border-t">
+                          <span>Total Deductions</span>
+                          <span className="text-red-600">₹{selectedSlip.deductions.toLocaleString()}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Net Salary */}
+                  <div className="p-4 bg-primary/10 rounded-lg">
+                    <div className="flex justify-between items-center">
+                      <span className="text-lg font-medium">Net Salary</span>
+                      <span className="text-2xl font-bold text-primary">₹{selectedSlip.netSalary.toLocaleString()}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsSlipDialogOpen(false)}>
+                  Close
+                </Button>
+                <Button onClick={() => selectedSlip && handleDownloadPDF(selectedSlip)}>
+                  <Download className="mr-2 h-4 w-4" />
+                  Download
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </TabsContent>
 
         <TabsContent value="structures" className="space-y-4">
