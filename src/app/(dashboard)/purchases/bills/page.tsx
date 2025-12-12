@@ -61,6 +61,9 @@ import {
   XCircle,
   AlertCircle,
   Loader2,
+  Upload,
+  X,
+  Paperclip,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -115,6 +118,13 @@ interface Item {
   name: string;
   sku: string | null;
   purchasePrice: number | null;
+}
+
+interface Attachment {
+  name: string;
+  size: number;
+  type: string;
+  data: string; // base64 encoded
 }
 
 const statusConfig = {
@@ -172,6 +182,8 @@ export default function PurchaseBillsPage() {
     terms: "",
     items: [{ itemId: "", quantity: 1, unitPrice: 0, discountPercent: 0 }],
   });
+  const [attachments, setAttachments] = React.useState<Attachment[]>([]);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const fetchBills = React.useCallback(async () => {
     if (!organizationId) return;
@@ -218,6 +230,59 @@ export default function PurchaseBillsPage() {
     fetchItems();
   }, [fetchBills, fetchParties, fetchItems]);
 
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    const newAttachments: Attachment[] = [];
+
+    for (const file of Array.from(files)) {
+      // Validate file type
+      const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'application/pdf'];
+      if (!allowedTypes.includes(file.type)) {
+        toast.error(`${file.name} is not a supported file type. Use JPG, PNG, GIF, or PDF.`);
+        continue;
+      }
+
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error(`${file.name} is too large. Maximum size is 5MB.`);
+        continue;
+      }
+
+      // Convert to base64
+      const base64 = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.readAsDataURL(file);
+      });
+
+      newAttachments.push({
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        data: base64,
+      });
+    }
+
+    setAttachments(prev => [...prev, ...newAttachments]);
+
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const removeAttachment = (index: number) => {
+    setAttachments(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!organizationId) return;
@@ -237,6 +302,7 @@ export default function PurchaseBillsPage() {
         body: JSON.stringify({
           ...formData,
           items: validItems,
+          attachments: attachments.length > 0 ? attachments : undefined,
         }),
       });
 
@@ -256,6 +322,7 @@ export default function PurchaseBillsPage() {
         terms: "",
         items: [{ itemId: "", quantity: 1, unitPrice: 0, discountPercent: 0 }],
       });
+      setAttachments([]);
       fetchBills();
     } catch (error) {
       console.error("Error creating bill:", error);
@@ -504,6 +571,62 @@ export default function PurchaseBillsPage() {
                       </div>
                     ))}
                   </div>
+                </div>
+
+                {/* File Upload Section */}
+                <div className="space-y-2">
+                  <Label>Bill Attachments</Label>
+                  <div className="border-2 border-dashed rounded-lg p-4 text-center hover:border-primary/50 transition-colors">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      accept="image/jpeg,image/png,image/gif,application/pdf"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                      id="bill-attachments"
+                    />
+                    <label
+                      htmlFor="bill-attachments"
+                      className="cursor-pointer flex flex-col items-center gap-2"
+                    >
+                      <Upload className="h-8 w-8 text-muted-foreground" />
+                      <div className="text-sm">
+                        <span className="text-primary font-medium">Click to upload</span>
+                        {" or drag and drop"}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        JPG, PNG, GIF, or PDF (max 5MB each)
+                      </p>
+                    </label>
+                  </div>
+                  {attachments.length > 0 && (
+                    <div className="space-y-2 mt-2">
+                      {attachments.map((attachment, index) => (
+                        <div
+                          key={index}
+                          className="flex items-center justify-between bg-muted rounded-md px-3 py-2"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Paperclip className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                            <span className="text-sm truncate">{attachment.name}</span>
+                            <span className="text-xs text-muted-foreground flex-shrink-0">
+                              ({formatFileSize(attachment.size)})
+                            </span>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 flex-shrink-0"
+                            onClick={() => removeAttachment(index)}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <DialogFooter>

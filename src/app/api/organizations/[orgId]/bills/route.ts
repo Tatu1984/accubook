@@ -8,6 +8,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 import { z } from "zod";
 
+const attachmentSchema = z.object({
+  name: z.string(),
+  size: z.number(),
+  type: z.string(),
+  data: z.string(),
+});
+
 const createBillSchema = z.object({
   partyId: z.string().min(1, "Vendor is required"),
   date: z.string().transform((val) => new Date(val)),
@@ -16,6 +23,7 @@ const createBillSchema = z.object({
   purchaseOrderId: z.string().optional(),
   status: z.enum(["DRAFT", "PENDING_APPROVAL", "APPROVED", "PARTIAL", "PAID", "OVERDUE", "CANCELLED"]).default("DRAFT"),
   notes: z.string().optional(),
+  attachments: z.array(attachmentSchema).optional(),
   items: z.array(z.object({
     itemId: z.string().min(1),
     quantity: z.number().min(1),
@@ -212,6 +220,7 @@ export async function POST(
         dueDate: validatedData.dueDate,
         status: validatedData.status,
         notes: validatedData.notes,
+        ...(validatedData.attachments && { attachments: validatedData.attachments }),
         subtotal,
         discountAmount: totalDiscount,
         taxAmount: totalTax,
