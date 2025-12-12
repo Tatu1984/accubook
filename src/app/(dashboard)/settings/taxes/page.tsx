@@ -588,10 +588,43 @@ export default function TaxesPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="MH">Maharashtra (27)</SelectItem>
+                      <SelectItem value="JK">Jammu & Kashmir (01)</SelectItem>
+                      <SelectItem value="HP">Himachal Pradesh (02)</SelectItem>
+                      <SelectItem value="PB">Punjab (03)</SelectItem>
+                      <SelectItem value="CH">Chandigarh (04)</SelectItem>
+                      <SelectItem value="UK">Uttarakhand (05)</SelectItem>
+                      <SelectItem value="HR">Haryana (06)</SelectItem>
                       <SelectItem value="DL">Delhi (07)</SelectItem>
+                      <SelectItem value="RJ">Rajasthan (08)</SelectItem>
+                      <SelectItem value="UP">Uttar Pradesh (09)</SelectItem>
+                      <SelectItem value="BR">Bihar (10)</SelectItem>
+                      <SelectItem value="SK">Sikkim (11)</SelectItem>
+                      <SelectItem value="AR">Arunachal Pradesh (12)</SelectItem>
+                      <SelectItem value="NL">Nagaland (13)</SelectItem>
+                      <SelectItem value="MN">Manipur (14)</SelectItem>
+                      <SelectItem value="MZ">Mizoram (15)</SelectItem>
+                      <SelectItem value="TR">Tripura (16)</SelectItem>
+                      <SelectItem value="ML">Meghalaya (17)</SelectItem>
+                      <SelectItem value="AS">Assam (18)</SelectItem>
+                      <SelectItem value="WB">West Bengal (19)</SelectItem>
+                      <SelectItem value="JH">Jharkhand (20)</SelectItem>
+                      <SelectItem value="OD">Odisha (21)</SelectItem>
+                      <SelectItem value="CG">Chhattisgarh (22)</SelectItem>
+                      <SelectItem value="MP">Madhya Pradesh (23)</SelectItem>
+                      <SelectItem value="GJ">Gujarat (24)</SelectItem>
+                      <SelectItem value="DD">Dadra & Nagar Haveli and Daman & Diu (26)</SelectItem>
+                      <SelectItem value="MH">Maharashtra (27)</SelectItem>
+                      <SelectItem value="AP">Andhra Pradesh (28)</SelectItem>
                       <SelectItem value="KA">Karnataka (29)</SelectItem>
+                      <SelectItem value="GA">Goa (30)</SelectItem>
+                      <SelectItem value="LD">Lakshadweep (31)</SelectItem>
+                      <SelectItem value="KL">Kerala (32)</SelectItem>
                       <SelectItem value="TN">Tamil Nadu (33)</SelectItem>
+                      <SelectItem value="PY">Puducherry (34)</SelectItem>
+                      <SelectItem value="AN">Andaman & Nicobar Islands (35)</SelectItem>
+                      <SelectItem value="TS">Telangana (36)</SelectItem>
+                      <SelectItem value="LA">Ladakh (37)</SelectItem>
+                      <SelectItem value="OT">Other Territory (97)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
