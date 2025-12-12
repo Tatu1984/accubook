@@ -172,15 +172,21 @@ export default function QuotationsPage() {
   });
 
   const fetchQuotations = React.useCallback(async () => {
-    if (!organizationId) return;
+    if (!organizationId) {
+      setLoading(false);
+      return;
+    }
     try {
       const response = await fetch(`/api/organizations/${organizationId}/quotations`);
-      if (!response.ok) throw new Error("Failed to fetch quotations");
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP ${response.status}: Failed to fetch quotations`);
+      }
       const data = await response.json();
       setQuotations(data.data || []);
     } catch (error) {
       console.error("Error fetching quotations:", error);
-      toast.error("Failed to load quotations");
+      toast.error(error instanceof Error ? error.message : "Failed to load quotations");
     } finally {
       setLoading(false);
     }
