@@ -37,6 +37,18 @@ import {
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
 import {
   Plus,
   Search,
@@ -52,6 +64,9 @@ import {
   Calendar,
   CheckCircle,
   Clock,
+  Settings,
+  Info,
+  HelpCircle,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -332,6 +347,10 @@ export default function PayrollPage() {
           <TabsTrigger value="runs">Payroll Runs</TabsTrigger>
           <TabsTrigger value="slips">Salary Slips</TabsTrigger>
           <TabsTrigger value="structures">Salary Structures</TabsTrigger>
+          <TabsTrigger value="settings">
+            <Settings className="mr-2 h-4 w-4" />
+            Settings
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="runs" className="space-y-4">
@@ -586,6 +605,520 @@ export default function PayrollPage() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="settings" className="space-y-4">
+          {/* Calculation Formula Info */}
+          <Alert>
+            <Info className="h-4 w-4" />
+            <AlertTitle>How Payroll is Calculated</AlertTitle>
+            <AlertDescription>
+              Net Salary = Gross Salary - (EPF + ESI + Professional Tax + TDS + Other Deductions)
+            </AlertDescription>
+          </Alert>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            {/* Pay Schedule Settings */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Calendar className="h-5 w-5" />
+                  Pay Schedule
+                </CardTitle>
+                <CardDescription>
+                  Configure when salaries are processed and paid
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Pay Frequency</Label>
+                  <Select defaultValue="monthly">
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="monthly">Monthly</SelectItem>
+                      <SelectItem value="bi-weekly">Bi-Weekly</SelectItem>
+                      <SelectItem value="weekly">Weekly</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Pay Day</Label>
+                  <Select defaultValue="last">
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1">1st of month</SelectItem>
+                      <SelectItem value="7">7th of month</SelectItem>
+                      <SelectItem value="15">15th of month</SelectItem>
+                      <SelectItem value="last">Last day of month</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Payroll Cut-off Date</Label>
+                  <Select defaultValue="25">
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="20">20th of month</SelectItem>
+                      <SelectItem value="25">25th of month</SelectItem>
+                      <SelectItem value="last">Last day of month</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Attendance and leaves after this date will be considered in next cycle
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Statutory Compliance */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="h-5 w-5" />
+                  Statutory Compliance
+                </CardTitle>
+                <CardDescription>
+                  Configure statutory deductions as per Indian labor laws
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label>EPF (Employee Provident Fund)</Label>
+                    <p className="text-xs text-muted-foreground">
+                      12% of Basic (both employer & employee)
+                    </p>
+                  </div>
+                  <Switch defaultChecked />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label>ESI (Employee State Insurance)</Label>
+                    <p className="text-xs text-muted-foreground">
+                      0.75% Employee + 3.25% Employer (if gross ≤ ₹21,000)
+                    </p>
+                  </div>
+                  <Switch defaultChecked />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label>Professional Tax</Label>
+                    <p className="text-xs text-muted-foreground">
+                      State-wise slab (max ₹2,500/year)
+                    </p>
+                  </div>
+                  <Switch defaultChecked />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label>TDS (Tax Deducted at Source)</Label>
+                    <p className="text-xs text-muted-foreground">
+                      As per income tax slabs
+                    </p>
+                  </div>
+                  <Switch defaultChecked />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label>LWF (Labour Welfare Fund)</Label>
+                    <p className="text-xs text-muted-foreground">
+                      State-specific contribution
+                    </p>
+                  </div>
+                  <Switch />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Salary Components Configuration */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Calculator className="h-5 w-5" />
+                Salary Components & Calculation Rules
+              </CardTitle>
+              <CardDescription>
+                Configure how each salary component is calculated
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-6">
+                {/* Earnings */}
+                <div>
+                  <h4 className="font-medium mb-3 text-green-600">Earnings (Added to Gross)</h4>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Component</TableHead>
+                        <TableHead>Calculation Type</TableHead>
+                        <TableHead>Value/Formula</TableHead>
+                        <TableHead>Taxable</TableHead>
+                        <TableHead>Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <TableRow>
+                        <TableCell className="font-medium">Basic Salary</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">% of CTC</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <code className="text-sm bg-muted px-2 py-1 rounded">50% of CTC</code>
+                        </TableCell>
+                        <TableCell>
+                          <Badge className="bg-red-100 text-red-800">Fully Taxable</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Switch defaultChecked disabled />
+                        </TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="font-medium">HRA (House Rent Allowance)</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">% of Basic</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <code className="text-sm bg-muted px-2 py-1 rounded">40% of Basic (Metro) / 50% (Non-Metro)</code>
+                        </TableCell>
+                        <TableCell>
+                          <Badge className="bg-yellow-100 text-yellow-800">Partially Exempt</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Switch defaultChecked />
+                        </TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="font-medium">Conveyance Allowance</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">Fixed Amount</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <code className="text-sm bg-muted px-2 py-1 rounded">₹1,600/month</code>
+                        </TableCell>
+                        <TableCell>
+                          <Badge className="bg-green-100 text-green-800">Exempt upto ₹1,600</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Switch defaultChecked />
+                        </TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="font-medium">Special Allowance</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">Balancing</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <code className="text-sm bg-muted px-2 py-1 rounded">CTC - (Basic + HRA + Other Fixed)</code>
+                        </TableCell>
+                        <TableCell>
+                          <Badge className="bg-red-100 text-red-800">Fully Taxable</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Switch defaultChecked />
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+
+                {/* Deductions */}
+                <div>
+                  <h4 className="font-medium mb-3 text-red-600">Deductions (Subtracted from Gross)</h4>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Component</TableHead>
+                        <TableHead>Calculation Type</TableHead>
+                        <TableHead>Value/Formula</TableHead>
+                        <TableHead>Tax Benefit</TableHead>
+                        <TableHead>Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <TableRow>
+                        <TableCell className="font-medium">EPF (Employee Share)</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">% of Basic</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <code className="text-sm bg-muted px-2 py-1 rounded">12% of Basic (max ₹15,000 wage ceiling)</code>
+                        </TableCell>
+                        <TableCell>
+                          <Badge className="bg-green-100 text-green-800">80C Deduction</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Switch defaultChecked />
+                        </TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="font-medium">ESI (Employee Share)</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">% of Gross</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <code className="text-sm bg-muted px-2 py-1 rounded">0.75% of Gross (if Gross ≤ ₹21,000)</code>
+                        </TableCell>
+                        <TableCell>
+                          <Badge className="bg-gray-100 text-gray-800">N/A</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Switch defaultChecked />
+                        </TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="font-medium">Professional Tax</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">Slab Based</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <code className="text-sm bg-muted px-2 py-1 rounded">₹200/month (varies by state)</code>
+                        </TableCell>
+                        <TableCell>
+                          <Badge className="bg-green-100 text-green-800">Deductible from Income</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Switch defaultChecked />
+                        </TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="font-medium">TDS (Income Tax)</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">Tax Slab</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <code className="text-sm bg-muted px-2 py-1 rounded">As per New/Old Regime selection</code>
+                        </TableCell>
+                        <TableCell>
+                          <Badge className="bg-gray-100 text-gray-800">Tax Payment</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Switch defaultChecked />
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+
+                {/* Employer Contributions */}
+                <div>
+                  <h4 className="font-medium mb-3 text-blue-600">Employer Contributions (Not deducted from salary)</h4>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Component</TableHead>
+                        <TableHead>Calculation</TableHead>
+                        <TableHead>Notes</TableHead>
+                        <TableHead>Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <TableRow>
+                        <TableCell className="font-medium">EPF (Employer Share)</TableCell>
+                        <TableCell>
+                          <code className="text-sm bg-muted px-2 py-1 rounded">12% of Basic (3.67% EPF + 8.33% EPS)</code>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          EPS capped at ₹15,000 wage ceiling
+                        </TableCell>
+                        <TableCell>
+                          <Switch defaultChecked />
+                        </TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="font-medium">ESI (Employer Share)</TableCell>
+                        <TableCell>
+                          <code className="text-sm bg-muted px-2 py-1 rounded">3.25% of Gross</code>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          Applicable if employee gross ≤ ₹21,000
+                        </TableCell>
+                        <TableCell>
+                          <Switch defaultChecked />
+                        </TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="font-medium">Gratuity</TableCell>
+                        <TableCell>
+                          <code className="text-sm bg-muted px-2 py-1 rounded">4.81% of Basic</code>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          Payable after 5 years of service
+                        </TableCell>
+                        <TableCell>
+                          <Switch defaultChecked />
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* EPF & ESI Details */}
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>EPF Configuration</CardTitle>
+                <CardDescription>
+                  Employee Provident Fund settings
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>EPF Establishment Code</Label>
+                    <Input placeholder="MHBAN00123450000" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>EPF Wage Ceiling</Label>
+                    <Select defaultValue="15000">
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="15000">₹15,000 (Statutory)</SelectItem>
+                        <SelectItem value="actual">Actual Basic (Voluntary)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label>Include employer PF in CTC</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Employer&apos;s 12% contribution shown as part of CTC
+                    </p>
+                  </div>
+                  <Switch defaultChecked />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label>Allow VPF (Voluntary PF)</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Employees can contribute more than 12%
+                    </p>
+                  </div>
+                  <Switch />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>ESI Configuration</CardTitle>
+                <CardDescription>
+                  Employee State Insurance settings
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>ESI Code</Label>
+                    <Input placeholder="31-00-123456-000-0001" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>ESI Wage Limit</Label>
+                    <Input value="₹21,000" disabled />
+                    <p className="text-xs text-muted-foreground">
+                      Statutory limit for ESI applicability
+                    </p>
+                  </div>
+                </div>
+                <div className="p-3 bg-muted rounded-lg">
+                  <p className="text-sm font-medium">ESI Contribution Rates:</p>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                    <div>Employee: <span className="font-medium">0.75%</span></div>
+                    <div>Employer: <span className="font-medium">3.25%</span></div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* TDS Configuration */}
+          <Card>
+            <CardHeader>
+              <CardTitle>TDS Configuration</CardTitle>
+              <CardDescription>
+                Income Tax deduction at source settings
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="space-y-2">
+                  <Label>TAN Number</Label>
+                  <Input placeholder="MUMB12345A" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Default Tax Regime</Label>
+                  <Select defaultValue="new">
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="new">New Regime (Default)</SelectItem>
+                      <SelectItem value="old">Old Regime</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Financial Year</Label>
+                  <Select defaultValue="2024-25">
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="2024-25">FY 2024-25</SelectItem>
+                      <SelectItem value="2025-26">FY 2025-26</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2 mt-4">
+                <div className="p-4 border rounded-lg">
+                  <h5 className="font-medium mb-2">New Tax Regime (FY 2024-25)</h5>
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between"><span>Up to ₹3,00,000</span><span className="font-medium">Nil</span></div>
+                    <div className="flex justify-between"><span>₹3,00,001 - ₹7,00,000</span><span className="font-medium">5%</span></div>
+                    <div className="flex justify-between"><span>₹7,00,001 - ₹10,00,000</span><span className="font-medium">10%</span></div>
+                    <div className="flex justify-between"><span>₹10,00,001 - ₹12,00,000</span><span className="font-medium">15%</span></div>
+                    <div className="flex justify-between"><span>₹12,00,001 - ₹15,00,000</span><span className="font-medium">20%</span></div>
+                    <div className="flex justify-between"><span>Above ₹15,00,000</span><span className="font-medium">30%</span></div>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Standard deduction: ₹75,000
+                  </p>
+                </div>
+                <div className="p-4 border rounded-lg">
+                  <h5 className="font-medium mb-2">Old Tax Regime</h5>
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between"><span>Up to ₹2,50,000</span><span className="font-medium">Nil</span></div>
+                    <div className="flex justify-between"><span>₹2,50,001 - ₹5,00,000</span><span className="font-medium">5%</span></div>
+                    <div className="flex justify-between"><span>₹5,00,001 - ₹10,00,000</span><span className="font-medium">20%</span></div>
+                    <div className="flex justify-between"><span>Above ₹10,00,000</span><span className="font-medium">30%</span></div>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    80C, 80D, HRA exemptions applicable
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Save Button */}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline">Reset to Defaults</Button>
+            <Button>Save Payroll Settings</Button>
+          </div>
         </TabsContent>
       </Tabs>
     </div>
