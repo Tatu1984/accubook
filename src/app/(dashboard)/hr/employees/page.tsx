@@ -17,6 +17,7 @@ import {
   Building,
   Calendar,
   FileText,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,6 +45,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -58,6 +69,8 @@ import { DataTable } from "@/components/ui/data-table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
+import { useOrganization } from "@/hooks/use-organization";
+import { toast } from "sonner";
 
 // Types
 interface Employee {
@@ -395,26 +408,168 @@ const columns: ColumnDef<Employee>[] = [
   },
 ];
 
+const initialFormData = {
+  employeeCode: "",
+  firstName: "",
+  lastName: "",
+  email: "",
+  phone: "",
+  department: "",
+  designation: "",
+  joiningDate: "",
+  employmentType: "FULL_TIME",
+  ctc: "",
+  panNo: "",
+  aadharNo: "",
+};
+
 export default function EmployeesPage() {
+  const { organizationId, isLoading: orgLoading } = useOrganization();
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
   const [selectedStatus, setSelectedStatus] = React.useState<string>("all");
+  const [employeesData, setEmployeesData] = React.useState<Employee[]>(employees);
+  const [isLoading, setIsLoading] = React.useState(false);
+  const [isSaving, setIsSaving] = React.useState(false);
+  const [formData, setFormData] = React.useState(initialFormData);
+  const [editingEmployee, setEditingEmployee] = React.useState<Employee | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
+  const [employeeToDelete, setEmployeeToDelete] = React.useState<Employee | null>(null);
+
+  // Fetch employees from API
+  React.useEffect(() => {
+    if (organizationId) {
+      fetchEmployees();
+    }
+  }, [organizationId]);
+
+  const fetchEmployees = async () => {
+    if (!organizationId) return;
+    setIsLoading(true);
+    try {
+      const response = await fetch(`/api/organizations/${organizationId}/employees`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.length > 0) {
+          setEmployeesData(data.map((emp: any) => ({
+            id: emp.id,
+            employeeCode: emp.employeeCode,
+            firstName: emp.firstName,
+            lastName: emp.lastName || "",
+            email: emp.email || "",
+            phone: emp.phone || "",
+            department: emp.department?.name || "Unassigned",
+            designation: emp.designation?.name || "Unassigned",
+            joiningDate: emp.joiningDate,
+            employmentType: emp.employmentType,
+            status: emp.status,
+            ctc: Number(emp.ctc) || 0,
+            reportingTo: emp.reportingTo,
+          })));
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching employees:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!organizationId) {
+      toast.error("Please select an organization");
+      return;
+    }
+    if (!formData.employeeCode || !formData.firstName || !formData.email || !formData.joiningDate) {
+      toast.error("Please fill in all required fields");
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const url = editingEmployee
+        ? `/api/organizations/${organizationId}/employees?id=${editingEmployee.id}`
+        : `/api/organizations/${organizationId}/employees`;
+
+      const response = await fetch(url, {
+        method: editingEmployee ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...formData,
+          ctc: formData.ctc ? parseFloat(formData.ctc) : 0,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to save employee");
+      }
+
+      toast.success(editingEmployee ? "Employee updated successfully" : "Employee added successfully");
+      setIsDialogOpen(false);
+      setFormData(initialFormData);
+      setEditingEmployee(null);
+      fetchEmployees();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save employee");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleEdit = (employee: Employee) => {
+    setEditingEmployee(employee);
+    setFormData({
+      employeeCode: employee.employeeCode,
+      firstName: employee.firstName,
+      lastName: employee.lastName,
+      email: employee.email,
+      phone: employee.phone,
+      department: employee.department,
+      designation: employee.designation,
+      joiningDate: employee.joiningDate.split("T")[0],
+      employmentType: employee.employmentType,
+      ctc: employee.ctc.toString(),
+      panNo: "",
+      aadharNo: "",
+    });
+    setIsDialogOpen(true);
+  };
+
+  const handleDelete = async () => {
+    if (!employeeToDelete || !organizationId) return;
+
+    try {
+      const response = await fetch(
+        `/api/organizations/${organizationId}/employees?id=${employeeToDelete.id}`,
+        { method: "DELETE" }
+      );
+      if (!response.ok) throw new Error("Failed to delete");
+      toast.success("Employee deactivated successfully");
+      fetchEmployees();
+    } catch (error) {
+      toast.error("Failed to deactivate employee");
+    } finally {
+      setDeleteDialogOpen(false);
+      setEmployeeToDelete(null);
+    }
+  };
 
   const filteredEmployees = React.useMemo(() => {
-    if (selectedStatus === "all") return employees;
-    return employees.filter((emp) => emp.status === selectedStatus);
-  }, [selectedStatus]);
+    if (selectedStatus === "all") return employeesData;
+    return employeesData.filter((emp) => emp.status === selectedStatus);
+  }, [selectedStatus, employeesData]);
 
   // Summary stats
   const stats = React.useMemo(() => {
-    const activeEmployees = employees.filter((e) => e.status === "ACTIVE");
+    const activeEmployees = employeesData.filter((e) => e.status === "ACTIVE");
     return {
-      total: employees.length,
+      total: employeesData.length,
       active: activeEmployees.length,
-      onNotice: employees.filter((e) => e.status === "ON_NOTICE").length,
-      departments: [...new Set(employees.map((e) => e.department))].length,
+      onNotice: employeesData.filter((e) => e.status === "ON_NOTICE").length,
+      departments: [...new Set(employeesData.map((e) => e.department))].length,
       totalCtc: activeEmployees.reduce((sum, e) => sum + e.ctc, 0),
     };
-  }, []);
+  }, [employeesData]);
 
   return (
     <div className="space-y-6">
@@ -452,54 +607,86 @@ export default function EmployeesPage() {
                 <div className="grid grid-cols-3 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="emp-code">Employee Code *</Label>
-                    <Input id="emp-code" placeholder="e.g., EMP001" />
+                    <Input
+                      id="emp-code"
+                      placeholder="e.g., EMP001"
+                      value={formData.employeeCode}
+                      onChange={(e) => setFormData({ ...formData, employeeCode: e.target.value })}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="first-name">First Name *</Label>
-                    <Input id="first-name" placeholder="First name" />
+                    <Input
+                      id="first-name"
+                      placeholder="First name"
+                      value={formData.firstName}
+                      onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="last-name">Last Name</Label>
-                    <Input id="last-name" placeholder="Last name" />
+                    <Input
+                      id="last-name"
+                      placeholder="Last name"
+                      value={formData.lastName}
+                      onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
+                    />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="email">Email *</Label>
-                    <Input id="email" type="email" placeholder="email@company.com" />
+                    <Input
+                      id="email"
+                      type="email"
+                      placeholder="email@company.com"
+                      value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="phone">Phone</Label>
-                    <Input id="phone" placeholder="+91 98765 43210" />
+                    <Input
+                      id="phone"
+                      placeholder="+91 98765 43210"
+                      value={formData.phone}
+                      onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Department *</Label>
-                    <Select>
+                    <Select
+                      value={formData.department}
+                      onValueChange={(value) => setFormData({ ...formData, department: value })}
+                    >
                       <SelectTrigger>
                         <SelectValue placeholder="Select department" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="engineering">Engineering</SelectItem>
-                        <SelectItem value="finance">Finance</SelectItem>
-                        <SelectItem value="sales">Sales</SelectItem>
-                        <SelectItem value="hr">HR</SelectItem>
-                        <SelectItem value="operations">Operations</SelectItem>
+                        <SelectItem value="Engineering">Engineering</SelectItem>
+                        <SelectItem value="Finance">Finance</SelectItem>
+                        <SelectItem value="Sales">Sales</SelectItem>
+                        <SelectItem value="HR">HR</SelectItem>
+                        <SelectItem value="Operations">Operations</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="space-y-2">
                     <Label>Designation *</Label>
-                    <Select>
+                    <Select
+                      value={formData.designation}
+                      onValueChange={(value) => setFormData({ ...formData, designation: value })}
+                    >
                       <SelectTrigger>
                         <SelectValue placeholder="Select designation" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="manager">Manager</SelectItem>
-                        <SelectItem value="senior">Senior Executive</SelectItem>
-                        <SelectItem value="executive">Executive</SelectItem>
-                        <SelectItem value="intern">Intern</SelectItem>
+                        <SelectItem value="Manager">Manager</SelectItem>
+                        <SelectItem value="Senior Executive">Senior Executive</SelectItem>
+                        <SelectItem value="Executive">Executive</SelectItem>
+                        <SelectItem value="Intern">Intern</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -507,11 +694,19 @@ export default function EmployeesPage() {
                 <div className="grid grid-cols-3 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="joining-date">Joining Date *</Label>
-                    <Input id="joining-date" type="date" />
+                    <Input
+                      id="joining-date"
+                      type="date"
+                      value={formData.joiningDate}
+                      onChange={(e) => setFormData({ ...formData, joiningDate: e.target.value })}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>Employment Type</Label>
-                    <Select defaultValue="FULL_TIME">
+                    <Select
+                      value={formData.employmentType}
+                      onValueChange={(value) => setFormData({ ...formData, employmentType: value })}
+                    >
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
@@ -525,26 +720,47 @@ export default function EmployeesPage() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="ctc">Annual CTC</Label>
-                    <Input id="ctc" type="number" placeholder="0" />
+                    <Input
+                      id="ctc"
+                      type="number"
+                      placeholder="0"
+                      value={formData.ctc}
+                      onChange={(e) => setFormData({ ...formData, ctc: e.target.value })}
+                    />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="pan">PAN Number</Label>
-                    <Input id="pan" placeholder="ABCDE1234F" />
+                    <Input
+                      id="pan"
+                      placeholder="ABCDE1234F"
+                      value={formData.panNo}
+                      onChange={(e) => setFormData({ ...formData, panNo: e.target.value })}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="aadhar">Aadhar Number</Label>
-                    <Input id="aadhar" placeholder="1234 5678 9012" />
+                    <Input
+                      id="aadhar"
+                      placeholder="1234 5678 9012"
+                      value={formData.aadharNo}
+                      onChange={(e) => setFormData({ ...formData, aadharNo: e.target.value })}
+                    />
                   </div>
                 </div>
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+                <Button variant="outline" onClick={() => {
+                  setIsDialogOpen(false);
+                  setFormData(initialFormData);
+                  setEditingEmployee(null);
+                }}>
                   Cancel
                 </Button>
-                <Button onClick={() => setIsDialogOpen(false)}>
-                  Add Employee
+                <Button onClick={handleSubmit} disabled={isSaving}>
+                  {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {editingEmployee ? "Update Employee" : "Add Employee"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -618,6 +834,25 @@ export default function EmployeesPage() {
           />
         </CardContent>
       </Card>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Deactivate Employee</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to deactivate {employeeToDelete?.firstName} {employeeToDelete?.lastName}?
+              This action can be reversed later.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700">
+              Deactivate
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

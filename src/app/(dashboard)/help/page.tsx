@@ -93,7 +93,11 @@ export default function HelpPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Button variant="outline" className="w-full">
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => window.open("https://docs.example.com", "_blank")}
+            >
               <ExternalLink className="mr-2 h-4 w-4" />
               View Docs
             </Button>
@@ -111,7 +115,13 @@ export default function HelpPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Button variant="outline" className="w-full">
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => {
+                alert("Live chat feature coming soon! Please use email support for now.");
+              }}
+            >
               <MessageCircle className="mr-2 h-4 w-4" />
               Start Chat
             </Button>
@@ -129,7 +139,11 @@ export default function HelpPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Button variant="outline" className="w-full">
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => window.open("mailto:support@accubook.com", "_blank")}
+            >
               <Mail className="mr-2 h-4 w-4" />
               Contact Us
             </Button>

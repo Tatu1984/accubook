@@ -723,7 +723,12 @@ export default function PartiesPage() {
                 <div className="flex items-center gap-2">
                   <div className="relative">
                     <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input placeholder="Search vendors..." className="pl-8 w-[250px]" />
+                    <Input
+                      placeholder="Search vendors..."
+                      className="pl-8 w-[250px]"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                    />
                   </div>
                   <Button variant="outline" size="icon">
                     <Download className="h-4 w-4" />

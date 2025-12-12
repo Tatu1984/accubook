@@ -18,11 +18,7 @@ export async function GET(
     const session = await auth();
     const { orgId } = await params;
 
-    console.log("Dashboard API - Session:", JSON.stringify(session, null, 2));
-    console.log("Dashboard API - OrgId:", orgId);
-
     if (!session?.user?.id) {
-      console.log("Dashboard API - No user ID in session");
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 

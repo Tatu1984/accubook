@@ -52,7 +52,14 @@ export default function ProfilePage() {
   const handleSave = async () => {
     setIsSaving(true);
     try {
+      // In a real implementation, this would call an API endpoint
+      // For now, we simulate a successful save since user profile updates
+      // would typically go to a dedicated user settings API
       await new Promise((resolve) => setTimeout(resolve, 500));
+
+      // Store in localStorage as a fallback for demo purposes
+      localStorage.setItem("userProfile", JSON.stringify(profile));
+
       toast.success("Profile updated successfully");
     } catch (error) {
       toast.error("Failed to update profile");
@@ -60,6 +67,18 @@ export default function ProfilePage() {
       setIsSaving(false);
     }
   };
+
+  // Load saved profile on mount
+  React.useEffect(() => {
+    const savedProfile = localStorage.getItem("userProfile");
+    if (savedProfile) {
+      try {
+        setProfile(JSON.parse(savedProfile));
+      } catch (e) {
+        // Ignore parse errors
+      }
+    }
+  }, []);
 
   if (orgLoading || isLoading) {
     return (

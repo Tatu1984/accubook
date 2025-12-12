@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useOrganization } from "@/hooks/use-organization";
+import { toast } from "sonner";
 
 interface Notification {
   id: string;
@@ -68,11 +69,20 @@ export default function NotificationsPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline">
+          <Button
+            variant="outline"
+            onClick={() => {
+              setNotifications((prev) =>
+                prev.map((n) => ({ ...n, read: true }))
+              );
+              toast.success("All notifications marked as read");
+            }}
+            disabled={notifications.length === 0 || notifications.every((n) => n.read)}
+          >
             <Check className="mr-2 h-4 w-4" />
             Mark All Read
           </Button>
-          <Button variant="outline">
+          <Button variant="outline" onClick={() => window.location.href = "/settings/preferences"}>
             <Settings className="mr-2 h-4 w-4" />
             Settings
           </Button>
