@@ -222,11 +222,28 @@ interface SalarySlip {
   status: string;
 }
 
+interface SalaryStructure {
+  id: string;
+  name: string;
+  basicPercent: number;
+  hraPercent: number;
+  pfPercent: number;
+  employees: number;
+}
+
 export default function PayrollPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSlipDialogOpen, setIsSlipDialogOpen] = useState(false);
   const [selectedSlip, setSelectedSlip] = useState<SalarySlip | null>(null);
+  const [isStructureDialogOpen, setIsStructureDialogOpen] = useState(false);
+  const [editingStructure, setEditingStructure] = useState<SalaryStructure | null>(null);
+  const [structureForm, setStructureForm] = useState({
+    name: "",
+    basicPercent: "50",
+    hraPercent: "40",
+    pfPercent: "12",
+  });
 
   const handleViewSlip = (slip: SalarySlip) => {
     setSelectedSlip(slip);
@@ -289,6 +306,42 @@ Generated on: ${new Date().toLocaleDateString()}
     salarySlips.forEach((slip) => {
       handleDownloadPDF(slip);
     });
+  };
+
+  const handleNewStructure = () => {
+    setEditingStructure(null);
+    setStructureForm({
+      name: "",
+      basicPercent: "50",
+      hraPercent: "40",
+      pfPercent: "12",
+    });
+    setIsStructureDialogOpen(true);
+  };
+
+  const handleEditStructure = (structure: SalaryStructure) => {
+    setEditingStructure(structure);
+    setStructureForm({
+      name: structure.name,
+      basicPercent: structure.basicPercent.toString(),
+      hraPercent: structure.hraPercent.toString(),
+      pfPercent: structure.pfPercent.toString(),
+    });
+    setIsStructureDialogOpen(true);
+  };
+
+  const handleSaveStructure = () => {
+    if (!structureForm.name) {
+      alert("Please enter a structure name");
+      return;
+    }
+
+    if (editingStructure) {
+      alert(`Structure "${structureForm.name}" updated successfully!`);
+    } else {
+      alert(`New structure "${structureForm.name}" created successfully!`);
+    }
+    setIsStructureDialogOpen(false);
   };
 
   return (
@@ -749,7 +802,7 @@ Generated on: ${new Date().toLocaleDateString()}
                     Configure salary components and structures
                   </CardDescription>
                 </div>
-                <Button>
+                <Button onClick={handleNewStructure}>
                   <Plus className="mr-2 h-4 w-4" />
                   New Structure
                 </Button>
@@ -778,7 +831,7 @@ Generated on: ${new Date().toLocaleDateString()}
                         <span className="text-muted-foreground">PF Contribution</span>
                         <span className="font-medium">{structure.pfPercent}% of Basic</span>
                       </div>
-                      <Button variant="outline" className="w-full mt-4">
+                      <Button variant="outline" className="w-full mt-4" onClick={() => handleEditStructure(structure)}>
                         Edit Structure
                       </Button>
                     </CardContent>
@@ -787,6 +840,107 @@ Generated on: ${new Date().toLocaleDateString()}
               </div>
             </CardContent>
           </Card>
+
+          {/* Structure Edit/Create Dialog */}
+          <Dialog open={isStructureDialogOpen} onOpenChange={setIsStructureDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>
+                  {editingStructure ? "Edit Salary Structure" : "Create New Salary Structure"}
+                </DialogTitle>
+                <DialogDescription>
+                  {editingStructure
+                    ? `Modify the "${editingStructure.name}" salary structure`
+                    : "Define a new salary structure for your employees"}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="space-y-2">
+                  <Label>Structure Name</Label>
+                  <Input
+                    placeholder="e.g., Senior Manager Grade"
+                    value={structureForm.name}
+                    onChange={(e) => setStructureForm({ ...structureForm, name: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Basic Salary (% of CTC)</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={structureForm.basicPercent}
+                      onChange={(e) => setStructureForm({ ...structureForm, basicPercent: e.target.value })}
+                    />
+                    <span className="text-muted-foreground">%</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Recommended: 40-50% of CTC for optimal tax planning
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label>HRA (% of Basic)</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={structureForm.hraPercent}
+                      onChange={(e) => setStructureForm({ ...structureForm, hraPercent: e.target.value })}
+                    />
+                    <span className="text-muted-foreground">%</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Standard: 40% for metro cities, 50% for non-metro
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label>PF Contribution (% of Basic)</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={structureForm.pfPercent}
+                      onChange={(e) => setStructureForm({ ...structureForm, pfPercent: e.target.value })}
+                    />
+                    <span className="text-muted-foreground">%</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Statutory minimum: 12% (on basic up to ₹15,000)
+                  </p>
+                </div>
+
+                {/* Preview */}
+                <div className="p-4 bg-muted rounded-lg mt-2">
+                  <h4 className="font-medium mb-2">Structure Preview (for ₹10,00,000 CTC)</h4>
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between">
+                      <span>Basic Salary</span>
+                      <span>₹{((1000000 * parseFloat(structureForm.basicPercent || "0")) / 100 / 12).toLocaleString()}/month</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>HRA</span>
+                      <span>₹{((1000000 * parseFloat(structureForm.basicPercent || "0") / 100 * parseFloat(structureForm.hraPercent || "0") / 100) / 12).toLocaleString()}/month</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>EPF Deduction</span>
+                      <span>₹{((1000000 * parseFloat(structureForm.basicPercent || "0") / 100 * parseFloat(structureForm.pfPercent || "0") / 100) / 12).toLocaleString()}/month</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsStructureDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleSaveStructure}>
+                  {editingStructure ? "Update Structure" : "Create Structure"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </TabsContent>
 
         <TabsContent value="settings" className="space-y-4">
