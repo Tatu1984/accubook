@@ -249,12 +249,13 @@ Three sub-PRs. Tick boxes as they ship.
 - **Active phase:** India end-to-end build (workstreams in §5). Foundation (Phase 0) done.
 - **Active workstreams:**
   - WS1 (invoicing core) ~80% done.
-  - **WS2 (GST returns) — GSTR-1 + GSTR-3B backends complete.** UI wiring is the only remaining piece.
+  - **WS2 (GST returns) — GSTR-1 + GSTR-3B both compute + portal JSON complete.** UI wiring is the only remaining piece. GSTR-9 + GSTR-2B reconciliation pending.
   - **WS3 (e-invoicing) — payload generator + preview endpoint complete.** NIC API submission still needs sandbox creds.
-  - **WS5 (TDS/TCS) — pure compute helper complete.** Persistence + posting integration pending.
   - **WS4 (e-way bill) — payload generator + endpoint complete.** NIC EWB API submission still needs sandbox creds.
+  - **WS5 (TDS/TCS) — pure compute helper complete.** Persistence + posting integration pending.
   - **WS6 (banking) — bank statement CSV import + auto-reconciliation matcher live.** Manual-match UI for low-confidence cases pending.
   - **WS7 (payroll) — PF/ESI/PT/TDS/LOP helpers tested.** Persistence + month-end run posting pending.
+  - **WS10 (manufacturing) — BOM + work-order schema + APIs + multi-level BOM cost compute live.** Work-order issue/complete state transitions pending.
   - **WS18 (Tally migration) — masters import live.** Vouchers still pending.
   - **Marketing landing page** at `/` — reactbits-style hero/features/CTA, sign-in button → /login on same domain.
 - **Last updated:** 2026-05-03 by Claude (commit `6af0767`)
