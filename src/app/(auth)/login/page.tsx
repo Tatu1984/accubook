@@ -128,17 +128,22 @@ function LoginForm() {
           </form>
         </Card>
 
-        {process.env.NEXT_PUBLIC_DEMO === "true" && (
-          <Card className="mt-4 bg-slate-50 dark:bg-slate-900 border-dashed">
-            <CardContent className="pt-4 pb-4">
-              <p className="text-sm font-medium text-center mb-2">Demo Credentials</p>
-              <div className="text-sm text-muted-foreground space-y-1">
-                <p><span className="font-medium">Email:</span> admin@accubooks.com</p>
-                <p><span className="font-medium">Password:</span> admin123</p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+        {/*
+          Demo credentials card. Currently shown unconditionally because
+          this deployment is treated as a demo (single seed admin org,
+          no real customers). When this product onboards real customers,
+          re-gate behind `process.env.NEXT_PUBLIC_DEMO === "true"` and
+          set the flag only on the demo deployment.
+        */}
+        <Card className="mt-4 bg-slate-50 dark:bg-slate-900 border-dashed">
+          <CardContent className="pt-4 pb-4">
+            <p className="text-sm font-medium text-center mb-2">Demo Credentials</p>
+            <div className="text-sm text-muted-foreground space-y-1">
+              <p><span className="font-medium">Email:</span> admin@accubooks.com</p>
+              <p><span className="font-medium">Password:</span> admin123</p>
+            </div>
+          </CardContent>
+        </Card>
 
         <p className="mt-6 text-center text-sm text-muted-foreground">
           Enterprise Accounting Platform
