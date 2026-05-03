@@ -5,6 +5,7 @@ import {
   isValidGstinFormat,
   splitGstRate,
   stateCodeFromGstin,
+  verifyGstinChecksum,
 } from "../india-tax";
 
 describe("determineSupplyType", () => {
@@ -127,5 +128,41 @@ describe("isValidGstinFormat", () => {
     expect(isValidGstinFormat("27AAAAA0000A1Z")).toBe(false); // 14 chars
     expect(isValidGstinFormat("")).toBe(false);
     expect(isValidGstinFormat(null)).toBe(false);
+  });
+});
+
+describe("verifyGstinChecksum (Mod-36)", () => {
+  // Check digits computed by hand from the algorithm (base-36 weighted
+  // sum, alternating factors 1/2, sum of digit-pairs of each product,
+  // mod 36 inverted to a base-36 char). These are the values the NIC
+  // portal would accept for these first-14-char prefixes.
+  const fixtures: Array<{ gstin: string; valid: boolean; note: string }> = [
+    { gstin: "27AAACR4849P1ZP", valid: true, note: "Maharashtra checksum 'P'" },
+    { gstin: "07AABCS5443A1ZS", valid: true, note: "Delhi checksum 'S'" },
+
+    // Same first 14 chars, wrong check digit.
+    { gstin: "27AAACR4849P1Z9", valid: false, note: "Maharashtra wrong checksum '9'" },
+    { gstin: "07AABCS5443A1Z0", valid: false, note: "Delhi wrong checksum '0'" },
+
+    // Format-invalid → checksum can't pass.
+    { gstin: "BADGSTIN0000000", valid: false, note: "garbage" },
+    { gstin: "", valid: false, note: "empty" },
+  ];
+
+  for (const fx of fixtures) {
+    it(`${fx.gstin} (${fx.note}) → ${fx.valid}`, () => {
+      expect(verifyGstinChecksum(fx.gstin)).toBe(fx.valid);
+    });
+  }
+
+  it("normalizes case and whitespace", () => {
+    const valid = "27AAACR4849P1ZP";
+    expect(verifyGstinChecksum(valid)).toBe(true);
+    expect(verifyGstinChecksum(`  ${valid.toLowerCase()}  `)).toBe(true);
+  });
+
+  it("rejects null / undefined", () => {
+    expect(verifyGstinChecksum(null)).toBe(false);
+    expect(verifyGstinChecksum(undefined)).toBe(false);
   });
 });

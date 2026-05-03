@@ -128,3 +128,49 @@ export function isValidGstinFormat(gstin: string | null | undefined): boolean {
   if (!gstin) return false;
   return GSTIN_RE.test(gstin.trim().toUpperCase());
 }
+
+/**
+ * GSTIN Mod-36 checksum verifier.
+ *
+ * The 15th character is a check digit computed over the first 14
+ * characters using a base-36 weighted sum:
+ *   - char[i] is mapped to its base-36 digit (0-9 → 0-9, A-Z → 10-35)
+ *   - weights alternate 1, 2, 1, 2, ... starting from position 0
+ *   - sum the products' base-36 digits (i.e. each factor mod 36 + carry)
+ *   - check digit = (36 - (sum mod 36)) mod 36 → mapped back to char
+ *
+ * This catches typos that pass the regex (e.g. transposed digits) but
+ * fail the mathematical check. NIC's e-invoice API enforces it server-
+ * side; we enforce client-side too so customers don't send invoices that
+ * the portal will silently reject.
+ *
+ * Returns true when the checksum matches; false otherwise (including
+ * format violations).
+ */
+const BASE36_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const BASE36_VALUE: Record<string, number> = (() => {
+  const out: Record<string, number> = {};
+  for (let i = 0; i < BASE36_CHARS.length; i++) out[BASE36_CHARS[i]] = i;
+  return out;
+})();
+
+export function verifyGstinChecksum(gstin: string | null | undefined): boolean {
+  if (!gstin) return false;
+  const upper = gstin.trim().toUpperCase();
+  if (!GSTIN_RE.test(upper)) return false;
+
+  let sum = 0;
+  for (let i = 0; i < 14; i++) {
+    const ch = upper[i];
+    const value = BASE36_VALUE[ch];
+    if (value === undefined) return false;
+    const factor = i % 2 === 0 ? 1 : 2;
+    const product = value * factor;
+    // Add base-36 digit-by-digit to mimic the official algorithm:
+    //   sum += (product / 36) + (product mod 36)
+    sum += Math.floor(product / 36) + (product % 36);
+  }
+  const expectedDigit = (36 - (sum % 36)) % 36;
+  const expectedChar = BASE36_CHARS[expectedDigit];
+  return upper[14] === expectedChar;
+}
