@@ -162,26 +162,50 @@ export const DELETE = withOrgAuth(async (request, { orgId }) => {
     const { searchParams } = new URL(request.url);
     const taxId = searchParams.get("taxId");
 
-    if (!taxId) {
-      return badRequest("Tax ID is required");
-    }
+    if (!taxId) return badRequest("Tax ID is required");
 
-    // Verify tax config exists and belongs to organization
     const existingTax = await prisma.taxConfig.findFirst({
-      where: {
-        id: taxId,
-        organizationId: orgId,
+      where: { id: taxId, organizationId: orgId },
+      select: {
+        id: true,
+        _count: {
+          select: {
+            invoiceItems: true,
+            invoiceTaxes: true,
+            billItems: true,
+            billTaxes: true,
+            salesOrderItems: true,
+            purchaseOrderItems: true,
+            quotationItems: true,
+            itemsPurchaseTax: true,
+            itemsSalesTax: true,
+          },
+        },
       },
     });
+    if (!existingTax) return notFound("Tax configuration not found");
 
-    if (!existingTax) {
-      return notFound("Tax configuration not found");
+    const refsTotal =
+      existingTax._count.invoiceItems +
+      existingTax._count.invoiceTaxes +
+      existingTax._count.billItems +
+      existingTax._count.billTaxes +
+      existingTax._count.salesOrderItems +
+      existingTax._count.purchaseOrderItems +
+      existingTax._count.quotationItems +
+      existingTax._count.itemsPurchaseTax +
+      existingTax._count.itemsSalesTax;
+
+    if (refsTotal > 0) {
+      // Tax in active use — soft delete preserves historical filings.
+      await prisma.taxConfig.update({
+        where: { id: taxId },
+        data: { isActive: false },
+      });
+      return NextResponse.json({ success: true, softDeleted: true });
     }
 
-    await prisma.taxConfig.delete({
-      where: { id: taxId },
-    });
-
+    await prisma.taxConfig.delete({ where: { id: taxId } });
     return NextResponse.json({ success: true });
   } catch (error) {
     logger.error({ err: error }, "Error deleting tax config");

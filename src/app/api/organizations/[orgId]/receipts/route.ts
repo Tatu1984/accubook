@@ -16,6 +16,7 @@ import {
   nextNumber,
   recomputeInvoiceStatus,
 } from "@/backend/utils/posting";
+import { writeAudit } from "@/backend/utils/audit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -232,6 +233,22 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
         });
         await recomputeInvoiceStatus(tx, invoice.id);
       }
+
+      await writeAudit(tx, {
+        organizationId: orgId,
+        userId,
+        action: "CREATE",
+        entityType: "Receipt",
+        entityId: receipt.id,
+        newData: {
+          receiptNumber,
+          partyId: party.id,
+          invoiceId: invoice?.id,
+          amount: amount.toString(),
+          paymentMode: validatedData.paymentMode,
+          voucherId: voucher.id,
+        },
+      });
 
       return receipt;
     });

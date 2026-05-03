@@ -16,6 +16,7 @@ import {
   nextNumber,
   recomputeBillStatus,
 } from "@/backend/utils/posting";
+import { writeAudit } from "@/backend/utils/audit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -235,6 +236,23 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
         });
         await recomputeBillStatus(tx, bill.id);
       }
+
+      // 9. Audit trail.
+      await writeAudit(tx, {
+        organizationId: orgId,
+        userId,
+        action: "CREATE",
+        entityType: "Payment",
+        entityId: payment.id,
+        newData: {
+          paymentNumber,
+          partyId: party.id,
+          billId: bill?.id,
+          amount: amount.toString(),
+          paymentMode: validatedData.paymentMode,
+          voucherId: voucher.id,
+        },
+      });
 
       return payment;
     });

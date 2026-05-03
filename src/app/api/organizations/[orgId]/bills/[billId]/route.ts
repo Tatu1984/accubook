@@ -1,41 +1,55 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
-import { withOrgAuth, notFound } from "@/backend/utils/with-org-auth";
+import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
 
-// Force Node.js runtime for this route
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/**
+ * DELETE a bill. Safety policy:
+ *   - Refuse if any payment references this bill (would orphan payment rows
+ *     and corrupt vendor AP balances). Caller must move the bill to
+ *     CANCELLED (manual reversal) or void the payments first.
+ *   - Refuse on PAID / PARTIAL / OVERDUE statuses for the same reason.
+ *   - APPROVED bills with no payments yet: refuse — caller should cancel
+ *     via the (future) PATCH endpoint so the GL gets reversed cleanly.
+ *   - DRAFT, PENDING_APPROVAL, CANCELLED bills with no payments: hard delete OK.
+ */
 export const DELETE = withOrgAuth<{ billId: string }>(async (_request, { orgId, params }) => {
   try {
     const { billId } = params;
 
-    // Check if bill exists and belongs to organization
-    const bill = await prisma.bill.findUnique({
-      where: { id: billId },
+    const bill = await prisma.bill.findFirst({
+      where: { id: billId, organizationId: orgId },
+      select: {
+        id: true,
+        status: true,
+        _count: { select: { payments: true } },
+      },
     });
+    if (!bill) return notFound("Bill not found");
 
-    if (!bill || bill.organizationId !== orgId) {
-      return notFound("Bill not found");
+    if (bill._count.payments > 0) {
+      return badRequest(
+        "Cannot delete a bill that has payments recorded against it. Cancel the payments first."
+      );
     }
 
-    // Delete bill items first (if not cascading)
-    await prisma.billItem.deleteMany({
-      where: { billId },
-    });
+    if (bill.status === "APPROVED" || bill.status === "PAID" || bill.status === "PARTIAL" || bill.status === "OVERDUE") {
+      return badRequest(
+        `Cannot delete a bill in status ${bill.status}. Move it to CANCELLED first so the books are reversed cleanly.`
+      );
+    }
 
-    // Delete bill
-    await prisma.bill.delete({
-      where: { id: billId },
-    });
+    await prisma.$transaction([
+      prisma.billItem.deleteMany({ where: { billId } }),
+      prisma.bill.delete({ where: { id: billId } }),
+    ]);
 
     return NextResponse.json({ success: true });
   } catch (error) {
     logger.error({ err: error }, "Error deleting bill");
-    return NextResponse.json(
-      { error: "Failed to delete bill" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to delete bill" }, { status: 500 });
   }
 });

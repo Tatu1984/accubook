@@ -4,6 +4,7 @@ import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { D, sum, closeEnough } from "@/backend/utils/money";
 import { applyLedgerEntries } from "@/backend/utils/posting";
+import { writeAudit } from "@/backend/utils/audit";
 import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
@@ -211,6 +212,23 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
           }))
         );
       }
+
+      await writeAudit(tx, {
+        organizationId: orgId,
+        userId,
+        action: requiresApproval ? "CREATE" : "POST",
+        entityType: "Voucher",
+        entityId: newVoucher.id,
+        newData: {
+          voucherNumber,
+          voucherTypeId: validatedData.voucherTypeId,
+          fiscalYearId: validatedData.fiscalYearId,
+          totalDebit: totalDebit.toString(),
+          totalCredit: totalCredit.toString(),
+          status: requiresApproval ? "PENDING_APPROVAL" : "APPROVED",
+          entryCount: validatedData.entries.length,
+        },
+      });
 
       return newVoucher;
     });
