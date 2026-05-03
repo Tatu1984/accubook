@@ -145,19 +145,30 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
     const fyLabel = `${currentFY}-${(currentFY + 1).toString().slice(-2)}`;
 
     // Place-of-supply determination: supplier (org) state vs customer state.
-    // For exports / unknown states, fail-safe to interstate (IGST).
+    // Foreign customers (billingCountry set and not "IN") → EXPORT.
+    // Indian customers, same state → INTRASTATE; different state → INTERSTATE.
     const [org, party] = await Promise.all([
       prisma.organization.findUnique({
         where: { id: orgId },
-        select: { state: true },
+        select: { state: true, country: true },
       }),
       prisma.party.findFirst({
         where: { id: validatedData.partyId, organizationId: orgId },
-        select: { id: true, billingState: true },
+        select: { id: true, billingState: true, billingCountry: true },
       }),
     ]);
     if (!party) return badRequest("Customer not found");
-    const supplyType: SupplyType = determineSupplyType(org?.state, party.billingState);
+    const isExport =
+      party.billingCountry &&
+      party.billingCountry.trim().toUpperCase() !== "IN" &&
+      party.billingCountry.trim().toUpperCase() !== "INDIA";
+    // Internal `supplyType` written to the invoice. The line-level GST
+    // computation still uses INTERSTATE when isExport is true (IGST applies
+    // unless the supplier files under LUT — that branch is a follow-up).
+    const supplyType: "INTRASTATE" | "INTERSTATE" | "EXPORT" = isExport
+      ? "EXPORT"
+      : determineSupplyType(org?.state, party.billingState);
+    const computeSupplyType: SupplyType = supplyType === "EXPORT" ? "INTERSTATE" : supplyType;
 
     // Pull tax rates referenced by line items in one query.
     const taxIds = [...new Set(validatedData.items.map((i) => i.taxId).filter(Boolean) as string[])];
@@ -182,8 +193,8 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
       // split correctly from the combined rate per place of supply.
       const taxConfig = item.taxId ? taxById.get(item.taxId) : undefined;
       const combinedRate = taxConfig ? D(taxConfig.rate) : D(0);
-      const split = computeLineGst(taxableAmount, combinedRate, supplyType);
-      const rates = supplyType === "INTRASTATE"
+      const split = computeLineGst(taxableAmount, combinedRate, computeSupplyType);
+      const rates = computeSupplyType === "INTRASTATE"
         ? { cgst: combinedRate.dividedBy(2), sgst: combinedRate.dividedBy(2), igst: D(0) }
         : { cgst: D(0), sgst: D(0), igst: combinedRate };
 

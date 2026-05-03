@@ -252,6 +252,215 @@ describe("computeGstr1", () => {
   });
 });
 
+describe("computeGstr1 — B2CL (B2C Large interstate ≥ ₹2.5L)", () => {
+  it("buckets a ₹3L unregistered interstate invoice into B2CL, not B2CS", async () => {
+    const db = stubDb([
+      {
+        id: "i1",
+        invoiceNumber: "INV/2026-27/00001",
+        date: new Date("2026-04-05"),
+        type: "INVOICE",
+        status: "APPROVED",
+        totalAmount: "354000",
+        placeOfSupply: "KA",
+        supplyType: "INTERSTATE",
+        reverseCharge: false,
+        party: { id: "p", name: "Big walk-in", gstNo: null, billingState: "KA", billingCountry: "IN" },
+        items: [{
+          hsnCode: "8523", quantity: "1", totalAmount: "354000",
+          taxableAmount: "300000", taxAmount: "54000",
+          cgstRate: "0", cgstAmount: "0",
+          sgstRate: "0", sgstAmount: "0",
+          igstRate: "18", igstAmount: "54000",
+          cessRate: null, cessAmount: null,
+          item: { primaryUnit: { symbol: "NOS", name: "Nos" } },
+        }],
+      },
+    ]);
+
+    const r = await computeGstr1(db, "org-1", period);
+    expect(r.b2cl).toHaveLength(1);
+    expect(r.b2cs).toHaveLength(0);
+    expect(r.b2cl[0].placeOfSupply).toBe("KA");
+    expect(r.b2cl[0].items[0].igst).toBe("54000");
+  });
+
+  it("keeps a ₹2.4L unregistered interstate invoice in B2CS (under threshold)", async () => {
+    const db = stubDb([
+      {
+        id: "i1",
+        invoiceNumber: "INV/2026-27/00002",
+        date: new Date("2026-04-05"),
+        type: "INVOICE",
+        status: "APPROVED",
+        totalAmount: "240000",
+        placeOfSupply: "KA",
+        supplyType: "INTERSTATE",
+        reverseCharge: false,
+        party: { id: "p", name: "Smaller walk-in", gstNo: null, billingState: "KA", billingCountry: "IN" },
+        items: [{
+          hsnCode: "8523", quantity: "1", totalAmount: "240000",
+          taxableAmount: "203389.83", taxAmount: "36610.17",
+          cgstRate: "0", cgstAmount: "0",
+          sgstRate: "0", sgstAmount: "0",
+          igstRate: "18", igstAmount: "36610.17",
+          cessRate: null, cessAmount: null,
+          item: { primaryUnit: { symbol: "NOS", name: "Nos" } },
+        }],
+      },
+    ]);
+
+    const r = await computeGstr1(db, "org-1", period);
+    expect(r.b2cl).toHaveLength(0);
+    expect(r.b2cs).toHaveLength(1);
+  });
+});
+
+describe("computeGstr1 — CDNR / CDNUR (credit/debit notes)", () => {
+  it("registered credit note goes to CDNR with noteType=C", async () => {
+    const db = stubDb([
+      {
+        id: "cn-1",
+        invoiceNumber: "CN/2026-27/00001",
+        date: new Date("2026-04-10"),
+        type: "CREDIT_NOTE",
+        status: "APPROVED",
+        totalAmount: "1180",
+        placeOfSupply: "MH",
+        supplyType: "INTRASTATE",
+        reverseCharge: false,
+        party: { id: "p", name: "Acme", gstNo: "27AAAAA0000A1Z5", billingState: "MH", billingCountry: "IN" },
+        items: [itemSold()],
+      },
+    ]);
+
+    const r = await computeGstr1(db, "org-1", period);
+    expect(r.b2b).toHaveLength(0);
+    expect(r.cdnr).toHaveLength(1);
+    expect(r.cdnr[0].noteType).toBe("C");
+    expect(r.cdnr[0].ctin).toBe("27AAAAA0000A1Z5");
+  });
+
+  it("unregistered debit note goes to CDNUR with noteType=D", async () => {
+    const db = stubDb([
+      {
+        id: "dn-1",
+        invoiceNumber: "DN/2026-27/00001",
+        date: new Date("2026-04-12"),
+        type: "DEBIT_NOTE",
+        status: "APPROVED",
+        totalAmount: "590",
+        placeOfSupply: "MH",
+        supplyType: "INTRASTATE",
+        reverseCharge: false,
+        party: { id: "p", name: "Walk-in", gstNo: null, billingState: "MH", billingCountry: "IN" },
+        items: [itemSold({ totalAmount: "590", taxableAmount: "500", cgstAmount: "45", sgstAmount: "45", taxAmount: "90" })],
+      },
+    ]);
+
+    const r = await computeGstr1(db, "org-1", period);
+    expect(r.cdnur).toHaveLength(1);
+    expect(r.cdnur[0].noteType).toBe("D");
+  });
+});
+
+describe("computeGstr1 — EXP (exports)", () => {
+  it("supplyType=EXPORT with IGST routes to EXP as WPAY", async () => {
+    const db = stubDb([
+      {
+        id: "exp-1",
+        invoiceNumber: "EXP/2026-27/00001",
+        date: new Date("2026-04-20"),
+        type: "INVOICE",
+        status: "APPROVED",
+        totalAmount: "118000",
+        placeOfSupply: null,
+        supplyType: "EXPORT",
+        reverseCharge: false,
+        party: { id: "p", name: "Foreign Co", gstNo: null, billingState: null, billingCountry: "US" },
+        items: [{
+          hsnCode: "8523", quantity: "1", totalAmount: "118000",
+          taxableAmount: "100000", taxAmount: "18000",
+          cgstRate: "0", cgstAmount: "0",
+          sgstRate: "0", sgstAmount: "0",
+          igstRate: "18", igstAmount: "18000",
+          cessRate: null, cessAmount: null,
+          item: { primaryUnit: { symbol: "NOS", name: "Nos" } },
+        }],
+      },
+    ]);
+
+    const r = await computeGstr1(db, "org-1", period);
+    expect(r.exp).toHaveLength(1);
+    expect(r.exp[0].exportType).toBe("WPAY");
+    expect(r.b2b).toHaveLength(0);
+  });
+
+  it("supplyType=EXPORT without IGST (LUT) routes to EXP as WOPAY", async () => {
+    const db = stubDb([
+      {
+        id: "exp-2",
+        invoiceNumber: "EXP/2026-27/00002",
+        date: new Date("2026-04-21"),
+        type: "INVOICE",
+        status: "APPROVED",
+        totalAmount: "100000",
+        placeOfSupply: null,
+        supplyType: "EXPORT",
+        reverseCharge: false,
+        party: { id: "p", name: "Foreign Co", gstNo: null, billingState: null, billingCountry: "US" },
+        items: [{
+          hsnCode: "8523", quantity: "1", totalAmount: "100000",
+          taxableAmount: "100000", taxAmount: "0",
+          cgstRate: "0", cgstAmount: "0",
+          sgstRate: "0", sgstAmount: "0",
+          igstRate: "0", igstAmount: "0",
+          cessRate: null, cessAmount: null,
+          item: { primaryUnit: { symbol: "NOS", name: "Nos" } },
+        }],
+      },
+    ]);
+
+    const r = await computeGstr1(db, "org-1", period);
+    expect(r.exp).toHaveLength(1);
+    expect(r.exp[0].exportType).toBe("WOPAY");
+  });
+});
+
+describe("computeGstr1 — NIL / EXEMPT", () => {
+  it("zero-rated unregistered intrastate invoice rolls into NIL.INTRA_UNREG", async () => {
+    const db = stubDb([
+      {
+        id: "nil-1",
+        invoiceNumber: "INV/2026-27/00100",
+        date: new Date("2026-04-25"),
+        type: "INVOICE",
+        status: "APPROVED",
+        totalAmount: "5000",
+        placeOfSupply: "MH",
+        supplyType: "INTRASTATE",
+        reverseCharge: false,
+        party: { id: "p", name: "Walk-in", gstNo: null, billingState: "MH", billingCountry: "IN" },
+        items: [{
+          hsnCode: "8523", quantity: "5", totalAmount: "5000",
+          taxableAmount: "5000", taxAmount: "0",
+          cgstRate: "0", cgstAmount: "0",
+          sgstRate: "0", sgstAmount: "0",
+          igstRate: "0", igstAmount: "0",
+          cessRate: null, cessAmount: null,
+          item: { primaryUnit: { symbol: "NOS", name: "Nos" } },
+        }],
+      },
+    ]);
+
+    const r = await computeGstr1(db, "org-1", period);
+    expect(r.b2cs).toHaveLength(0);
+    expect(r.nil).toHaveLength(1);
+    expect(r.nil[0].bucket).toBe("INTRA_UNREG");
+    expect(r.nil[0].amount).toBe("5000");
+  });
+});
+
 describe("summarizeGstr1", () => {
   it("rolls up totals across B2B and B2CS line rows", async () => {
     const db = stubDb([
