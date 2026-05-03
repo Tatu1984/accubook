@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
+import { D, sum, closeEnough } from "@/backend/utils/money";
+import { applyLedgerEntries } from "@/backend/utils/posting";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -9,8 +11,8 @@ export const dynamic = "force-dynamic";
 
 const voucherEntrySchema = z.object({
   ledgerId: z.string().min(1, "Ledger is required"),
-  debitAmount: z.number().min(0).default(0),
-  creditAmount: z.number().min(0).default(0),
+  debitAmount: z.union([z.number().min(0), z.string()]).default(0).transform((v) => D(v)),
+  creditAmount: z.union([z.number().min(0), z.string()]).default(0).transform((v) => D(v)),
   narration: z.string().optional(),
   costCenterId: z.string().optional(),
   projectId: z.string().optional(),
@@ -123,53 +125,61 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
     const body = await request.json();
     const validatedData = createVoucherSchema.parse(body);
 
-    // Validate double-entry: total debit must equal total credit
-    const totalDebit = validatedData.entries.reduce((sum, e) => sum + e.debitAmount, 0);
-    const totalCredit = validatedData.entries.reduce((sum, e) => sum + e.creditAmount, 0);
-
-    if (Math.abs(totalDebit - totalCredit) > 0.01) {
+    // Double-entry balance check, in Decimal.
+    const totalDebit = sum(validatedData.entries.map((e) => e.debitAmount));
+    const totalCredit = sum(validatedData.entries.map((e) => e.creditAmount));
+    if (!closeEnough(totalDebit, totalCredit)) {
       return badRequest("Total debit must equal total credit");
     }
 
-    // Get voucher type for numbering
     const voucherType = await prisma.voucherType.findUnique({
       where: { id: validatedData.voucherTypeId },
+      select: { id: true, numberingPrefix: true, requiresApproval: true },
     });
+    if (!voucherType) return badRequest("Invalid voucher type");
 
-    if (!voucherType) {
-      return badRequest("Invalid voucher type");
-    }
-
-    // Generate voucher number
-    const lastVoucher = await prisma.voucher.findFirst({
-      where: {
-        organizationId: orgId,
-        voucherTypeId: validatedData.voucherTypeId,
-      },
-      orderBy: { createdAt: "desc" },
+    // Confirm fiscal year belongs to this organization (prevents cross-tenant leak via fiscalYearId).
+    const fyOk = await prisma.fiscalYear.findFirst({
+      where: { id: validatedData.fiscalYearId, organizationId: orgId },
+      select: { id: true },
     });
+    if (!fyOk) return badRequest("Fiscal year not found in this organization");
 
-    const nextNumber = lastVoucher
-      ? parseInt(lastVoucher.voucherNumber.split("/").pop() || "0") + 1
-      : 1;
+    const date = new Date(validatedData.date);
+    const requiresApproval = voucherType.requiresApproval;
 
-    const voucherNumber = `${voucherType.numberingPrefix}${new Date().getFullYear()}/${nextNumber.toString().padStart(5, "0")}`;
-
-    // Create voucher with entries in transaction
     const voucher = await prisma.$transaction(async (tx) => {
+      // Voucher numbering: read last under same (org, type, fy), increment.
+      // Race-prone in theory; Postgres sequences will replace this.
+      const lastVoucher = await tx.voucher.findFirst({
+        where: {
+          organizationId: orgId,
+          voucherTypeId: validatedData.voucherTypeId,
+          fiscalYearId: validatedData.fiscalYearId,
+        },
+        orderBy: { createdAt: "desc" },
+        select: { voucherNumber: true },
+      });
+      const nextNumber = lastVoucher
+        ? parseInt(lastVoucher.voucherNumber.split("/").pop() || "0", 10) + 1
+        : 1;
+      const voucherNumber = `${voucherType.numberingPrefix ?? "VCH/"}${new Date().getFullYear()}/${String(nextNumber).padStart(5, "0")}`;
+
       const newVoucher = await tx.voucher.create({
         data: {
           organizationId: orgId,
           voucherTypeId: validatedData.voucherTypeId,
           fiscalYearId: validatedData.fiscalYearId,
           voucherNumber,
-          date: new Date(validatedData.date),
+          date,
           narration: validatedData.narration,
           referenceNo: validatedData.referenceNo,
           branchId: validatedData.branchId,
           totalDebit,
           totalCredit,
-          status: "PENDING",
+          status: requiresApproval ? "PENDING_APPROVAL" : "APPROVED",
+          isPosted: !requiresApproval,
+          postedAt: requiresApproval ? null : new Date(),
           createdById: userId,
           entries: {
             create: validatedData.entries.map((entry, index) => ({
@@ -185,13 +195,21 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
         },
         include: {
           voucherType: true,
-          entries: {
-            include: {
-              ledger: true,
-            },
-          },
+          entries: { include: { ledger: true } },
         },
       });
+
+      // Apply balance impact only when the voucher is posted (skip if pending approval).
+      if (!requiresApproval) {
+        await applyLedgerEntries(
+          tx,
+          validatedData.entries.map((e) => ({
+            ledgerId: e.ledgerId,
+            debitAmount: e.debitAmount,
+            creditAmount: e.creditAmount,
+          }))
+        );
+      }
 
       return newVoucher;
     });

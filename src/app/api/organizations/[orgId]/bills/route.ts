@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
+import { D, sum } from "@/backend/utils/money";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -131,34 +132,46 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
       ? `BILL-${String(parseInt(lastBill.billNumber.split("-")[1] || "0") + 1).padStart(6, "0")}`
       : "BILL-000001";
 
-    // Calculate totals
-    let subtotal = 0;
-    let totalTax = 0;
-    let totalDiscount = 0;
+    // Resolve tax rates for all items that reference a taxId, in one query.
+    const taxIds = [...new Set(validatedData.items.map((i) => i.taxId).filter(Boolean) as string[])];
+    const taxes = taxIds.length
+      ? await prisma.taxConfig.findMany({
+          where: { id: { in: taxIds }, organizationId: orgId },
+          select: { id: true, rate: true },
+        })
+      : [];
+    const rateById = new Map(taxes.map((t) => [t.id, D(t.rate)]));
 
+    // All money math via Decimal — never via JS floats.
     const itemsData = validatedData.items.map((item, index) => {
-      const lineTotal = item.quantity * item.unitPrice;
-      const discountAmount = (lineTotal * item.discountPercent) / 100;
-      const taxableAmount = lineTotal - discountAmount;
-      subtotal += lineTotal;
-      totalDiscount += discountAmount;
+      const lineTotal = D(item.quantity).times(D(item.unitPrice));
+      const discountAmount = lineTotal.times(D(item.discountPercent)).dividedBy(D(100));
+      const taxableAmount = lineTotal.minus(discountAmount);
+      const taxRate = item.taxId ? rateById.get(item.taxId) : undefined;
+      const taxAmount = taxRate
+        ? taxableAmount.times(taxRate).dividedBy(D(100))
+        : D(0);
+      const totalAmount = taxableAmount.plus(taxAmount);
 
       return {
         itemId: item.itemId,
         description: item.description || "",
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        discountPercent: item.discountPercent,
-        discountAmount: discountAmount,
-        taxableAmount: taxableAmount,
+        quantity: D(item.quantity),
+        unitPrice: D(item.unitPrice),
+        discountPercent: D(item.discountPercent),
+        discountAmount,
+        taxableAmount,
         taxId: item.taxId,
-        taxAmount: 0,
-        totalAmount: taxableAmount,
+        taxAmount,
+        totalAmount,
         sequence: index,
       };
     });
 
-    const totalAmount = subtotal - totalDiscount + totalTax;
+    const subtotal = sum(itemsData.map((i) => D(i.quantity).times(D(i.unitPrice))));
+    const totalDiscount = sum(itemsData.map((i) => i.discountAmount));
+    const totalTax = sum(itemsData.map((i) => i.taxAmount));
+    const totalAmount = subtotal.minus(totalDiscount).plus(totalTax);
 
     const bill = await prisma.bill.create({
       data: {
