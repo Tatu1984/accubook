@@ -1,25 +1,12 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
 import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(
-  request: Request,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const GET = withOrgAuth(async (_request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { orgId } = await params;
-
     const bankAccounts = await prisma.bankAccount.findMany({
       where: {
         organizationId: orgId,
@@ -49,21 +36,10 @@ export async function GET(
       { status: 500 }
     );
   }
-}
+});
 
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const POST = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { orgId } = await params;
     const body = await request.json();
 
     const {
@@ -78,10 +54,7 @@ export async function POST(
     } = body;
 
     if (!name || !bankName || !accountNumber || !accountType) {
-      return NextResponse.json(
-        { error: "Name, bank name, account number, and account type are required" },
-        { status: 400 }
-      );
+      return badRequest("Name, bank name, account number, and account type are required");
     }
 
     const bankAccount = await prisma.bankAccount.create({
@@ -107,29 +80,15 @@ export async function POST(
       { status: 500 }
     );
   }
-}
+});
 
-export async function PATCH(
-  request: Request,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const PATCH = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { orgId } = await params;
     const body = await request.json();
     const { id, ...updateData } = body;
 
     if (!id) {
-      return NextResponse.json(
-        { error: "Bank account ID is required" },
-        { status: 400 }
-      );
+      return badRequest("Bank account ID is required");
     }
 
     const bankAccount = await prisma.bankAccount.update({
@@ -148,29 +107,15 @@ export async function PATCH(
       { status: 500 }
     );
   }
-}
+});
 
-export async function DELETE(
-  request: Request,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const DELETE = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { orgId } = await params;
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
 
     if (!id) {
-      return NextResponse.json(
-        { error: "Bank account ID is required" },
-        { status: 400 }
-      );
+      return badRequest("Bank account ID is required");
     }
 
     // Check if bank account has transactions
@@ -187,10 +132,7 @@ export async function DELETE(
     });
 
     if (!bankAccount) {
-      return NextResponse.json(
-        { error: "Bank account not found" },
-        { status: 404 }
-      );
+      return notFound("Bank account not found");
     }
 
     if (bankAccount._count.receipts > 0 || bankAccount._count.payments > 0) {
@@ -214,4 +156,4 @@ export async function DELETE(
       { status: 500 }
     );
   }
-}
+});

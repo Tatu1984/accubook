@@ -1,13 +1,26 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import bcrypt from "bcryptjs";
 import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { withOrgAuth, badRequest, forbidden, notFound, hasPermission } from "@/backend/utils/with-org-auth";
+
+// Helper: returns true when the target user is the org's last active ADMIN.
+// Used to refuse demote/delete operations that would orphan the organization.
+async function isLastAdmin(orgId: string, targetUserId: string): Promise<boolean> {
+  const adminCount = await prisma.organizationUser.count({
+    where: {
+      organizationId: orgId,
+      isActive: true,
+      role: { name: "ADMIN" },
+      NOT: { userId: targetUserId },
+    },
+  });
+  return adminCount === 0;
+}
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-import { z } from "zod";
-import bcrypt from "bcryptjs";
 
 const inviteUserSchema = z.object({
   email: z.string().email("Invalid email"),
@@ -19,34 +32,10 @@ const updateUserSchema = z.object({
   userId: z.string().min(1, "User ID is required"),
   roleId: z.string().optional(),
   isActive: z.boolean().optional(),
-});
+}).strict();
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const GET = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const { searchParams } = new URL(request.url);
     const search = searchParams.get("search");
     const roleId = searchParams.get("roleId");
@@ -119,44 +108,12 @@ export async function GET(
       { status: 500 }
     );
   }
-}
+});
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const POST = withOrgAuth(async (request, { orgId, orgUser }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-      include: {
-        role: true,
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
-    // Check if user has permission to invite users
-    const permissions = orgUser.role?.permissions as string[] | null;
-    if (!permissions?.includes("manage_users") && orgUser.role?.name !== "Owner") {
-      return NextResponse.json(
-        { error: "You don't have permission to invite users" },
-        { status: 403 }
-      );
+    if (!hasPermission(orgUser, "users", "create")) {
+      return forbidden("You don't have permission to invite users");
     }
 
     const body = await request.json();
@@ -179,14 +136,13 @@ export async function POST(
       });
 
       if (existingOrgUser) {
-        return NextResponse.json(
-          { error: "User is already a member of this organization" },
-          { status: 400 }
-        );
+        return badRequest("User is already a member of this organization");
       }
     } else {
-      // Create new user with temporary password
-      const tempPassword = Math.random().toString(36).slice(-8);
+      // Create new user with cryptographically-random temporary password.
+      // 16 random bytes → 22-char base64url string (~128 bits of entropy).
+      const { randomBytes } = await import("node:crypto");
+      const tempPassword = randomBytes(16).toString("base64url");
       const hashedPassword = await bcrypt.hash(tempPassword, 12);
 
       user = await prisma.user.create({
@@ -228,10 +184,7 @@ export async function POST(
     return NextResponse.json(newOrgUser, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: "Validation failed", details: error.issues },
-        { status: 400 }
-      );
+      return badRequest("Validation failed", error.issues);
     }
     console.error("Error inviting user:", error);
     return NextResponse.json(
@@ -239,44 +192,12 @@ export async function POST(
       { status: 500 }
     );
   }
-}
+});
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const PATCH = withOrgAuth(async (request, { orgId, orgUser: currentOrgUser }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const currentOrgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-      include: {
-        role: true,
-      },
-    });
-
-    if (!currentOrgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
-    // Check if user has permission to manage users
-    const permissions = currentOrgUser.role?.permissions as string[] | null;
-    if (!permissions?.includes("manage_users") && currentOrgUser.role?.name !== "Owner") {
-      return NextResponse.json(
-        { error: "You don't have permission to manage users" },
-        { status: 403 }
-      );
+    if (!hasPermission(currentOrgUser, "users", "update")) {
+      return forbidden("You don't have permission to manage users");
     }
 
     const body = await request.json();
@@ -296,18 +217,16 @@ export async function PATCH(
     });
 
     if (!targetOrgUser) {
-      return NextResponse.json(
-        { error: "User not found in organization" },
-        { status: 404 }
-      );
+      return notFound("User not found in organization");
     }
 
-    // Prevent modifying owner unless you're the owner
-    if (targetOrgUser.role?.name === "Owner" && currentOrgUser.role?.name !== "Owner") {
-      return NextResponse.json(
-        { error: "Cannot modify owner's permissions" },
-        { status: 403 }
-      );
+    // Refuse to demote or deactivate the last admin (would orphan the org).
+    const isAdminTarget = targetOrgUser.role?.name === "ADMIN";
+    const willDemote =
+      validatedData.roleId !== undefined && validatedData.roleId !== targetOrgUser.roleId;
+    const willDeactivate = validatedData.isActive === false;
+    if (isAdminTarget && (willDemote || willDeactivate) && (await isLastAdmin(orgId, validatedData.userId))) {
+      return forbidden("Cannot demote or deactivate the only remaining admin");
     }
 
     const updateData: Record<string, unknown> = {};
@@ -346,10 +265,7 @@ export async function PATCH(
     return NextResponse.json(updatedOrgUser);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: "Validation failed", details: error.issues },
-        { status: 400 }
-      );
+      return badRequest("Validation failed", error.issues);
     }
     console.error("Error updating user:", error);
     return NextResponse.json(
@@ -357,62 +273,24 @@ export async function PATCH(
       { status: 500 }
     );
   }
-}
+});
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const DELETE = withOrgAuth(async (request, { orgId, orgUser: currentOrgUser, userId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const currentOrgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-      include: {
-        role: true,
-      },
-    });
-
-    if (!currentOrgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
-    // Check if user has permission to manage users
-    const permissions = currentOrgUser.role?.permissions as string[] | null;
-    if (!permissions?.includes("manage_users") && currentOrgUser.role?.name !== "Owner") {
-      return NextResponse.json(
-        { error: "You don't have permission to remove users" },
-        { status: 403 }
-      );
+    if (!hasPermission(currentOrgUser, "users", "delete")) {
+      return forbidden("You don't have permission to remove users");
     }
 
     const { searchParams } = new URL(request.url);
-    const userId = searchParams.get("userId");
+    const targetUserId = searchParams.get("userId");
 
-    if (!userId) {
-      return NextResponse.json(
-        { error: "User ID is required" },
-        { status: 400 }
-      );
+    if (!targetUserId) {
+      return badRequest("User ID is required");
     }
 
     // Cannot remove yourself
-    if (userId === session.user.id) {
-      return NextResponse.json(
-        { error: "Cannot remove yourself from the organization" },
-        { status: 400 }
-      );
+    if (targetUserId === userId) {
+      return badRequest("Cannot remove yourself from the organization");
     }
 
     // Verify user is part of organization
@@ -420,7 +298,7 @@ export async function DELETE(
       where: {
         organizationId_userId: {
           organizationId: orgId,
-          userId,
+          userId: targetUserId,
         },
       },
       include: {
@@ -429,25 +307,19 @@ export async function DELETE(
     });
 
     if (!targetOrgUser) {
-      return NextResponse.json(
-        { error: "User not found in organization" },
-        { status: 404 }
-      );
+      return notFound("User not found in organization");
     }
 
-    // Cannot remove owner
-    if (targetOrgUser.role?.name === "Owner") {
-      return NextResponse.json(
-        { error: "Cannot remove the owner from the organization" },
-        { status: 403 }
-      );
+    // Refuse to remove the last admin (would orphan the org).
+    if (targetOrgUser.role?.name === "ADMIN" && (await isLastAdmin(orgId, targetUserId))) {
+      return forbidden("Cannot remove the only remaining admin");
     }
 
     await prisma.organizationUser.delete({
       where: {
         organizationId_userId: {
           organizationId: orgId,
-          userId,
+          userId: targetUserId,
         },
       },
     });
@@ -460,4 +332,4 @@ export async function DELETE(
       { status: 500 }
     );
   }
-}
+});

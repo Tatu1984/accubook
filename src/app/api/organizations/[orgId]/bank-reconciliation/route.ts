@@ -1,7 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
+import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -36,32 +35,8 @@ const reconciliationSchema = z.object({
   action: z.enum(["start", "complete"]),
 });
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const GET = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const { searchParams } = new URL(request.url);
     const bankAccountId = searchParams.get("bankAccountId");
     const view = searchParams.get("view") || "summary"; // summary, transactions, unreconciled
@@ -114,7 +89,7 @@ export async function GET(
     });
 
     if (!bankAccount) {
-      return NextResponse.json({ error: "Bank account not found" }, { status: 404 });
+      return notFound("Bank account not found");
     }
 
     if (view === "transactions") {
@@ -301,34 +276,10 @@ export async function GET(
       { status: 500 }
     );
   }
-}
+});
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const POST = withOrgAuth(async (request, { orgId, session }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const body = await request.json();
     const { action } = body;
 
@@ -336,10 +287,7 @@ export async function POST(
       case "import": {
         const validationResult = importTransactionSchema.safeParse(body);
         if (!validationResult.success) {
-          return NextResponse.json(
-            { error: "Validation failed", details: validationResult.error.issues },
-            { status: 400 }
-          );
+          return badRequest("Validation failed", validationResult.error.issues);
         }
 
         const { bankAccountId, transactions } = validationResult.data;
@@ -350,7 +298,7 @@ export async function POST(
         });
 
         if (!bankAccount) {
-          return NextResponse.json({ error: "Bank account not found" }, { status: 404 });
+          return notFound("Bank account not found");
         }
 
         // Import transactions
@@ -377,10 +325,7 @@ export async function POST(
       case "match": {
         const validationResult = matchTransactionSchema.safeParse(body);
         if (!validationResult.success) {
-          return NextResponse.json(
-            { error: "Validation failed", details: validationResult.error.issues },
-            { status: 400 }
-          );
+          return badRequest("Validation failed", validationResult.error.issues);
         }
 
         const { bankTransactionId, voucherId, action: matchAction } = validationResult.data;
@@ -391,7 +336,7 @@ export async function POST(
         });
 
         if (!bankTransaction || bankTransaction.bankAccount.organizationId !== orgId) {
-          return NextResponse.json({ error: "Transaction not found" }, { status: 404 });
+          return notFound("Transaction not found");
         }
 
         if (matchAction === "match" && voucherId) {
@@ -418,7 +363,7 @@ export async function POST(
           return NextResponse.json({ message: "Transaction unmatched" });
         }
 
-        return NextResponse.json({ error: "Invalid match action" }, { status: 400 });
+        return badRequest("Invalid match action");
       }
 
       case "auto-match": {
@@ -429,7 +374,7 @@ export async function POST(
         });
 
         if (!bankAccount) {
-          return NextResponse.json({ error: "Bank account not found" }, { status: 404 });
+          return notFound("Bank account not found");
         }
 
         // Get bank ledger
@@ -438,7 +383,7 @@ export async function POST(
         });
 
         if (!bankLedger) {
-          return NextResponse.json({ error: "No ledger linked to bank account" }, { status: 400 });
+          return badRequest("No ledger linked to bank account");
         }
 
         // Get unreconciled bank transactions
@@ -513,10 +458,7 @@ export async function POST(
       case "reconcile": {
         const validationResult = reconciliationSchema.safeParse(body);
         if (!validationResult.success) {
-          return NextResponse.json(
-            { error: "Validation failed", details: validationResult.error.issues },
-            { status: 400 }
-          );
+          return badRequest("Validation failed", validationResult.error.issues);
         }
 
         const { bankAccountId, periodStart, periodEnd, statementBalance, action: reconAction } = validationResult.data;
@@ -526,7 +468,7 @@ export async function POST(
         });
 
         if (!bankAccount) {
-          return NextResponse.json({ error: "Bank account not found" }, { status: 404 });
+          return notFound("Bank account not found");
         }
 
         // Calculate book balance
@@ -623,11 +565,11 @@ export async function POST(
           });
         }
 
-        return NextResponse.json({ error: "Invalid reconciliation action" }, { status: 400 });
+        return badRequest("Invalid reconciliation action");
       }
 
       default:
-        return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+        return badRequest("Invalid action");
     }
   } catch (error) {
     console.error("Error in reconciliation:", error);
@@ -636,4 +578,4 @@ export async function POST(
       { status: 500 }
     );
   }
-}
+});

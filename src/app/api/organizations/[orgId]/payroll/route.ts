@@ -1,12 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
+import { NextResponse } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-import { z } from "zod";
 
 const earningSchema = z.object({
   name: z.string(),
@@ -31,32 +30,8 @@ const createPayslipSchema = z.object({
   status: z.enum(["DRAFT", "PROCESSED", "APPROVED", "PAID"]).default("DRAFT"),
 });
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const GET = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const { searchParams } = new URL(request.url);
     const employeeId = searchParams.get("employeeId");
     const month = searchParams.get("month");
@@ -135,34 +110,10 @@ export async function GET(
       { status: 500 }
     );
   }
-}
+});
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const POST = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const body = await request.json();
     const validatedData = createPayslipSchema.parse(body);
 
@@ -175,10 +126,7 @@ export async function POST(
     });
 
     if (!employee) {
-      return NextResponse.json(
-        { error: "Employee not found" },
-        { status: 404 }
-      );
+      return notFound("Employee not found");
     }
 
     // Check if payslip already exists for this month/year
@@ -191,10 +139,7 @@ export async function POST(
     });
 
     if (existingPayslip) {
-      return NextResponse.json(
-        { error: "Payslip already exists for this period" },
-        { status: 400 }
-      );
+      return badRequest("Payslip already exists for this period");
     }
 
     // Calculate gross salary from basic + earnings
@@ -248,10 +193,7 @@ export async function POST(
     return NextResponse.json(payslip, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: "Validation failed", details: error.issues },
-        { status: 400 }
-      );
+      return badRequest("Validation failed", error.issues);
     }
     console.error("Error creating payslip:", error);
     return NextResponse.json(
@@ -259,4 +201,4 @@ export async function POST(
       { status: 500 }
     );
   }
-}
+});

@@ -1,7 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
+import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -119,40 +118,13 @@ interface GSTR3BData {
   };
 }
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const POST = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const body = await request.json();
     const validationResult = computeGSTRSchema.safeParse(body);
 
     if (!validationResult.success) {
-      return NextResponse.json(
-        { error: "Validation failed", details: validationResult.error.issues },
-        { status: 400 }
-      );
+      return badRequest("Validation failed", validationResult.error.issues);
     }
 
     const { returnType, period, year } = validationResult.data;
@@ -173,7 +145,7 @@ export async function POST(
       const monthAbbr = period.split("-")[0];
       const monthIndex = monthNames.indexOf(monthAbbr);
       if (monthIndex === -1) {
-        return NextResponse.json({ error: "Invalid period format" }, { status: 400 });
+        return badRequest("Invalid period format");
       }
       startDate = new Date(year, monthIndex, 1);
       endDate = new Date(year, monthIndex + 1, 0);
@@ -186,7 +158,7 @@ export async function POST(
     });
 
     if (!organization?.gstNo) {
-      return NextResponse.json({ error: "Organization GSTIN not configured" }, { status: 400 });
+      return badRequest("Organization GSTIN not configured");
     }
 
     const sellerStateCode = organization.gstNo.substring(0, 2);
@@ -464,9 +436,9 @@ export async function POST(
       });
     }
 
-    return NextResponse.json({ error: "Invalid return type" }, { status: 400 });
+    return badRequest("Invalid return type");
   } catch (error) {
     console.error("Error computing GST return:", error);
     return NextResponse.json({ error: "Failed to compute GST return" }, { status: 500 });
   }
-}
+});

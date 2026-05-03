@@ -1,12 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
+import { NextResponse } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-import { z } from "zod";
 
 const updateWarehouseSchema = z.object({
   name: z.string().min(1).optional(),
@@ -21,20 +20,11 @@ const updateWarehouseSchema = z.object({
   phone: z.string().optional().nullable(),
   isDefault: z.boolean().optional(),
   isActive: z.boolean().optional(),
-});
+}).strict();
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string; warehouseId: string }> }
-) {
+export const GET = withOrgAuth<{ warehouseId: string }>(async (_request, { orgId, params }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId, warehouseId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { warehouseId } = params;
 
     const warehouse = await prisma.warehouse.findFirst({
       where: {
@@ -63,7 +53,7 @@ export async function GET(
     });
 
     if (!warehouse) {
-      return NextResponse.json({ error: "Warehouse not found" }, { status: 404 });
+      return notFound("Warehouse not found");
     }
 
     return NextResponse.json(warehouse);
@@ -74,21 +64,11 @@ export async function GET(
       { status: 500 }
     );
   }
-}
+});
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string; warehouseId: string }> }
-) {
+export const PATCH = withOrgAuth<{ warehouseId: string }>(async (request, { orgId, params }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId, warehouseId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
+    const { warehouseId } = params;
     const body = await request.json();
     const validatedData = updateWarehouseSchema.parse(body);
 
@@ -101,7 +81,7 @@ export async function PATCH(
     });
 
     if (!existingWarehouse) {
-      return NextResponse.json({ error: "Warehouse not found" }, { status: 404 });
+      return notFound("Warehouse not found");
     }
 
     // Check for name uniqueness if name is being changed
@@ -115,10 +95,7 @@ export async function PATCH(
       });
 
       if (nameExists) {
-        return NextResponse.json(
-          { error: "A warehouse with this name already exists" },
-          { status: 400 }
-        );
+        return badRequest("A warehouse with this name already exists");
       }
     }
 
@@ -152,10 +129,7 @@ export async function PATCH(
     return NextResponse.json(warehouse);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: "Validation failed", details: error.issues },
-        { status: 400 }
-      );
+      return badRequest("Validation failed", error.issues);
     }
     console.error("Error updating warehouse:", error);
     return NextResponse.json(
@@ -163,20 +137,11 @@ export async function PATCH(
       { status: 500 }
     );
   }
-}
+});
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string; warehouseId: string }> }
-) {
+export const DELETE = withOrgAuth<{ warehouseId: string }>(async (_request, { orgId, params }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId, warehouseId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { warehouseId } = params;
 
     // Check if warehouse exists
     const warehouse = await prisma.warehouse.findFirst({
@@ -187,7 +152,7 @@ export async function DELETE(
     });
 
     if (!warehouse) {
-      return NextResponse.json({ error: "Warehouse not found" }, { status: 404 });
+      return notFound("Warehouse not found");
     }
 
     // Check if warehouse has stock
@@ -217,4 +182,4 @@ export async function DELETE(
       { status: 500 }
     );
   }
-}
+});

@@ -1,12 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
+import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
+import { z } from "zod";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-import { z } from "zod";
 
 const createTaxConfigSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -18,32 +17,10 @@ const createTaxConfigSchema = z.object({
   isActive: z.boolean().default(true),
 });
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+const updateTaxConfigSchema = createTaxConfigSchema.partial().strict();
+
+export const GET = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const { searchParams } = new URL(request.url);
     const taxType = searchParams.get("taxType");
     const search = searchParams.get("search");
@@ -99,34 +76,10 @@ export async function GET(
       { status: 500 }
     );
   }
-}
+});
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const POST = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const body = await request.json();
     const validatedData = createTaxConfigSchema.parse(body);
 
@@ -139,10 +92,7 @@ export async function POST(
     });
 
     if (existingTax) {
-      return NextResponse.json(
-        { error: "Tax configuration with this code already exists" },
-        { status: 400 }
-      );
+      return badRequest("Tax configuration with this code already exists");
     }
 
     const taxConfig = await prisma.taxConfig.create({
@@ -155,10 +105,7 @@ export async function POST(
     return NextResponse.json(taxConfig, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: "Validation failed", details: error.issues },
-        { status: 400 }
-      );
+      return badRequest("Validation failed", error.issues);
     }
     console.error("Error creating tax config:", error);
     return NextResponse.json(
@@ -166,42 +113,15 @@ export async function POST(
       { status: 500 }
     );
   }
-}
+});
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const PATCH = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const body = await request.json();
     const { taxId, ...updateData } = body;
 
     if (!taxId) {
-      return NextResponse.json(
-        { error: "Tax ID is required" },
-        { status: 400 }
-      );
+      return badRequest("Tax ID is required");
     }
 
     // Verify tax config exists and belongs to organization
@@ -213,13 +133,10 @@ export async function PATCH(
     });
 
     if (!existingTax) {
-      return NextResponse.json(
-        { error: "Tax configuration not found" },
-        { status: 404 }
-      );
+      return notFound("Tax configuration not found");
     }
 
-    const validatedData = createTaxConfigSchema.partial().parse(updateData);
+    const validatedData = updateTaxConfigSchema.parse(updateData);
 
     const taxConfig = await prisma.taxConfig.update({
       where: { id: taxId },
@@ -229,10 +146,7 @@ export async function PATCH(
     return NextResponse.json(taxConfig);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: "Validation failed", details: error.issues },
-        { status: 400 }
-      );
+      return badRequest("Validation failed", error.issues);
     }
     console.error("Error updating tax config:", error);
     return NextResponse.json(
@@ -240,42 +154,15 @@ export async function PATCH(
       { status: 500 }
     );
   }
-}
+});
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const DELETE = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const { searchParams } = new URL(request.url);
     const taxId = searchParams.get("taxId");
 
     if (!taxId) {
-      return NextResponse.json(
-        { error: "Tax ID is required" },
-        { status: 400 }
-      );
+      return badRequest("Tax ID is required");
     }
 
     // Verify tax config exists and belongs to organization
@@ -287,10 +174,7 @@ export async function DELETE(
     });
 
     if (!existingTax) {
-      return NextResponse.json(
-        { error: "Tax configuration not found" },
-        { status: 404 }
-      );
+      return notFound("Tax configuration not found");
     }
 
     await prisma.taxConfig.delete({
@@ -305,4 +189,4 @@ export async function DELETE(
       { status: 500 }
     );
   }
-}
+});

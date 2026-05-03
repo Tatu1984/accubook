@@ -1,12 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
+import { NextResponse } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-import { z } from "zod";
 
 const updatePartySchema = z.object({
   name: z.string().min(1).optional(),
@@ -30,20 +29,11 @@ const updatePartySchema = z.object({
   openingBalance: z.number().optional(),
   openingBalanceType: z.enum(["DEBIT", "CREDIT"]).optional(),
   isActive: z.boolean().optional(),
-});
+}).strict();
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string; partyId: string }> }
-) {
+export const GET = withOrgAuth<{ partyId: string }>(async (_request, { orgId, params }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId, partyId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { partyId } = params;
 
     const party = await prisma.party.findFirst({
       where: {
@@ -53,7 +43,7 @@ export async function GET(
     });
 
     if (!party) {
-      return NextResponse.json({ error: "Party not found" }, { status: 404 });
+      return notFound("Party not found");
     }
 
     return NextResponse.json(party);
@@ -64,21 +54,11 @@ export async function GET(
       { status: 500 }
     );
   }
-}
+});
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string; partyId: string }> }
-) {
+export const PATCH = withOrgAuth<{ partyId: string }>(async (request, { orgId, params }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId, partyId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
+    const { partyId } = params;
     const body = await request.json();
     const validatedData = updatePartySchema.parse(body);
 
@@ -91,7 +71,7 @@ export async function PATCH(
     });
 
     if (!existingParty) {
-      return NextResponse.json({ error: "Party not found" }, { status: 404 });
+      return notFound("Party not found");
     }
 
     // Check for name uniqueness if name is being changed
@@ -105,10 +85,7 @@ export async function PATCH(
       });
 
       if (nameExists) {
-        return NextResponse.json(
-          { error: "A party with this name already exists" },
-          { status: 400 }
-        );
+        return badRequest("A party with this name already exists");
       }
     }
 
@@ -120,10 +97,7 @@ export async function PATCH(
     return NextResponse.json(party);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: "Validation failed", details: error.issues },
-        { status: 400 }
-      );
+      return badRequest("Validation failed", error.issues);
     }
     console.error("Error updating party:", error);
     return NextResponse.json(
@@ -131,20 +105,11 @@ export async function PATCH(
       { status: 500 }
     );
   }
-}
+});
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string; partyId: string }> }
-) {
+export const DELETE = withOrgAuth<{ partyId: string }>(async (_request, { orgId, params }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId, partyId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { partyId } = params;
 
     // Check if party exists
     const party = await prisma.party.findFirst({
@@ -155,7 +120,7 @@ export async function DELETE(
     });
 
     if (!party) {
-      return NextResponse.json({ error: "Party not found" }, { status: 404 });
+      return notFound("Party not found");
     }
 
     // Check if party has any invoices or bills
@@ -189,4 +154,4 @@ export async function DELETE(
       { status: 500 }
     );
   }
-}
+});

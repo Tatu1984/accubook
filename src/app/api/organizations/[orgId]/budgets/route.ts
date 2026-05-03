@@ -1,12 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
+import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
+import { z } from "zod";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-import { z } from "zod";
 
 const budgetLineSchema = z.object({
   ledgerId: z.string().min(1),
@@ -32,32 +31,8 @@ const createBudgetSchema = z.object({
   lines: z.array(budgetLineSchema).optional(),
 });
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const GET = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const { searchParams } = new URL(request.url);
     const fiscalYearId = searchParams.get("fiscalYearId");
     const status = searchParams.get("status");
@@ -149,34 +124,10 @@ export async function GET(
       { status: 500 }
     );
   }
-}
+});
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const POST = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const body = await request.json();
     const validatedData = createBudgetSchema.parse(body);
 
@@ -192,10 +143,7 @@ export async function POST(
     });
 
     if (existing) {
-      return NextResponse.json(
-        { error: "Budget with this name already exists for this fiscal year" },
-        { status: 400 }
-      );
+      return badRequest("Budget with this name already exists for this fiscal year");
     }
 
     const linesData = validatedData.lines?.map((line) => ({
@@ -253,10 +201,7 @@ export async function POST(
     return NextResponse.json(budget, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: "Validation failed", details: error.issues },
-        { status: 400 }
-      );
+      return badRequest("Validation failed", error.issues);
     }
     console.error("Error creating budget:", error);
     return NextResponse.json(
@@ -264,42 +209,15 @@ export async function POST(
       { status: 500 }
     );
   }
-}
+});
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const PATCH = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const body = await request.json();
     const { budgetId, status, lines, ...updateData } = body;
 
     if (!budgetId) {
-      return NextResponse.json(
-        { error: "Budget ID is required" },
-        { status: 400 }
-      );
+      return badRequest("Budget ID is required");
     }
 
     // Verify budget belongs to organization
@@ -311,10 +229,7 @@ export async function PATCH(
     });
 
     if (!existing) {
-      return NextResponse.json(
-        { error: "Budget not found" },
-        { status: 404 }
-      );
+      return notFound("Budget not found");
     }
 
     const budget = await prisma.budget.update({
@@ -341,42 +256,15 @@ export async function PATCH(
       { status: 500 }
     );
   }
-}
+});
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const DELETE = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const { searchParams } = new URL(request.url);
     const budgetId = searchParams.get("budgetId");
 
     if (!budgetId) {
-      return NextResponse.json(
-        { error: "Budget ID is required" },
-        { status: 400 }
-      );
+      return badRequest("Budget ID is required");
     }
 
     // Verify budget belongs to organization
@@ -388,10 +276,7 @@ export async function DELETE(
     });
 
     if (!existing) {
-      return NextResponse.json(
-        { error: "Budget not found" },
-        { status: 404 }
-      );
+      return notFound("Budget not found");
     }
 
     await prisma.budget.delete({
@@ -406,4 +291,4 @@ export async function DELETE(
       { status: 500 }
     );
   }
-}
+});

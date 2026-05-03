@@ -77,7 +77,7 @@
 | D9 | Email service | Stub for now (no actual email send). Resend/Postmark in Phase 1. | 2026-05-03 (assumed default) |
 | D10 | Test runner | Vitest. Coverage targets the load-bearing pieces (auth helper, payment posting, voucher numbering) — not full coverage. | 2026-05-03 (assumed default) |
 | D11 | Logger | `pino` via thin wrapper at `src/backend/utils/logger.ts`, redacts `password` / `token` / `authorization`. | 2026-05-03 (assumed default) |
-| D12 | `AUTH_SECRET` rotation | Will rotate during Phase 0 work — invalidates JWTs but no real users yet. | 2026-05-03 |
+| D12 | `AUTH_SECRET` rotation | **Skipped** — user declined. Revisit before first real user signs up. (No active JWTs to invalidate today.) | 2026-05-03 |
 | D13 | Pace assumption | Solo + Claude, full-time. (User has not explicitly confirmed but said "lets start working".) | 2026-05-03 |
 | D14 | v1 scope | India ERP MVP (Phase 0 + Phase 1). Phase 2+ is roadmap, not committed. | 2026-05-03 |
 
@@ -193,16 +193,16 @@ Four parallel audits on 2026-05-03 found this codebase NOT production-ready. Top
 
 Three sub-PRs. Tick boxes as they ship.
 
-### PR 1 — Security & tenant isolation
-- [ ] `src/backend/utils/with-org-auth.ts` — wrapper helper that authenticates session, verifies `organizationUser` membership of `params.orgId`, attaches `{ session, orgUser, orgId }` to handler context. Type-safe.
-- [ ] Apply `withOrgAuth` to every route under `src/app/api/organizations/[orgId]/...` (~57 routes). Delete the duplicated 15-line preambles.
-- [ ] Strict Zod (`.strict()`) on every PATCH endpoint to block mass-assignment.
-- [ ] Delete `src/app/api/test-session/route.ts`.
-- [ ] Login page: remove demo card or gate behind `process.env.NEXT_PUBLIC_DEMO === "true"`. Seed: skip admin user when `NODE_ENV === "production"`.
-- [ ] `/api/auth/register` — generic response on duplicate email (no enumeration).
-- [ ] Replace `Math.random().toString(36).slice(-8)` (`users/route.ts:189`) with `crypto.randomBytes(16).toString("base64url")`.
-- [ ] Permission model — switch to `permissions` JSON checks. Normalize role names to uppercase. Patch `users/route.ts` "Owner" check.
-- [ ] Rotate `AUTH_SECRET` (regenerate, update `.env`, document in this file).
+### PR 1 — Security & tenant isolation ✅ COMPLETE (pending commit)
+- [x] `src/backend/utils/with-org-auth.ts` — wrapper helper that authenticates session, verifies `organizationUser` membership of `params.orgId`, attaches `{ session, orgUser, orgId, params, userId }` to handler context. Plus `hasPermission()` for permissions-JSON checks and `unauthorized/forbidden/notFound/badRequest` response helpers.
+- [x] Applied `withOrgAuth` to all 55 routes under `src/app/api/organizations/[orgId]/...` (5 parallel agent batches: items/inventory/branches=10, sales=8, purchase/vouchers/ledgers=10, HR/admin=12, reports/tax/banking=15). Cross-tenant data leak closed on every detail route.
+- [x] `.strict()` added to every PATCH Zod schema (mass-assignment protection).
+- [x] Deleted `src/app/api/test-session/route.ts`.
+- [x] Login page: demo card gated behind `process.env.NEXT_PUBLIC_DEMO === "true"`. Seed: refuses to run when `NODE_ENV === "production"` unless `ALLOW_PROD_SEED=true`.
+- [x] `/api/auth/register` — generic response on duplicate email (no enumeration).
+- [x] Replaced `Math.random().toString(36).slice(-8)` with `crypto.randomBytes(16).toString("base64url")` in `users/route.ts`.
+- [x] Permission model — switched all `role.name === "Owner"` checks (4× in users/route.ts, 1× in audit-logs/route.ts) to `hasPermission(orgUser, module, action)` against the structured permissions JSON. Added "last admin" guard to prevent orphaning the org via demote/deactivate/remove.
+- [x] ~~Rotate `AUTH_SECRET`~~ — skipped per D12. Revisit before first real user.
 - [ ] Rate limiting on `/api/auth/*` — **stubbed** with a TODO until user provisions Upstash (per Q3).
 
 ### PR 2 — Accounting correctness
@@ -237,24 +237,27 @@ Three sub-PRs. Tick boxes as they ship.
 ## 8. Current state
 
 - **Active phase:** Phase 0
-- **Active sub-PR:** None yet — about to start PR 1
-- **Last updated:** 2026-05-03 by Claude (commit ` <to-fill-on-commit> `)
+- **Active sub-PR:** PR 1 complete — about to commit. PR 2 (accounting correctness) is next.
+- **Last updated:** 2026-05-03 by Claude (commit `<pending>`)
 - **What's done since last session:**
-  - Restructured `src/` into `backend/`, `frontend/`, `shared/`, `config/` (commit `a734b34`)
-  - Schema pushed to Neon, seeded
-  - Production build passes (`npm run build` → 66 pages, 0 errors)
-  - Four-agent audit completed; findings logged in §6 above
-  - This `update.md` file created
+  - PR 1 complete (everything except rate-limiting stub):
+    - `withOrgAuth` helper at `src/backend/utils/with-org-auth.ts` (with `hasPermission` and response helpers)
+    - All 55 org-scoped routes migrated; cross-tenant leak closed
+    - `.strict()` on every PATCH schema; quick-wins shipped (test-session deleted, demo card gated, seed prod-gated, register enumeration fixed, crypto-strength temp password, permission model rewired)
+    - tsc + production build pass
 - **What's next (exact):**
-  1. Create `src/backend/utils/with-org-auth.ts` — type-safe wrapper for `(req, ctx) => Response` handlers.
-  2. Apply to one representative route (e.g. `items/[itemId]/route.ts`) as a proof-of-concept.
-  3. Confirm with user before bulk-applying to ~57 routes.
+  1. Commit & push PR 1.
+  2. Start PR 2 (accounting correctness) — see §7. Begin with payments/receipts: wrap in `prisma.$transaction` that creates payment + offsetting voucher + updates invoice + updates bank account balance.
+  3. Then voucher posting → ledger balance updates.
+  4. Then voucher numbering races → Postgres sequences.
+  5. Then Decimal math sweep across all reports.
 
 ## 9. Completed log (reverse chronological)
 
 | Date | What | Commit |
 |---|---|---|
-| 2026-05-03 | Created `update.md`; saved memory pointer | `<pending>` |
+| 2026-05-03 | **PR 1 — Security & tenant isolation complete.** `withOrgAuth` helper, applied to all 55 org-scoped routes, `.strict()` on PATCH schemas, demo/test gate, register enumeration fix, crypto-strength temp password, permission model rewired with `hasPermission()` + last-admin guard. tsc + build clean. | `<pending>` |
+| 2026-05-03 | Created `update.md`; saved memory pointer | `e4dc1db` |
 | 2026-05-03 | Production audit (auth, data integrity, ops, code quality) — 4 agents | n/a |
 | 2026-05-03 | Pushed all migration work to `origin/main` | `a734b34` |
 | 2026-05-03 | Local `npm run build` passes (66 pages, 0 errors) | n/a |

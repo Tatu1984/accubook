@@ -1,38 +1,13 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
+import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const GET = withOrgAuth(async (request, { orgId, userId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const { searchParams } = new URL(request.url);
     const type = searchParams.get("type");
     const isRead = searchParams.get("isRead");
@@ -40,7 +15,7 @@ export async function GET(
     const limit = parseInt(searchParams.get("limit") || "20");
 
     const where: Record<string, unknown> = {
-      userId: session.user.id,
+      userId,
       OR: [
         { organizationId: orgId },
         { organizationId: null },
@@ -88,34 +63,10 @@ export async function GET(
       { status: 500 }
     );
   }
-}
+});
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const PATCH = withOrgAuth(async (request, { userId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const body = await request.json();
     const { notificationId, action, notificationIds } = body;
 
@@ -123,7 +74,7 @@ export async function PATCH(
       // Mark all notifications as read
       await prisma.notification.updateMany({
         where: {
-          userId: session.user.id,
+          userId,
           isRead: false,
         },
         data: {
@@ -140,7 +91,7 @@ export async function PATCH(
       await prisma.notification.updateMany({
         where: {
           id: { in: notificationIds },
-          userId: session.user.id,
+          userId,
         },
         data: {
           isRead: true,
@@ -156,7 +107,7 @@ export async function PATCH(
       const notification = await prisma.notification.update({
         where: {
           id: notificationId,
-          userId: session.user.id,
+          userId,
         },
         data: {
           isRead: true,
@@ -167,10 +118,7 @@ export async function PATCH(
       return NextResponse.json(notification);
     }
 
-    return NextResponse.json(
-      { error: "Invalid request" },
-      { status: 400 }
-    );
+    return badRequest("Invalid request");
   } catch (error) {
     console.error("Error updating notification:", error);
     return NextResponse.json(
@@ -178,34 +126,10 @@ export async function PATCH(
       { status: 500 }
     );
   }
-}
+});
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const DELETE = withOrgAuth(async (request, { userId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const { searchParams } = new URL(request.url);
     const notificationId = searchParams.get("notificationId");
     const deleteAll = searchParams.get("deleteAll") === "true";
@@ -213,7 +137,7 @@ export async function DELETE(
     if (deleteAll) {
       await prisma.notification.deleteMany({
         where: {
-          userId: session.user.id,
+          userId,
           isRead: true,
         },
       });
@@ -225,17 +149,14 @@ export async function DELETE(
       await prisma.notification.delete({
         where: {
           id: notificationId,
-          userId: session.user.id,
+          userId,
         },
       });
 
       return NextResponse.json({ success: true });
     }
 
-    return NextResponse.json(
-      { error: "Notification ID is required" },
-      { status: 400 }
-    );
+    return badRequest("Notification ID is required");
   } catch (error) {
     console.error("Error deleting notification:", error);
     return NextResponse.json(
@@ -243,4 +164,4 @@ export async function DELETE(
       { status: 500 }
     );
   }
-}
+});

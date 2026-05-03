@@ -1,10 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
-import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 import { z } from "zod";
+import { prisma } from "@/backend/database/client";
+import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
 
-// Force Node.js runtime for this route
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -23,175 +21,76 @@ const updateItemSchema = z.object({
   reorderLevel: z.number().optional().nullable(),
   reorderQuantity: z.number().optional().nullable(),
   isActive: z.boolean().optional(),
+}).strict();
+
+export const GET = withOrgAuth<{ itemId: string }>(async (_request, { orgId, params }) => {
+  const item = await prisma.item.findFirst({
+    where: { id: params.itemId, organizationId: orgId },
+    include: {
+      category: true,
+      primaryUnit: true,
+      purchaseTax: true,
+      salesTax: true,
+    },
+  });
+
+  if (!item) return notFound("Item not found");
+  return NextResponse.json(item);
 });
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string; itemId: string }> }
-) {
+export const PATCH = withOrgAuth<{ itemId: string }>(async (request, { orgId, params }) => {
+  let validatedData: z.infer<typeof updateItemSchema>;
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId, itemId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const item = await prisma.item.findFirst({
-      where: {
-        id: itemId,
-        organizationId: orgId,
-      },
-      include: {
-        category: true,
-        primaryUnit: true,
-        purchaseTax: true,
-        salesTax: true,
-      },
-    });
-
-    if (!item) {
-      return NextResponse.json({ error: "Item not found" }, { status: 404 });
-    }
-
-    return NextResponse.json(item);
+    validatedData = updateItemSchema.parse(await request.json());
   } catch (error) {
-    console.error("Error fetching item:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch item" },
-      { status: 500 }
-    );
+    if (error instanceof z.ZodError) return badRequest("Validation failed", error.issues);
+    throw error;
   }
-}
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string; itemId: string }> }
-) {
-  try {
-    await cookies();
-    const session = await auth();
-    const { orgId, itemId } = await params;
+  const existingItem = await prisma.item.findFirst({
+    where: { id: params.itemId, organizationId: orgId },
+  });
+  if (!existingItem) return notFound("Item not found");
 
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const body = await request.json();
-    const validatedData = updateItemSchema.parse(body);
-
-    // Check if item exists
-    const existingItem = await prisma.item.findFirst({
+  if (validatedData.name && validatedData.name !== existingItem.name) {
+    const nameExists = await prisma.item.findFirst({
       where: {
-        id: itemId,
         organizationId: orgId,
+        name: validatedData.name,
+        NOT: { id: params.itemId },
       },
     });
-
-    if (!existingItem) {
-      return NextResponse.json({ error: "Item not found" }, { status: 404 });
-    }
-
-    // Check for name uniqueness if name is being changed
-    if (validatedData.name && validatedData.name !== existingItem.name) {
-      const nameExists = await prisma.item.findFirst({
-        where: {
-          organizationId: orgId,
-          name: validatedData.name,
-          NOT: { id: itemId },
-        },
-      });
-
-      if (nameExists) {
-        return NextResponse.json(
-          { error: "An item with this name already exists" },
-          { status: 400 }
-        );
-      }
-    }
-
-    const item = await prisma.item.update({
-      where: { id: itemId },
-      data: validatedData,
-      include: {
-        category: true,
-        primaryUnit: true,
-        purchaseTax: true,
-        salesTax: true,
-      },
-    });
-
-    return NextResponse.json(item);
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: "Validation failed", details: error.issues },
-        { status: 400 }
-      );
-    }
-    console.error("Error updating item:", error);
-    return NextResponse.json(
-      { error: "Failed to update item" },
-      { status: 500 }
-    );
+    if (nameExists) return badRequest("An item with this name already exists");
   }
-}
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string; itemId: string }> }
-) {
-  try {
-    await cookies();
-    const session = await auth();
-    const { orgId, itemId } = await params;
+  const item = await prisma.item.update({
+    where: { id: params.itemId },
+    data: validatedData,
+    include: { category: true, primaryUnit: true, purchaseTax: true, salesTax: true },
+  });
 
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  return NextResponse.json(item);
+});
 
-    // Check if item exists
-    const item = await prisma.item.findFirst({
-      where: {
-        id: itemId,
-        organizationId: orgId,
-      },
+export const DELETE = withOrgAuth<{ itemId: string }>(async (_request, { orgId, params }) => {
+  const item = await prisma.item.findFirst({
+    where: { id: params.itemId, organizationId: orgId },
+  });
+  if (!item) return notFound("Item not found");
+
+  const [hasStock, hasInvoiceItems] = await Promise.all([
+    prisma.stock.findFirst({ where: { itemId: params.itemId } }),
+    prisma.invoiceItem.findFirst({ where: { itemId: params.itemId } }),
+  ]);
+
+  if (hasStock || hasInvoiceItems) {
+    await prisma.item.update({
+      where: { id: params.itemId },
+      data: { isActive: false },
     });
-
-    if (!item) {
-      return NextResponse.json({ error: "Item not found" }, { status: 404 });
-    }
-
-    // Check if item has stock or invoices
-    const hasStock = await prisma.stock.findFirst({
-      where: { itemId },
-    });
-
-    const hasInvoiceItems = await prisma.invoiceItem.findFirst({
-      where: { itemId },
-    });
-
-    if (hasStock || hasInvoiceItems) {
-      // Soft delete
-      await prisma.item.update({
-        where: { id: itemId },
-        data: { isActive: false },
-      });
-      return NextResponse.json({ success: true, softDeleted: true });
-    }
-
-    // Hard delete
-    await prisma.item.delete({
-      where: { id: itemId },
-    });
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error("Error deleting item:", error);
-    return NextResponse.json(
-      { error: "Failed to delete item" },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: true, softDeleted: true });
   }
-}
+
+  await prisma.item.delete({ where: { id: params.itemId } });
+  return NextResponse.json({ success: true });
+});

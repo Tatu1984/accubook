@@ -1,37 +1,14 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
+import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { withOrgAuth, notFound } from "@/backend/utils/with-org-auth";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string; billId: string }> }
-) {
+export const DELETE = withOrgAuth<{ billId: string }>(async (_request, { orgId, params }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId, billId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
+    const { billId } = params;
 
     // Check if bill exists and belongs to organization
     const bill = await prisma.bill.findUnique({
@@ -39,10 +16,7 @@ export async function DELETE(
     });
 
     if (!bill || bill.organizationId !== orgId) {
-      return NextResponse.json(
-        { error: "Bill not found" },
-        { status: 404 }
-      );
+      return notFound("Bill not found");
     }
 
     // Delete bill items first (if not cascading)
@@ -63,4 +37,4 @@ export async function DELETE(
       { status: 500 }
     );
   }
-}
+});

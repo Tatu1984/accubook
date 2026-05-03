@@ -163,6 +163,13 @@ async function main() {
 
   console.log("Leave types created");
 
+  // Refuse to seed the well-known demo admin into a production-flagged DB.
+  // Set ALLOW_PROD_SEED=true to override (e.g. for first-time bootstrap).
+  if (process.env.NODE_ENV === "production" && process.env.ALLOW_PROD_SEED !== "true") {
+    console.error("Refusing to seed demo admin into NODE_ENV=production. Set ALLOW_PROD_SEED=true to override.");
+    process.exit(1);
+  }
+
   // Create admin user
   const passwordHash = await hash("admin123", 12);
 

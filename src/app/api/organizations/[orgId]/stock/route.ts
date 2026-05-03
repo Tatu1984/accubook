@@ -1,12 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
+import { NextResponse } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-import { z } from "zod";
 
 const stockMovementSchema = z.object({
   itemId: z.string().min(1, "Item is required"),
@@ -23,32 +22,8 @@ const stockMovementSchema = z.object({
   date: z.string().transform((val) => new Date(val)),
 });
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const GET = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const { searchParams } = new URL(request.url);
     const view = searchParams.get("view") || "summary";
     const warehouseId = searchParams.get("warehouseId");
@@ -188,34 +163,10 @@ export async function GET(
       { status: 500 }
     );
   }
-}
+});
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const POST = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const body = await request.json();
     const validatedData = stockMovementSchema.parse(body);
 
@@ -228,10 +179,7 @@ export async function POST(
     });
 
     if (!item) {
-      return NextResponse.json(
-        { error: "Item not found" },
-        { status: 404 }
-      );
+      return notFound("Item not found");
     }
 
     // Verify warehouses belong to organization
@@ -244,10 +192,7 @@ export async function POST(
       });
 
       if (!fromWarehouse) {
-        return NextResponse.json(
-          { error: "Source warehouse not found" },
-          { status: 404 }
-        );
+        return notFound("Source warehouse not found");
       }
     }
 
@@ -260,10 +205,7 @@ export async function POST(
       });
 
       if (!toWarehouse) {
-        return NextResponse.json(
-          { error: "Destination warehouse not found" },
-          { status: 404 }
-        );
+        return notFound("Destination warehouse not found");
       }
     }
 
@@ -351,10 +293,7 @@ export async function POST(
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: "Validation failed", details: error.issues },
-        { status: 400 }
-      );
+      return badRequest("Validation failed", error.issues);
     }
     console.error("Error processing stock movement:", error);
     return NextResponse.json(
@@ -362,4 +301,4 @@ export async function POST(
       { status: 500 }
     );
   }
-}
+});

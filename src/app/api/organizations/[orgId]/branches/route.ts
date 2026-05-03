@@ -1,8 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
-import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 import { z } from "zod";
+import { prisma } from "@/backend/database/client";
+import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -22,19 +21,8 @@ const createBranchSchema = z.object({
   isHeadOffice: z.boolean().default(false),
 });
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const GET = withOrgAuth(async (_request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     const branches = await prisma.branch.findMany({
       where: {
         organizationId: orgId,
@@ -54,21 +42,10 @@ export async function GET(
       { status: 500 }
     );
   }
-}
+});
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const POST = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     const body = await request.json();
     const validatedData = createBranchSchema.parse(body);
 
@@ -96,10 +73,7 @@ export async function POST(
     return NextResponse.json(branch, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: "Validation failed", details: error.issues },
-        { status: 400 }
-      );
+      return badRequest("Validation failed", error.issues);
     }
     console.error("Error creating branch:", error);
     return NextResponse.json(
@@ -107,4 +81,4 @@ export async function POST(
       { status: 500 }
     );
   }
-}
+});

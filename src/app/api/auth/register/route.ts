@@ -28,8 +28,10 @@ export async function POST(request: NextRequest) {
     });
 
     if (existingUser) {
+      // Generic response to prevent email enumeration. Combined with
+      // rate limiting on /api/auth/* (planned), this prevents account discovery.
       return NextResponse.json(
-        { error: "Email already registered" },
+        { error: "Registration could not be completed. Please try a different email or contact support if you already have an account." },
         { status: 400 }
       );
     }

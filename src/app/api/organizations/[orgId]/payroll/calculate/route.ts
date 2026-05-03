@@ -1,8 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
-import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 import { z } from "zod";
+import { prisma } from "@/backend/database/client";
+import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import {
   calculatePayroll,
   calculatePF,
@@ -43,32 +42,8 @@ const bulkCalculateSchema = z.object({
   employeeIds: z.array(z.string()).optional(),
 });
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const GET = withOrgAuth(async (request) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const { searchParams } = new URL(request.url);
     const view = searchParams.get("view") || "config";
 
@@ -115,7 +90,7 @@ export async function GET(
     if (view === "ctc-breakdown") {
       const annualCtc = parseFloat(searchParams.get("ctc") || "0");
       if (annualCtc <= 0) {
-        return NextResponse.json({ error: "CTC required" }, { status: 400 });
+        return badRequest("CTC required");
       }
 
       const structure = generateSalaryStructure(annualCtc);
@@ -153,49 +128,22 @@ export async function GET(
       });
     }
 
-    return NextResponse.json({ error: "Invalid view" }, { status: 400 });
+    return badRequest("Invalid view");
   } catch (error) {
     console.error("Error:", error);
     return NextResponse.json({ error: "Failed to process request" }, { status: 500 });
   }
-}
+});
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const POST = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const body = await request.json();
     const { action = "calculate" } = body;
 
     if (action === "calculate") {
       const validationResult = calculatePayslipSchema.safeParse(body);
       if (!validationResult.success) {
-        return NextResponse.json(
-          { error: "Validation failed", details: validationResult.error.issues },
-          { status: 400 }
-        );
+        return badRequest("Validation failed", validationResult.error.issues);
       }
 
       const input = validationResult.data;
@@ -209,7 +157,7 @@ export async function POST(
       });
 
       if (!employee) {
-        return NextResponse.json({ error: "Employee not found" }, { status: 404 });
+        return notFound("Employee not found");
       }
 
       // Get attendance for the month
@@ -290,10 +238,7 @@ export async function POST(
     if (action === "bulk-calculate") {
       const validationResult = bulkCalculateSchema.safeParse(body);
       if (!validationResult.success) {
-        return NextResponse.json(
-          { error: "Validation failed", details: validationResult.error.issues },
-          { status: 400 }
-        );
+        return badRequest("Validation failed", validationResult.error.issues);
       }
 
       const { month, year, employeeIds } = validationResult.data;
@@ -396,10 +341,7 @@ export async function POST(
     if (action === "generate-payslips") {
       const validationResult = bulkCalculateSchema.safeParse(body);
       if (!validationResult.success) {
-        return NextResponse.json(
-          { error: "Validation failed", details: validationResult.error.issues },
-          { status: 400 }
-        );
+        return badRequest("Validation failed", validationResult.error.issues);
       }
 
       const { month, year, employeeIds } = validationResult.data;
@@ -516,9 +458,9 @@ export async function POST(
       });
     }
 
-    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+    return badRequest("Invalid action");
   } catch (error) {
     console.error("Error:", error);
     return NextResponse.json({ error: "Failed to process request" }, { status: 500 });
   }
-}
+});

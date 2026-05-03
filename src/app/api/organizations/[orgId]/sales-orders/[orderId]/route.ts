@@ -1,37 +1,14 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
+import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { withOrgAuth, notFound } from "@/backend/utils/with-org-auth";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string; orderId: string }> }
-) {
+export const DELETE = withOrgAuth<{ orderId: string }>(async (_request, { orgId, params }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId, orderId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
+    const { orderId } = params;
 
     // Check if sales order exists and belongs to organization
     const order = await prisma.salesOrder.findUnique({
@@ -39,10 +16,7 @@ export async function DELETE(
     });
 
     if (!order || order.organizationId !== orgId) {
-      return NextResponse.json(
-        { error: "Sales order not found" },
-        { status: 404 }
-      );
+      return notFound("Sales order not found");
     }
 
     // Delete sales order items first (if not cascading)
@@ -63,4 +37,4 @@ export async function DELETE(
       { status: 500 }
     );
   }
-}
+});

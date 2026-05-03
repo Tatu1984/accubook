@@ -128,15 +128,17 @@ function LoginForm() {
           </form>
         </Card>
 
-        <Card className="mt-4 bg-slate-50 dark:bg-slate-900 border-dashed">
-          <CardContent className="pt-4 pb-4">
-            <p className="text-sm font-medium text-center mb-2">Demo Credentials</p>
-            <div className="text-sm text-muted-foreground space-y-1">
-              <p><span className="font-medium">Email:</span> admin@accubooks.com</p>
-              <p><span className="font-medium">Password:</span> admin123</p>
-            </div>
-          </CardContent>
-        </Card>
+        {process.env.NEXT_PUBLIC_DEMO === "true" && (
+          <Card className="mt-4 bg-slate-50 dark:bg-slate-900 border-dashed">
+            <CardContent className="pt-4 pb-4">
+              <p className="text-sm font-medium text-center mb-2">Demo Credentials</p>
+              <div className="text-sm text-muted-foreground space-y-1">
+                <p><span className="font-medium">Email:</span> admin@accubooks.com</p>
+                <p><span className="font-medium">Password:</span> admin123</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <p className="mt-6 text-center text-sm text-muted-foreground">
           Enterprise Accounting Platform

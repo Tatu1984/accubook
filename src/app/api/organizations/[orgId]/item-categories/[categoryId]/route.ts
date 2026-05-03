@@ -1,12 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
+import { NextResponse } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-import { z } from "zod";
 
 const updateCategorySchema = z.object({
   name: z.string().min(1).optional(),
@@ -15,20 +14,11 @@ const updateCategorySchema = z.object({
   sacCode: z.string().optional().nullable(),
   parentId: z.string().optional().nullable(),
   isActive: z.boolean().optional(),
-});
+}).strict();
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string; categoryId: string }> }
-) {
+export const GET = withOrgAuth<{ categoryId: string }>(async (_request, { orgId, params }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId, categoryId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { categoryId } = params;
 
     const category = await prisma.itemCategory.findFirst({
       where: {
@@ -57,7 +47,7 @@ export async function GET(
     });
 
     if (!category) {
-      return NextResponse.json({ error: "Category not found" }, { status: 404 });
+      return notFound("Category not found");
     }
 
     return NextResponse.json(category);
@@ -68,21 +58,11 @@ export async function GET(
       { status: 500 }
     );
   }
-}
+});
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string; categoryId: string }> }
-) {
+export const PATCH = withOrgAuth<{ categoryId: string }>(async (request, { orgId, params }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId, categoryId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
+    const { categoryId } = params;
     const body = await request.json();
     const validatedData = updateCategorySchema.parse(body);
 
@@ -95,7 +75,7 @@ export async function PATCH(
     });
 
     if (!existingCategory) {
-      return NextResponse.json({ error: "Category not found" }, { status: 404 });
+      return notFound("Category not found");
     }
 
     // Check for name uniqueness if name is being changed
@@ -109,19 +89,13 @@ export async function PATCH(
       });
 
       if (nameExists) {
-        return NextResponse.json(
-          { error: "A category with this name already exists" },
-          { status: 400 }
-        );
+        return badRequest("A category with this name already exists");
       }
     }
 
     // Prevent circular parent reference
     if (validatedData.parentId === categoryId) {
-      return NextResponse.json(
-        { error: "Category cannot be its own parent" },
-        { status: 400 }
-      );
+      return badRequest("Category cannot be its own parent");
     }
 
     const category = await prisma.itemCategory.update({
@@ -140,10 +114,7 @@ export async function PATCH(
     return NextResponse.json(category);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: "Validation failed", details: error.issues },
-        { status: 400 }
-      );
+      return badRequest("Validation failed", error.issues);
     }
     console.error("Error updating category:", error);
     return NextResponse.json(
@@ -151,20 +122,11 @@ export async function PATCH(
       { status: 500 }
     );
   }
-}
+});
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string; categoryId: string }> }
-) {
+export const DELETE = withOrgAuth<{ categoryId: string }>(async (_request, { orgId, params }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId, categoryId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { categoryId } = params;
 
     // Check if category exists
     const category = await prisma.itemCategory.findFirst({
@@ -175,7 +137,7 @@ export async function DELETE(
     });
 
     if (!category) {
-      return NextResponse.json({ error: "Category not found" }, { status: 404 });
+      return notFound("Category not found");
     }
 
     // Check if category has items or children
@@ -209,4 +171,4 @@ export async function DELETE(
       { status: 500 }
     );
   }
-}
+});

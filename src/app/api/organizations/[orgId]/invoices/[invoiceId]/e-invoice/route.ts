@@ -1,7 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
+import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
 import QRCode from "qrcode";
 
 export const runtime = "nodejs";
@@ -134,31 +133,9 @@ function generateIRN(invoiceNumber: string, sellerGstin: string, fiscalYear: str
   return `${hashStr}${Date.now().toString(16)}`.substring(0, 64).toUpperCase();
 }
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string; invoiceId: string }> }
-) {
+export const GET = withOrgAuth<{ invoiceId: string }>(async (_request, { orgId, params }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId, invoiceId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
+    const { invoiceId } = params;
 
     // Get invoice with e-invoice details
     const invoice = await prisma.invoice.findFirst({
@@ -175,7 +152,7 @@ export async function GET(
     });
 
     if (!invoice) {
-      return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+      return notFound("Invoice not found");
     }
 
     return NextResponse.json({
@@ -191,34 +168,11 @@ export async function GET(
     console.error("Error fetching e-invoice:", error);
     return NextResponse.json({ error: "Failed to fetch e-invoice" }, { status: 500 });
   }
-}
+});
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string; invoiceId: string }> }
-) {
+export const POST = withOrgAuth<{ invoiceId: string }>(async (request, { orgId, params, userId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId, invoiceId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
+    const { invoiceId } = params;
     const body = await request.json();
     const { action = "generate" } = body;
 
@@ -243,7 +197,7 @@ export async function POST(
     });
 
     if (!invoice) {
-      return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+      return notFound("Invoice not found");
     }
 
     if (action === "generate") {
@@ -257,7 +211,7 @@ export async function POST(
 
       // Validate required fields
       if (!invoice.organization.gstNo) {
-        return NextResponse.json({ error: "Seller GSTIN required" }, { status: 400 });
+        return badRequest("Seller GSTIN required");
       }
 
       // Build e-invoice JSON
@@ -382,7 +336,7 @@ export async function POST(
       });
 
       // Update invoice with e-invoice details
-      const updatedInvoice = await prisma.invoice.update({
+      await prisma.invoice.update({
         where: { id: invoiceId },
         data: {
           irnNumber,
@@ -395,7 +349,7 @@ export async function POST(
       await prisma.auditLog.create({
         data: {
           organizationId: orgId,
-          userId: session.user.id,
+          userId,
           action: "CREATE",
           entityType: "E_INVOICE",
           entityId: invoiceId,
@@ -419,12 +373,12 @@ export async function POST(
 
     if (action === "cancel") {
       if (!invoice.irnNumber || invoice.eInvoiceStatus !== "GENERATED") {
-        return NextResponse.json({ error: "No e-invoice to cancel" }, { status: 400 });
+        return badRequest("No e-invoice to cancel");
       }
 
       const { reason } = body;
       if (!reason) {
-        return NextResponse.json({ error: "Cancellation reason required" }, { status: 400 });
+        return badRequest("Cancellation reason required");
       }
 
       // In production, this would call NIC API to cancel
@@ -439,7 +393,7 @@ export async function POST(
       await prisma.auditLog.create({
         data: {
           organizationId: orgId,
-          userId: session.user.id,
+          userId,
           action: "UPDATE",
           entityType: "E_INVOICE",
           entityId: invoiceId,
@@ -455,9 +409,9 @@ export async function POST(
       });
     }
 
-    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+    return badRequest("Invalid action");
   } catch (error) {
     console.error("Error processing e-invoice:", error);
     return NextResponse.json({ error: "Failed to process e-invoice" }, { status: 500 });
   }
-}
+});

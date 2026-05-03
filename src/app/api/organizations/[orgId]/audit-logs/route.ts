@@ -1,46 +1,15 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
+import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { withOrgAuth, forbidden, hasPermission } from "@/backend/utils/with-org-auth";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const GET = withOrgAuth(async (request, { orgId, orgUser }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-      include: { role: true },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
-    // Only allow users with admin/owner role to view audit logs
-    const permissions = orgUser.role?.permissions as string[] | null;
-    if (!permissions?.includes("view_settings") && orgUser.role?.name !== "Owner") {
-      return NextResponse.json(
-        { error: "You don't have permission to view audit logs" },
-        { status: 403 }
-      );
+    if (!hasPermission(orgUser, "audit-logs", "read")) {
+      return forbidden("You don't have permission to view audit logs");
     }
 
     const { searchParams } = new URL(request.url);
@@ -130,4 +99,4 @@ export async function GET(
       { status: 500 }
     );
   }
-}
+});

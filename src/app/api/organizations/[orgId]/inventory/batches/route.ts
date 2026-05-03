@@ -1,8 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
-import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 import { z } from "zod";
+import { prisma } from "@/backend/database/client";
+import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,34 +23,10 @@ const updateBatchSchema = z.object({
   costPrice: z.number().nonnegative().optional(),
   sellingPrice: z.number().nonnegative().optional(),
   status: z.enum(["ACTIVE", "EXPIRED", "CONSUMED"]).optional(),
-});
+}).strict();
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const GET = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const { searchParams } = new URL(request.url);
     const itemId = searchParams.get("itemId");
     const warehouseId = searchParams.get("warehouseId");
@@ -205,42 +180,15 @@ export async function GET(
     console.error("Error fetching batches:", error);
     return NextResponse.json({ error: "Failed to fetch batches" }, { status: 500 });
   }
-}
+});
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const POST = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const body = await request.json();
     const validationResult = createBatchSchema.safeParse(body);
 
     if (!validationResult.success) {
-      return NextResponse.json(
-        { error: "Validation failed", details: validationResult.error.issues },
-        { status: 400 }
-      );
+      return badRequest("Validation failed", validationResult.error.issues);
     }
 
     const data = validationResult.data;
@@ -251,11 +199,11 @@ export async function POST(
     });
 
     if (!item) {
-      return NextResponse.json({ error: "Item not found" }, { status: 404 });
+      return notFound("Item not found");
     }
 
     if (!item.trackBatch) {
-      return NextResponse.json({ error: "Item does not have batch tracking enabled" }, { status: 400 });
+      return badRequest("Item does not have batch tracking enabled");
     }
 
     // Verify warehouse belongs to org
@@ -264,7 +212,7 @@ export async function POST(
     });
 
     if (!warehouse) {
-      return NextResponse.json({ error: "Warehouse not found" }, { status: 404 });
+      return notFound("Warehouse not found");
     }
 
     // Check for duplicate batch number
@@ -279,7 +227,7 @@ export async function POST(
     });
 
     if (existingBatch) {
-      return NextResponse.json({ error: "Batch number already exists for this item in this warehouse" }, { status: 400 });
+      return badRequest("Batch number already exists for this item in this warehouse");
     }
 
     // Determine initial status
@@ -340,34 +288,20 @@ export async function POST(
     console.error("Error creating batch:", error);
     return NextResponse.json({ error: "Failed to create batch" }, { status: 500 });
   }
-}
+});
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const PATCH = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     const body = await request.json();
     const { batchId, ...updateData } = body;
 
     if (!batchId) {
-      return NextResponse.json({ error: "Batch ID required" }, { status: 400 });
+      return badRequest("Batch ID required");
     }
 
     const validationResult = updateBatchSchema.safeParse(updateData);
     if (!validationResult.success) {
-      return NextResponse.json(
-        { error: "Validation failed", details: validationResult.error.issues },
-        { status: 400 }
-      );
+      return badRequest("Validation failed", validationResult.error.issues);
     }
 
     // Verify batch belongs to org
@@ -379,7 +313,7 @@ export async function PATCH(
     });
 
     if (!batch) {
-      return NextResponse.json({ error: "Batch not found" }, { status: 404 });
+      return notFound("Batch not found");
     }
 
     const data = validationResult.data;
@@ -415,4 +349,4 @@ export async function PATCH(
     console.error("Error updating batch:", error);
     return NextResponse.json({ error: "Failed to update batch" }, { status: 500 });
   }
-}
+});

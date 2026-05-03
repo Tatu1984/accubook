@@ -1,12 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
+import { NextResponse } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-import { z } from "zod";
 
 const createExpenseClaimSchema = z.object({
   employeeId: z.string().min(1, "Employee is required"),
@@ -18,32 +17,8 @@ const createExpenseClaimSchema = z.object({
   notes: z.string().optional(),
 });
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const GET = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const { searchParams } = new URL(request.url);
     const employeeId = searchParams.get("employeeId");
     const status = searchParams.get("status");
@@ -110,34 +85,10 @@ export async function GET(
       { status: 500 }
     );
   }
-}
+});
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const POST = withOrgAuth(async (request, { orgId, userId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const body = await request.json();
     const validatedData = createExpenseClaimSchema.parse(body);
 
@@ -150,10 +101,7 @@ export async function POST(
     });
 
     if (!employee) {
-      return NextResponse.json(
-        { error: "Employee not found" },
-        { status: 404 }
-      );
+      return notFound("Employee not found");
     }
 
     // Generate claim number
@@ -170,7 +118,7 @@ export async function POST(
     const claim = await prisma.expenseClaim.create({
       data: {
         employeeId: validatedData.employeeId,
-        userId: session.user.id,
+        userId,
         claimNumber,
         date: validatedData.date,
         category: validatedData.category,
@@ -189,10 +137,7 @@ export async function POST(
     return NextResponse.json(claim, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: "Validation failed", details: error.issues },
-        { status: 400 }
-      );
+      return badRequest("Validation failed", error.issues);
     }
     console.error("Error creating expense claim:", error);
     return NextResponse.json(
@@ -200,43 +145,15 @@ export async function POST(
       { status: 500 }
     );
   }
-}
+});
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const PATCH = withOrgAuth(async (request, { orgId, userId, session }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-      include: { role: true },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const body = await request.json();
     const { claimId, action, notes } = body;
 
     if (!claimId || !action) {
-      return NextResponse.json(
-        { error: "Claim ID and action are required" },
-        { status: 400 }
-      );
+      return badRequest("Claim ID and action are required");
     }
 
     const claim = await prisma.expenseClaim.findFirst({
@@ -247,21 +164,18 @@ export async function PATCH(
     });
 
     if (!claim) {
-      return NextResponse.json(
-        { error: "Expense claim not found" },
-        { status: 404 }
-      );
+      return notFound("Expense claim not found");
     }
 
     const updateData: Record<string, unknown> = {};
 
     if (action === "APPROVE") {
       updateData.status = "APPROVED";
-      updateData.approvedBy = session.user.name || session.user.id;
+      updateData.approvedBy = session.user?.name || userId;
       updateData.approvedAt = new Date();
     } else if (action === "REJECT") {
       updateData.status = "REJECTED";
-      updateData.approvedBy = session.user.name || session.user.id;
+      updateData.approvedBy = session.user?.name || userId;
       updateData.approvedAt = new Date();
     } else if (action === "REIMBURSE") {
       updateData.status = "REIMBURSED";
@@ -289,4 +203,4 @@ export async function PATCH(
       { status: 500 }
     );
   }
-}
+});

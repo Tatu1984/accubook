@@ -1,12 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
+import { NextResponse } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-import { z } from "zod";
 
 const createWorkflowSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -25,34 +24,10 @@ const processApprovalSchema = z.object({
   approvalId: z.string().min(1, "Approval ID is required"),
   action: z.enum(["APPROVE", "REJECT"]),
   comments: z.string().optional(),
-});
+}).strict();
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const GET = withOrgAuth(async (request, { orgId, userId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const { searchParams } = new URL(request.url);
     const view = searchParams.get("view") || "workflows";
     const entityType = searchParams.get("entityType");
@@ -63,7 +38,7 @@ export async function GET(
     if (view === "pending") {
       // Get pending approvals for current user
       const where: Record<string, unknown> = {
-        approverId: session.user.id,
+        approverId: userId,
         status: "PENDING",
       };
 
@@ -103,8 +78,8 @@ export async function GET(
       // Get approval history
       const where: Record<string, unknown> = {
         OR: [
-          { approverId: session.user.id },
-          { requesterId: session.user.id },
+          { approverId: userId },
+          { requesterId: userId },
         ],
         status: { not: "PENDING" },
       };
@@ -192,37 +167,10 @@ export async function GET(
       { status: 500 }
     );
   }
-}
+});
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const POST = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-      include: {
-        role: true,
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const body = await request.json();
     const validatedData = createWorkflowSchema.parse(body);
 
@@ -235,10 +183,7 @@ export async function POST(
     });
 
     if (existingWorkflow) {
-      return NextResponse.json(
-        { error: "Workflow with this name already exists" },
-        { status: 400 }
-      );
+      return badRequest("Workflow with this name already exists");
     }
 
     const workflow = await prisma.approvalWorkflow.create({
@@ -267,10 +212,7 @@ export async function POST(
     return NextResponse.json(workflow, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: "Validation failed", details: error.issues },
-        { status: 400 }
-      );
+      return badRequest("Validation failed", error.issues);
     }
     console.error("Error creating workflow:", error);
     return NextResponse.json(
@@ -278,34 +220,10 @@ export async function POST(
       { status: 500 }
     );
   }
-}
+});
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const PATCH = withOrgAuth(async (request, { userId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const body = await request.json();
 
     // Check if this is processing an approval
@@ -317,15 +235,12 @@ export async function PATCH(
         where: {
           id: validatedData.approvalId,
           status: "PENDING",
-          approverId: session.user.id,
+          approverId: userId,
         },
       });
 
       if (!approval) {
-        return NextResponse.json(
-          { error: "Approval not found or you don't have permission" },
-          { status: 404 }
-        );
+        return notFound("Approval not found or you don't have permission");
       }
 
       const updatedApproval = await prisma.approval.update({
@@ -348,16 +263,10 @@ export async function PATCH(
       return NextResponse.json(updatedApproval);
     }
 
-    return NextResponse.json(
-      { error: "Invalid request" },
-      { status: 400 }
-    );
+    return badRequest("Invalid request");
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: "Validation failed", details: error.issues },
-        { status: 400 }
-      );
+      return badRequest("Validation failed", error.issues);
     }
     console.error("Error processing approval:", error);
     return NextResponse.json(
@@ -365,45 +274,15 @@ export async function PATCH(
       { status: 500 }
     );
   }
-}
+});
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const DELETE = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-      include: {
-        role: true,
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const { searchParams } = new URL(request.url);
     const workflowId = searchParams.get("workflowId");
 
     if (!workflowId) {
-      return NextResponse.json(
-        { error: "Workflow ID is required" },
-        { status: 400 }
-      );
+      return badRequest("Workflow ID is required");
     }
 
     // Verify workflow exists and belongs to organization
@@ -415,10 +294,7 @@ export async function DELETE(
     });
 
     if (!workflow) {
-      return NextResponse.json(
-        { error: "Workflow not found" },
-        { status: 404 }
-      );
+      return notFound("Workflow not found");
     }
 
     // Delete steps first, then workflow
@@ -439,4 +315,4 @@ export async function DELETE(
       { status: 500 }
     );
   }
-}
+});

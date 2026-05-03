@@ -1,9 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
-import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 import { z } from "zod";
 import * as bwipjs from "bwip-js";
+import { prisma } from "@/backend/database/client";
+import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -108,32 +107,8 @@ function calculateCheckDigit(code: string, type: "ean13" | "ean8" | "upca"): str
   return code + checkDigit;
 }
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const GET = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const { searchParams } = new URL(request.url);
     const view = searchParams.get("view") || "formats";
     const itemId = searchParams.get("itemId");
@@ -205,7 +180,7 @@ export async function GET(
       });
 
       if (!item) {
-        return NextResponse.json({ error: "Item not found" }, { status: 404 });
+        return notFound("Item not found");
       }
 
       const barcodeText = item.barcode || item.sku || generateBarcodeNumber();
@@ -233,56 +208,29 @@ export async function GET(
           image: `data:image/png;base64,${base64}`,
         });
       } catch (barcodeError) {
-        return NextResponse.json({
-          error: "Failed to generate barcode",
-          details: barcodeError instanceof Error ? barcodeError.message : "Unknown error",
-        }, { status: 400 });
+        return badRequest(
+          "Failed to generate barcode",
+          barcodeError instanceof Error ? barcodeError.message : "Unknown error"
+        );
       }
     }
 
-    return NextResponse.json({ error: "Invalid view" }, { status: 400 });
+    return badRequest("Invalid view");
   } catch (error) {
     console.error("Error:", error);
     return NextResponse.json({ error: "Failed to process request" }, { status: 500 });
   }
-}
+});
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const POST = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const body = await request.json();
     const { action = "generate" } = body;
 
     if (action === "generate") {
       const validationResult = generateBarcodeSchema.safeParse(body);
       if (!validationResult.success) {
-        return NextResponse.json(
-          { error: "Validation failed", details: validationResult.error.issues },
-          { status: 400 }
-        );
+        return badRequest("Validation failed", validationResult.error.issues);
       }
 
       const { text, format, height, scale, includeText, textSize } = validationResult.data;
@@ -290,7 +238,7 @@ export async function POST(
       // Validate text for specific formats
       const validation = validateBarcodeText(text, format);
       if (!validation.valid) {
-        return NextResponse.json({ error: validation.error }, { status: 400 });
+        return badRequest(validation.error || "Invalid barcode text");
       }
 
       try {
@@ -312,20 +260,17 @@ export async function POST(
           image: `data:image/png;base64,${base64}`,
         });
       } catch (barcodeError) {
-        return NextResponse.json({
-          error: "Failed to generate barcode",
-          details: barcodeError instanceof Error ? barcodeError.message : "Unknown error",
-        }, { status: 400 });
+        return badRequest(
+          "Failed to generate barcode",
+          barcodeError instanceof Error ? barcodeError.message : "Unknown error"
+        );
       }
     }
 
     if (action === "bulk-generate") {
       const validationResult = bulkGenerateSchema.safeParse(body);
       if (!validationResult.success) {
-        return NextResponse.json(
-          { error: "Validation failed", details: validationResult.error.issues },
-          { status: 400 }
-        );
+        return badRequest("Validation failed", validationResult.error.issues);
       }
 
       const { items, format, width, height, includeText } = validationResult.data;
@@ -373,7 +318,7 @@ export async function POST(
       const { itemId, barcode, autoGenerate } = body;
 
       if (!itemId) {
-        return NextResponse.json({ error: "Item ID required" }, { status: 400 });
+        return badRequest("Item ID required");
       }
 
       const item = await prisma.item.findFirst({
@@ -381,7 +326,7 @@ export async function POST(
       });
 
       if (!item) {
-        return NextResponse.json({ error: "Item not found" }, { status: 404 });
+        return notFound("Item not found");
       }
 
       let barcodeValue = barcode;
@@ -405,7 +350,7 @@ export async function POST(
       const { itemIds, prefix } = body;
 
       if (!Array.isArray(itemIds) || itemIds.length === 0) {
-        return NextResponse.json({ error: "Item IDs required" }, { status: 400 });
+        return badRequest("Item IDs required");
       }
 
       const results = [];
@@ -446,10 +391,10 @@ export async function POST(
       const { countryCode = "590", companyCode, productCode } = body;
 
       if (!companyCode || !productCode) {
-        return NextResponse.json({
-          error: "Company code and product code required",
-          example: { countryCode: "590", companyCode: "12345", productCode: "6789" },
-        }, { status: 400 });
+        return badRequest(
+          "Company code and product code required",
+          { example: { countryCode: "590", companyCode: "12345", productCode: "6789" } }
+        );
       }
 
       const baseCode = `${countryCode}${companyCode}${productCode}`.substring(0, 12).padEnd(12, "0");
@@ -485,7 +430,7 @@ export async function POST(
       const { items, labelSize = "standard", columns = 3, rows = 10 } = body;
 
       if (!Array.isArray(items) || items.length === 0) {
-        return NextResponse.json({ error: "Items required" }, { status: 400 });
+        return badRequest("Items required");
       }
 
       const labelSizes = {
@@ -534,9 +479,9 @@ export async function POST(
       });
     }
 
-    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+    return badRequest("Invalid action");
   } catch (error) {
     console.error("Error:", error);
     return NextResponse.json({ error: "Failed to process request" }, { status: 500 });
   }
-}
+});

@@ -1,7 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
+import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import * as XLSX from "xlsx";
 
 export const runtime = "nodejs";
@@ -10,32 +9,8 @@ export const dynamic = "force-dynamic";
 type ExportFormat = "xlsx" | "csv" | "json";
 type ReportType = "trial-balance" | "profit-loss" | "balance-sheet" | "cash-flow" | "aging" | "invoices" | "bills" | "ledger";
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const POST = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const body = await request.json();
     const { reportType, format = "xlsx", filters = {} } = body as {
       reportType: ReportType;
@@ -325,7 +300,7 @@ export async function POST(
       case "ledger": {
         const ledgerId = filters.ledgerId;
         if (!ledgerId) {
-          return NextResponse.json({ error: "Ledger ID required" }, { status: 400 });
+          return badRequest("Ledger ID required");
         }
 
         const ledger = await prisma.ledger.findUnique({
@@ -334,7 +309,7 @@ export async function POST(
         });
 
         if (!ledger) {
-          return NextResponse.json({ error: "Ledger not found" }, { status: 404 });
+          return notFound("Ledger not found");
         }
 
         sheetName = `Ledger - ${ledger.name}`;
@@ -383,7 +358,7 @@ export async function POST(
       }
 
       default:
-        return NextResponse.json({ error: "Invalid report type" }, { status: 400 });
+        return badRequest("Invalid report type");
     }
 
     // Generate file based on format
@@ -436,4 +411,4 @@ export async function POST(
       { status: 500 }
     );
   }
-}
+});

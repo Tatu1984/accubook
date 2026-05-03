@@ -1,12 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/backend/services/auth.service";
+import { NextResponse } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/backend/database/client";
-import { cookies } from "next/headers";
+import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-import { z } from "zod";
 
 const createLeaveSchema = z.object({
   employeeId: z.string().min(1, "Employee is required"),
@@ -19,34 +18,10 @@ const createLeaveSchema = z.object({
 const approveLeaveSchema = z.object({
   status: z.enum(["APPROVED", "REJECTED"]),
   notes: z.string().optional(),
-});
+}).strict();
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const GET = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const { searchParams } = new URL(request.url);
     const employeeId = searchParams.get("employeeId");
     const status = searchParams.get("status");
@@ -137,34 +112,10 @@ export async function GET(
       { status: 500 }
     );
   }
-}
+});
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const POST = withOrgAuth(async (request, { orgId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const body = await request.json();
     const validatedData = createLeaveSchema.parse(body);
 
@@ -177,10 +128,7 @@ export async function POST(
     });
 
     if (!employee) {
-      return NextResponse.json(
-        { error: "Employee not found" },
-        { status: 404 }
-      );
+      return notFound("Employee not found");
     }
 
     // Verify leave type exists
@@ -191,10 +139,7 @@ export async function POST(
     });
 
     if (!leaveType) {
-      return NextResponse.json(
-        { error: "Leave type not found" },
-        { status: 404 }
-      );
+      return notFound("Leave type not found");
     }
 
     // Calculate days
@@ -218,10 +163,7 @@ export async function POST(
     });
 
     if (overlapping) {
-      return NextResponse.json(
-        { error: "Leave dates overlap with existing leave request" },
-        { status: 400 }
-      );
+      return badRequest("Leave dates overlap with existing leave request");
     }
 
     const leave = await prisma.leave.create({
@@ -250,10 +192,7 @@ export async function POST(
     return NextResponse.json(leave, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: "Validation failed", details: error.issues },
-        { status: 400 }
-      );
+      return badRequest("Validation failed", error.issues);
     }
     console.error("Error creating leave:", error);
     return NextResponse.json(
@@ -261,42 +200,15 @@ export async function POST(
       { status: 500 }
     );
   }
-}
+});
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+export const PATCH = withOrgAuth(async (request, { orgId, userId }) => {
   try {
-    await cookies();
-    const session = await auth();
-    const { orgId } = await params;
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
-        },
-      },
-    });
-
-    if (!orgUser) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     const body = await request.json();
     const { leaveId, ...updateData } = body;
 
     if (!leaveId) {
-      return NextResponse.json(
-        { error: "Leave ID is required" },
-        { status: 400 }
-      );
+      return badRequest("Leave ID is required");
     }
 
     const validatedData = approveLeaveSchema.parse(updateData);
@@ -310,22 +222,16 @@ export async function PATCH(
     });
 
     if (!leave) {
-      return NextResponse.json(
-        { error: "Leave not found" },
-        { status: 404 }
-      );
+      return notFound("Leave not found");
     }
 
     if (leave.status !== "PENDING") {
-      return NextResponse.json(
-        { error: "Can only approve/reject pending leaves" },
-        { status: 400 }
-      );
+      return badRequest("Can only approve/reject pending leaves");
     }
 
     // Get approver's name for storing
     const approver = await prisma.user.findUnique({
-      where: { id: session.user.id },
+      where: { id: userId },
       select: { name: true },
     });
 
@@ -333,7 +239,7 @@ export async function PATCH(
       where: { id: leaveId },
       data: {
         status: validatedData.status,
-        approvedBy: approver?.name || session.user.id,
+        approvedBy: approver?.name || userId,
         notes: validatedData.notes,
         approvedAt: new Date(),
       },
@@ -353,10 +259,7 @@ export async function PATCH(
     return NextResponse.json(updatedLeave);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: "Validation failed", details: error.issues },
-        { status: 400 }
-      );
+      return badRequest("Validation failed", error.issues);
     }
     console.error("Error updating leave:", error);
     return NextResponse.json(
@@ -364,4 +267,4 @@ export async function PATCH(
       { status: 500 }
     );
   }
-}
+});
