@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -39,7 +40,7 @@ export const GET = withOrgAuth<{ branchId: string }>(async (_request, { orgId, p
 
     return NextResponse.json(branch);
   } catch (error) {
-    console.error("Error fetching branch:", error);
+    logger.error({ err: error }, "Error fetching branch");
     return NextResponse.json(
       { error: "Failed to fetch branch" },
       { status: 500 }
@@ -83,7 +84,7 @@ export const PATCH = withOrgAuth<{ branchId: string }>(async (request, { orgId, 
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
     }
-    console.error("Error updating branch:", error);
+    logger.error({ err: error }, "Error updating branch");
     return NextResponse.json(
       { error: "Failed to update branch" },
       { status: 500 }
@@ -108,7 +109,7 @@ export const DELETE = withOrgAuth<{ branchId: string }>(async (_request, { orgId
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Error deleting branch:", error);
+    logger.error({ err: error }, "Error deleting branch");
     return NextResponse.json(
       { error: "Failed to delete branch" },
       { status: 500 }

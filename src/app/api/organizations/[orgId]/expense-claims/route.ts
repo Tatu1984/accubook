@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -79,7 +80,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       },
     });
   } catch (error) {
-    console.error("Error fetching expense claims:", error);
+    logger.error({ err: error }, "Error fetching expense claims");
     return NextResponse.json(
       { error: "Failed to fetch expense claims" },
       { status: 500 }
@@ -139,7 +140,7 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
     }
-    console.error("Error creating expense claim:", error);
+    logger.error({ err: error }, "Error creating expense claim");
     return NextResponse.json(
       { error: "Failed to create expense claim" },
       { status: 500 }
@@ -197,7 +198,7 @@ export const PATCH = withOrgAuth(async (request, { orgId, userId, session }) => 
 
     return NextResponse.json(updatedClaim);
   } catch (error) {
-    console.error("Error updating expense claim:", error);
+    logger.error({ err: error }, "Error updating expense claim");
     return NextResponse.json(
       { error: "Failed to update expense claim" },
       { status: 500 }

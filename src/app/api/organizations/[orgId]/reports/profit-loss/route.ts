@@ -3,6 +3,7 @@ import { prisma } from "@/backend/database/client";
 import { withOrgAuth } from "@/backend/utils/with-org-auth";
 import { D, sum, toNumber } from "@/backend/utils/money";
 import { Prisma } from "@/generated/prisma";
+import { logger } from "@/backend/utils/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -257,7 +258,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       },
     });
   } catch (error) {
-    console.error("Error generating P&L:", error);
+    logger.error({ err: error }, "Error generating P&L");
     return NextResponse.json(
       { error: "Failed to generate Profit & Loss statement" },
       { status: 500 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -59,7 +60,7 @@ export const GET = withOrgAuth<{ voucherId: string }>(async (_request, { orgId, 
 
     return NextResponse.json(voucher);
   } catch (error) {
-    console.error("Error fetching voucher:", error);
+    logger.error({ err: error }, "Error fetching voucher");
     return NextResponse.json(
       { error: "Failed to fetch voucher" },
       { status: 500 }
@@ -124,7 +125,7 @@ export const PATCH = withOrgAuth<{ voucherId: string }>(async (request, { orgId,
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
     }
-    console.error("Error updating voucher:", error);
+    logger.error({ err: error }, "Error updating voucher");
     return NextResponse.json(
       { error: "Failed to update voucher" },
       { status: 500 }
@@ -165,7 +166,7 @@ export const DELETE = withOrgAuth<{ voucherId: string }>(async (_request, { orgI
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Error deleting voucher:", error);
+    logger.error({ err: error }, "Error deleting voucher");
     return NextResponse.json(
       { error: "Failed to delete voucher" },
       { status: 500 }

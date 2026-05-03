@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
+import { logger } from "@/backend/utils/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -177,7 +178,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       },
     });
   } catch (error) {
-    console.error("Error fetching batches:", error);
+    logger.error({ err: error }, "Error fetching batches");
     return NextResponse.json({ error: "Failed to fetch batches" }, { status: 500 });
   }
 });
@@ -285,7 +286,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
       message: "Batch created successfully",
     }, { status: 201 });
   } catch (error) {
-    console.error("Error creating batch:", error);
+    logger.error({ err: error }, "Error creating batch");
     return NextResponse.json({ error: "Failed to create batch" }, { status: 500 });
   }
 });
@@ -346,7 +347,7 @@ export const PATCH = withOrgAuth(async (request, { orgId }) => {
       message: "Batch updated successfully",
     });
   } catch (error) {
-    console.error("Error updating batch:", error);
+    logger.error({ err: error }, "Error updating batch");
     return NextResponse.json({ error: "Failed to update batch" }, { status: 500 });
   }
 });

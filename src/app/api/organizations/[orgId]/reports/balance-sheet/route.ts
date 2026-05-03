@@ -3,6 +3,7 @@ import { prisma } from "@/backend/database/client";
 import { withOrgAuth } from "@/backend/utils/with-org-auth";
 import { D, sum } from "@/backend/utils/money";
 import { Prisma } from "@/generated/prisma";
+import { logger } from "@/backend/utils/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -319,7 +320,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       },
     });
   } catch (error) {
-    console.error("Error generating balance sheet:", error);
+    logger.error({ err: error }, "Error generating balance sheet");
     return NextResponse.json(
       { error: "Failed to generate balance sheet" },
       { status: 500 }

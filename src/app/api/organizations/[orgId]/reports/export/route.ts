@@ -4,6 +4,7 @@ import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth
 import { D, sum, toNumber } from "@/backend/utils/money";
 import { Prisma } from "@/generated/prisma";
 import * as XLSX from "xlsx";
+import { logger } from "@/backend/utils/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -409,7 +410,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
       },
     });
   } catch (error) {
-    console.error("Error exporting report:", error);
+    logger.error({ err: error }, "Error exporting report");
     return NextResponse.json(
       { error: "Failed to export report" },
       { status: 500 }

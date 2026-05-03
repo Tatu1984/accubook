@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth } from "@/backend/utils/with-org-auth";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -20,7 +21,7 @@ export const GET = withOrgAuth(async () => {
 
     return NextResponse.json(voucherTypes);
   } catch (error) {
-    console.error("Error fetching voucher types:", error);
+    logger.error({ err: error }, "Error fetching voucher types");
     return NextResponse.json(
       { error: "Failed to fetch voucher types" },
       { status: 500 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { z } from "zod";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -118,7 +119,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       },
     });
   } catch (error) {
-    console.error("Error fetching budgets:", error);
+    logger.error({ err: error }, "Error fetching budgets");
     return NextResponse.json(
       { error: "Failed to fetch budgets" },
       { status: 500 }
@@ -203,7 +204,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
     }
-    console.error("Error creating budget:", error);
+    logger.error({ err: error }, "Error creating budget");
     return NextResponse.json(
       { error: "Failed to create budget" },
       { status: 500 }
@@ -250,7 +251,7 @@ export const PATCH = withOrgAuth(async (request, { orgId }) => {
 
     return NextResponse.json(budget);
   } catch (error) {
-    console.error("Error updating budget:", error);
+    logger.error({ err: error }, "Error updating budget");
     return NextResponse.json(
       { error: "Failed to update budget" },
       { status: 500 }
@@ -285,7 +286,7 @@ export const DELETE = withOrgAuth(async (request, { orgId }) => {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Error deleting budget:", error);
+    logger.error({ err: error }, "Error deleting budget");
     return NextResponse.json(
       { error: "Failed to delete budget" },
       { status: 500 }

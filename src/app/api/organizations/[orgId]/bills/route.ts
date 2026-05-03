@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { D, sum } from "@/backend/utils/money";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -108,7 +109,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       },
     });
   } catch (error) {
-    console.error("Error fetching bills:", error);
+    logger.error({ err: error }, "Error fetching bills");
     return NextResponse.json(
       { error: "Failed to fetch bills" },
       { status: 500 }
@@ -209,7 +210,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
     }
-    console.error("Error creating bill:", error);
+    logger.error({ err: error }, "Error creating bill");
     return NextResponse.json(
       { error: "Failed to create bill" },
       { status: 500 }

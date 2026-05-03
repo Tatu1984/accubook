@@ -14,6 +14,9 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   reactCompiler: true,
   poweredByHeader: false,
+  // pino + thread-stream do worker-thread shenanigans Turbopack can't bundle.
+  // Marking them external means they're loaded at runtime via require(), not bundled.
+  serverExternalPackages: ["pino", "pino-pretty", "thread-stream"],
   async headers() {
     return [
       {

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { z } from "zod";
+import { logger } from "@/backend/utils/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -438,7 +439,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
 
     return badRequest("Invalid return type");
   } catch (error) {
-    console.error("Error computing GST return:", error);
+    logger.error({ err: error }, "Error computing GST return");
     return NextResponse.json({ error: "Failed to compute GST return" }, { status: 500 });
   }
 });

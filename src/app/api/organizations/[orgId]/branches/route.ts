@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -36,7 +37,7 @@ export const GET = withOrgAuth(async (_request, { orgId }) => {
 
     return NextResponse.json(branches);
   } catch (error) {
-    console.error("Error fetching branches:", error);
+    logger.error({ err: error }, "Error fetching branches");
     return NextResponse.json(
       { error: "Failed to fetch branches" },
       { status: 500 }
@@ -75,7 +76,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
     }
-    console.error("Error creating branch:", error);
+    logger.error({ err: error }, "Error creating branch");
     return NextResponse.json(
       { error: "Failed to create branch" },
       { status: 500 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -120,7 +121,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       },
     });
   } catch (error) {
-    console.error("Error fetching invoices:", error);
+    logger.error({ err: error }, "Error fetching invoices");
     return NextResponse.json(
       { error: "Failed to fetch invoices" },
       { status: 500 }
@@ -235,7 +236,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
     }
-    console.error("Error creating invoice:", error);
+    logger.error({ err: error }, "Error creating invoice");
     return NextResponse.json(
       { error: "Failed to create invoice" },
       { status: 500 }

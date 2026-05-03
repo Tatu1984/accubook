@@ -3,6 +3,7 @@ import { prisma } from "@/backend/database/client";
 import { withOrgAuth } from "@/backend/utils/with-org-auth";
 import { D, sum } from "@/backend/utils/money";
 import { Prisma } from "@/generated/prisma";
+import { logger } from "@/backend/utils/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -301,7 +302,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       },
     });
   } catch (error) {
-    console.error("Error generating cash flow:", error);
+    logger.error({ err: error }, "Error generating cash flow");
     return NextResponse.json(
       { error: "Failed to generate cash flow statement" },
       { status: 500 }

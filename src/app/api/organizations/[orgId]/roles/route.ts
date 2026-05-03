@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth } from "@/backend/utils/with-org-auth";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -106,7 +107,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       availablePermissions: AVAILABLE_PERMISSIONS,
     });
   } catch (error) {
-    console.error("Error fetching roles:", error);
+    logger.error({ err: error }, "Error fetching roles");
     return NextResponse.json(
       { error: "Failed to fetch roles" },
       { status: 500 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { env } from "@/config/env";
+import { logger } from "@/backend/utils/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,7 +22,7 @@ export async function GET() {
     dbOk = true;
   } catch (error) {
      
-    console.error("Health check DB ping failed:", error);
+    logger.error({ err: error }, "Health check DB ping failed");
   }
 
   const status = dbOk ? 200 : 503;

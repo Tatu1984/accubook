@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { z } from "zod";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -67,7 +68,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       },
     });
   } catch (error) {
-    console.error("Error fetching GST returns:", error);
+    logger.error({ err: error }, "Error fetching GST returns");
     return NextResponse.json(
       { error: "Failed to fetch GST returns" },
       { status: 500 }
@@ -100,7 +101,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
     }
-    console.error("Error creating GST return:", error);
+    logger.error({ err: error }, "Error creating GST return");
     return NextResponse.json(
       { error: "Failed to create GST return" },
       { status: 500 }
@@ -144,7 +145,7 @@ export const PATCH = withOrgAuth(async (request, { orgId }) => {
 
     return NextResponse.json(gstReturn);
   } catch (error) {
-    console.error("Error updating GST return:", error);
+    logger.error({ err: error }, "Error updating GST return");
     return NextResponse.json(
       { error: "Failed to update GST return" },
       { status: 500 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -52,7 +53,7 @@ export const GET = withOrgAuth<{ categoryId: string }>(async (_request, { orgId,
 
     return NextResponse.json(category);
   } catch (error) {
-    console.error("Error fetching category:", error);
+    logger.error({ err: error }, "Error fetching category");
     return NextResponse.json(
       { error: "Failed to fetch category" },
       { status: 500 }
@@ -116,7 +117,7 @@ export const PATCH = withOrgAuth<{ categoryId: string }>(async (request, { orgId
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
     }
-    console.error("Error updating category:", error);
+    logger.error({ err: error }, "Error updating category");
     return NextResponse.json(
       { error: "Failed to update category" },
       { status: 500 }
@@ -165,7 +166,7 @@ export const DELETE = withOrgAuth<{ categoryId: string }>(async (_request, { org
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Error deleting category:", error);
+    logger.error({ err: error }, "Error deleting category");
     return NextResponse.json(
       { error: "Failed to delete category" },
       { status: 500 }

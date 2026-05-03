@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { z } from "zod";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -67,7 +68,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       },
     });
   } catch (error) {
-    console.error("Error fetching projects:", error);
+    logger.error({ err: error }, "Error fetching projects");
     return NextResponse.json(
       { error: "Failed to fetch projects" },
       { status: 500 }
@@ -113,7 +114,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
     }
-    console.error("Error creating project:", error);
+    logger.error({ err: error }, "Error creating project");
     return NextResponse.json(
       { error: "Failed to create project" },
       { status: 500 }
@@ -137,7 +138,7 @@ export const PATCH = withOrgAuth(async (request) => {
 
     return NextResponse.json(project);
   } catch (error) {
-    console.error("Error updating project:", error);
+    logger.error({ err: error }, "Error updating project");
     return NextResponse.json(
       { error: "Failed to update project" },
       { status: 500 }
@@ -160,7 +161,7 @@ export const DELETE = withOrgAuth(async (request) => {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Error deleting project:", error);
+    logger.error({ err: error }, "Error deleting project");
     return NextResponse.json(
       { error: "Failed to delete project" },
       { status: 500 }

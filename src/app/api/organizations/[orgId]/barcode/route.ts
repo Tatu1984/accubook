@@ -3,6 +3,7 @@ import { z } from "zod";
 import * as bwipjs from "bwip-js";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
+import { logger } from "@/backend/utils/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -217,7 +218,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
 
     return badRequest("Invalid view");
   } catch (error) {
-    console.error("Error:", error);
+    logger.error({ err: error }, "Error");
     return NextResponse.json({ error: "Failed to process request" }, { status: 500 });
   }
 });
@@ -481,7 +482,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
 
     return badRequest("Invalid action");
   } catch (error) {
-    console.error("Error:", error);
+    logger.error({ err: error }, "Error");
     return NextResponse.json({ error: "Failed to process request" }, { status: 500 });
   }
 });

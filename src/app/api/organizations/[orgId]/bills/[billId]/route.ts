@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, notFound } from "@/backend/utils/with-org-auth";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -31,7 +32,7 @@ export const DELETE = withOrgAuth<{ billId: string }>(async (_request, { orgId, 
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Error deleting bill:", error);
+    logger.error({ err: error }, "Error deleting bill");
     return NextResponse.json(
       { error: "Failed to delete bill" },
       { status: 500 }

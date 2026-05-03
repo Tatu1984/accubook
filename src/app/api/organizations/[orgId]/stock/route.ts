@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
 import { D, mul, toNumber } from "@/backend/utils/money";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -158,7 +159,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       });
     }
   } catch (error) {
-    console.error("Error fetching stock:", error);
+    logger.error({ err: error }, "Error fetching stock");
     return NextResponse.json(
       { error: "Failed to fetch stock" },
       { status: 500 }
@@ -328,7 +329,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
     if (error instanceof InsufficientStockError) {
       return badRequest(error.message);
     }
-    console.error("Error processing stock movement:", error);
+    logger.error({ err: error }, "Error processing stock movement");
     return NextResponse.json(
       { error: "Failed to process stock movement" },
       { status: 500 }

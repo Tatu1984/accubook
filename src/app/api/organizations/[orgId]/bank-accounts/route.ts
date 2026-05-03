@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
+import { logger } from "@/backend/utils/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,7 +31,7 @@ export const GET = withOrgAuth(async (_request, { orgId }) => {
 
     return NextResponse.json(bankAccounts);
   } catch (error) {
-    console.error("Error fetching bank accounts:", error);
+    logger.error({ err: error }, "Error fetching bank accounts");
     return NextResponse.json(
       { error: "Failed to fetch bank accounts" },
       { status: 500 }
@@ -74,7 +75,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
 
     return NextResponse.json(bankAccount, { status: 201 });
   } catch (error) {
-    console.error("Error creating bank account:", error);
+    logger.error({ err: error }, "Error creating bank account");
     return NextResponse.json(
       { error: "Failed to create bank account" },
       { status: 500 }
@@ -101,7 +102,7 @@ export const PATCH = withOrgAuth(async (request, { orgId }) => {
 
     return NextResponse.json(bankAccount);
   } catch (error) {
-    console.error("Error updating bank account:", error);
+    logger.error({ err: error }, "Error updating bank account");
     return NextResponse.json(
       { error: "Failed to update bank account" },
       { status: 500 }
@@ -150,7 +151,7 @@ export const DELETE = withOrgAuth(async (request, { orgId }) => {
 
     return NextResponse.json({ message: "Bank account deleted", softDeleted: false });
   } catch (error) {
-    console.error("Error deleting bank account:", error);
+    logger.error({ err: error }, "Error deleting bank account");
     return NextResponse.json(
       { error: "Failed to delete bank account" },
       { status: 500 }

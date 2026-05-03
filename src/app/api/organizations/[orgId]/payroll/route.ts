@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -104,7 +105,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       },
     });
   } catch (error) {
-    console.error("Error fetching payslips:", error);
+    logger.error({ err: error }, "Error fetching payslips");
     return NextResponse.json(
       { error: "Failed to fetch payslips" },
       { status: 500 }
@@ -195,7 +196,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
     }
-    console.error("Error creating payslip:", error);
+    logger.error({ err: error }, "Error creating payslip");
     return NextResponse.json(
       { error: "Failed to create payslip" },
       { status: 500 }

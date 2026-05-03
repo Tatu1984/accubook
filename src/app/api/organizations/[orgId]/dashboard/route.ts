@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth } from "@/backend/utils/with-org-auth";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -239,7 +240,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
 
     return NextResponse.json(dashboardData);
   } catch (error) {
-    console.error("Error fetching dashboard data:", error);
+    logger.error({ err: error }, "Error fetching dashboard data");
     return NextResponse.json(
       { error: "Failed to fetch dashboard data" },
       { status: 500 }

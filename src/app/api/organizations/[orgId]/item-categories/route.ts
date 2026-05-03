@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -18,7 +19,7 @@ export const GET = withOrgAuth(async (_request, { orgId }) => {
 
     return NextResponse.json(categories);
   } catch (error) {
-    console.error("Error fetching item categories:", error);
+    logger.error({ err: error }, "Error fetching item categories");
     return NextResponse.json(
       { error: "Failed to fetch item categories" },
       { status: 500 }
@@ -48,7 +49,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
 
     return NextResponse.json(category, { status: 201 });
   } catch (error) {
-    console.error("Error creating item category:", error);
+    logger.error({ err: error }, "Error creating item category");
     return NextResponse.json(
       { error: "Failed to create item category" },
       { status: 500 }

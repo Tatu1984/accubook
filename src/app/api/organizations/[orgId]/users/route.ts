@@ -3,6 +3,7 @@ import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, forbidden, notFound, hasPermission } from "@/backend/utils/with-org-auth";
+import { logger } from "@/backend/utils/logger";
 
 // Helper: returns true when the target user is the org's last active ADMIN.
 // Used to refuse demote/delete operations that would orphan the organization.
@@ -102,7 +103,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       },
     });
   } catch (error) {
-    console.error("Error fetching users:", error);
+    logger.error({ err: error }, "Error fetching users");
     return NextResponse.json(
       { error: "Failed to fetch users" },
       { status: 500 }
@@ -186,7 +187,7 @@ export const POST = withOrgAuth(async (request, { orgId, orgUser }) => {
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
     }
-    console.error("Error inviting user:", error);
+    logger.error({ err: error }, "Error inviting user");
     return NextResponse.json(
       { error: "Failed to invite user" },
       { status: 500 }
@@ -267,7 +268,7 @@ export const PATCH = withOrgAuth(async (request, { orgId, orgUser: currentOrgUse
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
     }
-    console.error("Error updating user:", error);
+    logger.error({ err: error }, "Error updating user");
     return NextResponse.json(
       { error: "Failed to update user" },
       { status: 500 }
@@ -326,7 +327,7 @@ export const DELETE = withOrgAuth(async (request, { orgId, orgUser: currentOrgUs
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Error removing user:", error);
+    logger.error({ err: error }, "Error removing user");
     return NextResponse.json(
       { error: "Failed to remove user" },
       { status: 500 }

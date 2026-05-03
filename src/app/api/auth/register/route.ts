@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
+import { logger } from "@/backend/utils/logger";
 
 const registerSchema = z.object({
   // User details
@@ -168,7 +169,7 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    console.error("Registration error:", error);
+    logger.error({ err: error }, "Registration error");
     return NextResponse.json(
       { error: "Registration failed" },
       { status: 500 }

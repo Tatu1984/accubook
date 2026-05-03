@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -44,7 +45,7 @@ export const GET = withOrgAuth(async (_request, { orgId }) => {
 
     return NextResponse.json(ledgerGroups);
   } catch (error) {
-    console.error("Error fetching ledger groups:", error);
+    logger.error({ err: error }, "Error fetching ledger groups");
     return NextResponse.json(
       { error: "Failed to fetch ledger groups" },
       { status: 500 }
@@ -91,7 +92,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
     }
-    console.error("Error creating ledger group:", error);
+    logger.error({ err: error }, "Error creating ledger group");
     return NextResponse.json(
       { error: "Failed to create ledger group" },
       { status: 500 }

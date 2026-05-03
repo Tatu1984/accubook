@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
+import { logger } from "@/backend/utils/logger";
 import { D } from "@/backend/utils/money";
 import {
   applyLedgerEntries,
@@ -72,7 +73,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
     });
   } catch (error) {
-    console.error("Error fetching receipts:", error);
+    logger.error({ err: error }, "Error fetching receipts");
     return NextResponse.json({ error: "Failed to fetch receipts" }, { status: 500 });
   }
 });
@@ -248,7 +249,7 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
     if (error instanceof Error && error.message.includes("not configured")) {
       return badRequest(error.message);
     }
-    console.error("Error creating receipt:", error);
+    logger.error({ err: error }, "Error creating receipt");
     return NextResponse.json({ error: "Failed to create receipt" }, { status: 500 });
   }
 });

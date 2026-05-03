@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -161,7 +162,7 @@ export const GET = withOrgAuth(async (request, { orgId, userId }) => {
       });
     }
   } catch (error) {
-    console.error("Error fetching approvals:", error);
+    logger.error({ err: error }, "Error fetching approvals");
     return NextResponse.json(
       { error: "Failed to fetch approvals" },
       { status: 500 }
@@ -214,7 +215,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
     }
-    console.error("Error creating workflow:", error);
+    logger.error({ err: error }, "Error creating workflow");
     return NextResponse.json(
       { error: "Failed to create workflow" },
       { status: 500 }
@@ -268,7 +269,7 @@ export const PATCH = withOrgAuth(async (request, { userId }) => {
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
     }
-    console.error("Error processing approval:", error);
+    logger.error({ err: error }, "Error processing approval");
     return NextResponse.json(
       { error: "Failed to process approval" },
       { status: 500 }
@@ -309,7 +310,7 @@ export const DELETE = withOrgAuth(async (request, { orgId }) => {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Error deleting workflow:", error);
+    logger.error({ err: error }, "Error deleting workflow");
     return NextResponse.json(
       { error: "Failed to delete workflow" },
       { status: 500 }

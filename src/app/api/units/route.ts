@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/backend/services/auth.service";
 import { prisma } from "@/backend/database/client";
 import { cookies } from "next/headers";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -25,7 +26,7 @@ export async function GET() {
 
     return NextResponse.json(units);
   } catch (error) {
-    console.error("Error fetching units:", error);
+    logger.error({ err: error }, "Error fetching units");
     return NextResponse.json(
       { error: "Failed to fetch units" },
       { status: 500 }
@@ -62,7 +63,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(unit, { status: 201 });
   } catch (error) {
-    console.error("Error creating unit:", error);
+    logger.error({ err: error }, "Error creating unit");
     return NextResponse.json(
       { error: "Failed to create unit" },
       { status: 500 }

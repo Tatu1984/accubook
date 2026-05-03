@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { z } from "zod";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -70,7 +71,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       },
     });
   } catch (error) {
-    console.error("Error fetching tax configs:", error);
+    logger.error({ err: error }, "Error fetching tax configs");
     return NextResponse.json(
       { error: "Failed to fetch tax configurations" },
       { status: 500 }
@@ -107,7 +108,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
     }
-    console.error("Error creating tax config:", error);
+    logger.error({ err: error }, "Error creating tax config");
     return NextResponse.json(
       { error: "Failed to create tax configuration" },
       { status: 500 }
@@ -148,7 +149,7 @@ export const PATCH = withOrgAuth(async (request, { orgId }) => {
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
     }
-    console.error("Error updating tax config:", error);
+    logger.error({ err: error }, "Error updating tax config");
     return NextResponse.json(
       { error: "Failed to update tax configuration" },
       { status: 500 }
@@ -183,7 +184,7 @@ export const DELETE = withOrgAuth(async (request, { orgId }) => {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Error deleting tax config:", error);
+    logger.error({ err: error }, "Error deleting tax config");
     return NextResponse.json(
       { error: "Failed to delete tax configuration" },
       { status: 500 }

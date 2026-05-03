@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -58,7 +59,7 @@ export const GET = withOrgAuth<{ warehouseId: string }>(async (_request, { orgId
 
     return NextResponse.json(warehouse);
   } catch (error) {
-    console.error("Error fetching warehouse:", error);
+    logger.error({ err: error }, "Error fetching warehouse");
     return NextResponse.json(
       { error: "Failed to fetch warehouse" },
       { status: 500 }
@@ -131,7 +132,7 @@ export const PATCH = withOrgAuth<{ warehouseId: string }>(async (request, { orgI
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
     }
-    console.error("Error updating warehouse:", error);
+    logger.error({ err: error }, "Error updating warehouse");
     return NextResponse.json(
       { error: "Failed to update warehouse" },
       { status: 500 }
@@ -176,7 +177,7 @@ export const DELETE = withOrgAuth<{ warehouseId: string }>(async (_request, { or
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Error deleting warehouse:", error);
+    logger.error({ err: error }, "Error deleting warehouse");
     return NextResponse.json(
       { error: "Failed to delete warehouse" },
       { status: 500 }

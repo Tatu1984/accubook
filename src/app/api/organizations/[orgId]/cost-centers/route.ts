@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { z } from "zod";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -63,7 +64,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
 
     return NextResponse.json({ data: costCenters });
   } catch (error) {
-    console.error("Error fetching cost centers:", error);
+    logger.error({ err: error }, "Error fetching cost centers");
     return NextResponse.json(
       { error: "Failed to fetch cost centers" },
       { status: 500 }
@@ -105,7 +106,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
     }
-    console.error("Error creating cost center:", error);
+    logger.error({ err: error }, "Error creating cost center");
     return NextResponse.json(
       { error: "Failed to create cost center" },
       { status: 500 }
@@ -129,7 +130,7 @@ export const PATCH = withOrgAuth(async (request) => {
 
     return NextResponse.json(costCenter);
   } catch (error) {
-    console.error("Error updating cost center:", error);
+    logger.error({ err: error }, "Error updating cost center");
     return NextResponse.json(
       { error: "Failed to update cost center" },
       { status: 500 }
@@ -152,7 +153,7 @@ export const DELETE = withOrgAuth(async (request) => {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Error deleting cost center:", error);
+    logger.error({ err: error }, "Error deleting cost center");
     return NextResponse.json(
       { error: "Failed to delete cost center" },
       { status: 500 }

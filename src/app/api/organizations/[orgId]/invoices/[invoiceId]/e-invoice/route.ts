@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
 import QRCode from "qrcode";
+import { logger } from "@/backend/utils/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -165,7 +166,7 @@ export const GET = withOrgAuth<{ invoiceId: string }>(async (_request, { orgId, 
       totalAmount: Number(invoice.totalAmount),
     });
   } catch (error) {
-    console.error("Error fetching e-invoice:", error);
+    logger.error({ err: error }, "Error fetching e-invoice");
     return NextResponse.json({ error: "Failed to fetch e-invoice" }, { status: 500 });
   }
 });
@@ -411,7 +412,7 @@ export const POST = withOrgAuth<{ invoiceId: string }>(async (request, { orgId, 
 
     return badRequest("Invalid action");
   } catch (error) {
-    console.error("Error processing e-invoice:", error);
+    logger.error({ err: error }, "Error processing e-invoice");
     return NextResponse.json({ error: "Failed to process e-invoice" }, { status: 500 });
   }
 });

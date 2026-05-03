@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -57,7 +58,7 @@ export const GET = withOrgAuth(async (request, { orgId, userId }) => {
       },
     });
   } catch (error) {
-    console.error("Error fetching notifications:", error);
+    logger.error({ err: error }, "Error fetching notifications");
     return NextResponse.json(
       { error: "Failed to fetch notifications" },
       { status: 500 }
@@ -120,7 +121,7 @@ export const PATCH = withOrgAuth(async (request, { userId }) => {
 
     return badRequest("Invalid request");
   } catch (error) {
-    console.error("Error updating notification:", error);
+    logger.error({ err: error }, "Error updating notification");
     return NextResponse.json(
       { error: "Failed to update notification" },
       { status: 500 }
@@ -158,7 +159,7 @@ export const DELETE = withOrgAuth(async (request, { userId }) => {
 
     return badRequest("Notification ID is required");
   } catch (error) {
-    console.error("Error deleting notification:", error);
+    logger.error({ err: error }, "Error deleting notification");
     return NextResponse.json(
       { error: "Failed to delete notification" },
       { status: 500 }

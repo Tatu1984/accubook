@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/backend/services/auth.service";
 import { prisma } from "@/backend/database/client";
 import { cookies } from "next/headers";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -59,7 +60,7 @@ export async function GET() {
 
     return NextResponse.json(organizations);
   } catch (error) {
-    console.error("Error fetching organizations:", error);
+    logger.error({ err: error }, "Error fetching organizations");
     return NextResponse.json(
       { error: "Failed to fetch organizations" },
       { status: 500 }
@@ -132,7 +133,7 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    console.error("Error creating organization:", error);
+    logger.error({ err: error }, "Error creating organization");
     return NextResponse.json(
       { error: "Failed to create organization" },
       { status: 500 }

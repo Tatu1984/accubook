@@ -13,6 +13,7 @@ import {
   NEW_REGIME_SLABS,
   OLD_REGIME_SLABS,
 } from "@/backend/utils/payroll-calculations.util";
+import { logger } from "@/backend/utils/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -130,7 +131,7 @@ export const GET = withOrgAuth(async (request) => {
 
     return badRequest("Invalid view");
   } catch (error) {
-    console.error("Error:", error);
+    logger.error({ err: error }, "Error");
     return NextResponse.json({ error: "Failed to process request" }, { status: 500 });
   }
 });
@@ -460,7 +461,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
 
     return badRequest("Invalid action");
   } catch (error) {
-    console.error("Error:", error);
+    logger.error({ err: error }, "Error");
     return NextResponse.json({ error: "Failed to process request" }, { status: 500 });
   }
 });

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, forbidden, hasPermission } from "@/backend/utils/with-org-auth";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -93,7 +94,7 @@ export const GET = withOrgAuth(async (request, { orgId, orgUser }) => {
       },
     });
   } catch (error) {
-    console.error("Error fetching audit logs:", error);
+    logger.error({ err: error }, "Error fetching audit logs");
     return NextResponse.json(
       { error: "Failed to fetch audit logs" },
       { status: 500 }

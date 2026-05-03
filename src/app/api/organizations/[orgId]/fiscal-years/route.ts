@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -19,7 +20,7 @@ export const GET = withOrgAuth(async (_request, { orgId }) => {
 
     return NextResponse.json(fiscalYears);
   } catch (error) {
-    console.error("Error fetching fiscal years:", error);
+    logger.error({ err: error }, "Error fetching fiscal years");
     return NextResponse.json(
       { error: "Failed to fetch fiscal years" },
       { status: 500 }
@@ -47,7 +48,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
 
     return NextResponse.json(fiscalYear, { status: 201 });
   } catch (error) {
-    console.error("Error creating fiscal year:", error);
+    logger.error({ err: error }, "Error creating fiscal year");
     return NextResponse.json(
       { error: "Failed to create fiscal year" },
       { status: 500 }

@@ -4,6 +4,7 @@ import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { D, sum, closeEnough } from "@/backend/utils/money";
 import { applyLedgerEntries } from "@/backend/utils/posting";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -112,7 +113,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       },
     });
   } catch (error) {
-    console.error("Error fetching vouchers:", error);
+    logger.error({ err: error }, "Error fetching vouchers");
     return NextResponse.json(
       { error: "Failed to fetch vouchers" },
       { status: 500 }
@@ -219,7 +220,7 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
     }
-    console.error("Error creating voucher:", error);
+    logger.error({ err: error }, "Error creating voucher");
     return NextResponse.json(
       { error: "Failed to create voucher" },
       { status: 500 }

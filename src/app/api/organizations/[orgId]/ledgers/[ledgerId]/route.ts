@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
+import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -37,7 +38,7 @@ export const GET = withOrgAuth<{ ledgerId: string }>(async (_request, { orgId, p
 
     return NextResponse.json(ledger);
   } catch (error) {
-    console.error("Error fetching ledger:", error);
+    logger.error({ err: error }, "Error fetching ledger");
     return NextResponse.json(
       { error: "Failed to fetch ledger" },
       { status: 500 }
@@ -91,7 +92,7 @@ export const PATCH = withOrgAuth<{ ledgerId: string }>(async (request, { orgId, 
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
     }
-    console.error("Error updating ledger:", error);
+    logger.error({ err: error }, "Error updating ledger");
     return NextResponse.json(
       { error: "Failed to update ledger" },
       { status: 500 }
@@ -136,7 +137,7 @@ export const DELETE = withOrgAuth<{ ledgerId: string }>(async (_request, { orgId
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Error deleting ledger:", error);
+    logger.error({ err: error }, "Error deleting ledger");
     return NextResponse.json(
       { error: "Failed to delete ledger" },
       { status: 500 }

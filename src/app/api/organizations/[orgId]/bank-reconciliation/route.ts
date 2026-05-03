@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { z } from "zod";
+import { logger } from "@/backend/utils/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -270,7 +271,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       })),
     });
   } catch (error) {
-    console.error("Error fetching reconciliation data:", error);
+    logger.error({ err: error }, "Error fetching reconciliation data");
     return NextResponse.json(
       { error: "Failed to fetch reconciliation data" },
       { status: 500 }
@@ -572,7 +573,7 @@ export const POST = withOrgAuth(async (request, { orgId, session }) => {
         return badRequest("Invalid action");
     }
   } catch (error) {
-    console.error("Error in reconciliation:", error);
+    logger.error({ err: error }, "Error in reconciliation");
     return NextResponse.json(
       { error: "Failed to process reconciliation" },
       { status: 500 }
