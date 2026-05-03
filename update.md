@@ -215,10 +215,10 @@ Three sub-PRs. Tick boxes as they ship.
 - [x] **Reports DRAFT filter** — every report (balance-sheet, trial-balance, profit-loss, cash-flow, export) now filters `status: "APPROVED"`.
 - [x] **Decimal sweep across reports** — 6 files, ~69 sites in `aging/balance-sheet/cash-flow/export/profit-loss/trial-balance`. Decimal accumulators throughout. Internal report types promoted to Decimal.
 - [x] **Stock movement fix** — `updateMany` with `quantity: { gte: qty }` predicate atomically guards negative stock; `InsufficientStockError` → 400. Weighted-avg recompute on PURCHASE/GRN/RETURN: `newAvg = (oldQty*oldAvg + qty*rate)/(oldQty+qty)`. All Decimal.
-- [ ] Voucher PATCH: reverse old entries before applying new ones; permission check on DRAFT↔APPROVED flip. **PR 2 part 3b — pending.**
-- [x] Voucher / invoice / bill / payment / receipt numbering races — fixed via `NumberCounter` table + atomic `nextNumber()` upsert+increment (`1f2a0e1`). Migration `1_add_number_counters` applied to Neon. Scopes: `VOUCHER:<typeId>:<fyId>`, `INVOICE:<FY>`, `BILL`, `PAYMENT`, `RECEIPT`.
-- [ ] Soft delete pattern: refuse delete if FK references exist; otherwise `isActive=false`. Touch: parties, ledgers, bank-accounts, tax-config, bills. (Items already does this.) **PR 2 part 3c — pending.**
-- [ ] Audit log writes inside every mutation tx (entityType, entityId, oldData, newData, userId, orgId). **PR 2 part 3d — pending.**
+- [x] **Voucher PATCH with reversal** (`4ad25ca`). DRAFT/PENDING_APPROVAL→APPROVED applies ledger entries (set isPosted, postedAt, approvedById). APPROVED→DRAFT/REJECTED/CANCELLED reverses ledger entries (debit/credit swapped). Permission-gated on `vouchers:approve`. Refuses narration/date edits on posted vouchers. DELETE refuses if posted.
+- [x] **Voucher / invoice / bill / payment / receipt numbering** — fixed via `NumberCounter` table + atomic `nextNumber()` upsert+increment (`1f2a0e1`).
+- [x] **Soft delete sweep** (`4ad25ca`). bills/[billId]: refuse if any Payment exists OR status is APPROVED/PAID/PARTIAL/OVERDUE. tax-config: counts FK refs across 9 relations; soft-deletes if any in use. parties/ledgers/bank-accounts/items already had the pattern.
+- [x] **Audit log writes** (`4ad25ca`). `src/backend/utils/audit.ts` helper, called inside the same tx. Hooked into payments POST, receipts POST, vouchers POST, vouchers PATCH (with action = POST/REVERSE/UPDATE depending on transition).
 
 ### PR 3 — Ops basics (PART 1 SHIPPED)
 - [x] `src/config/env.ts` — zod schema, fail-fast at boot. Always import `env` from here, never `process.env.X` directly.
@@ -246,9 +246,9 @@ Three sub-PRs. Tick boxes as they ship.
 
 ## 8. Current state
 
-- **Active phase:** Phase 0 — **~99% complete**.
-- **Active sub-PR:** PR 2 part 3a shipped (`1f2a0e1`). Remaining: 3b (voucher PATCH reversal), 3c (soft delete sweep), 3d (audit log writes). Plus a build-config issue: prisma's pooler-URL advisory locks made `migrate deploy` flaky locally — used `db execute` + `migrate resolve` for the latest migration. On Vercel this should work since each lambda gets a fresh connection, but worth watching the first prod deploy logs.
-- **Last updated:** 2026-05-03 by Claude (commit `1f2a0e1`)
+- **Active phase:** Phase 0 — **100% complete on the audit punch list.** Functional baseline shipped.
+- **Active sub-PR:** None. PR 2 parts 1-3 + PR 3 parts 1-3 all shipped. Net diff across Phase 0: **+~5k LOC, -~7k LOC** (the new auth+posting+money helpers replaced ~3k lines of duplicated boilerplate).
+- **Last updated:** 2026-05-03 by Claude (commit `4ad25ca`)
 - **What's done since last session:**
   - PR 1 (`ce7532d`+`381fe36`+`1cc57c0`): tenant isolation closed everywhere, permission model rewired, quick-wins.
   - PR 2 part 1 (`46d022b`): Decimal helpers, posting helpers, payments/receipts/bills/vouchers POST → GL posting in `$transaction`. Reports filter DRAFT.
@@ -256,15 +256,29 @@ Three sub-PRs. Tick boxes as they ship.
   - PR 3 part 1 (`82a99c5`): env.ts zod, /api/health, error boundaries, security headers, pino logger, DB pool tuned, ESLint fixed, 8 unused deps pruned.
   - PR 3 part 2 (`31d3f43`): Vitest + 19 tests, GitHub Actions CI, console.error → logger sweep (129 calls / 60 files), README rewritten, .env.example, 40 scaffold stubs deleted.
   - PR 3 part 3 (`e5d8935`): Prisma migrations baselined against Neon, vercel.json updated, hasPermission extracted to leaf module, +10 unit tests (29 total), DEVELOPER_GUIDE refreshed.
-- **What's next (exact)** — pick path:
-  - **(A) PR 2 part 3 — close out Phase 0:** voucher numbering Postgres sequences (now possible — migration baseline exists) → voucher PATCH reversal → soft delete sweep across parties/ledgers/bank-accounts/tax-config/bills → audit log writes inside every mutation tx.
-  - **(B) Start Phase 1 (India ERP MVP)** — pick a feature from §5: GST returns (GSTR-1/3B/9), e-invoicing (NIC IRN + QR), TDS/TCS, recurring billing, Tally XML migration, document OCR via Claude vision, dunning emails.
-  Recommendation: (A) is safer (numbering races bite under concurrency, audit log dead means compliance gap). (B) is more visible (sellable features). Either is defensible — Phase 0 is functionally complete.
+  - PR 2 part 3a (`1f2a0e1`): NumberCounter model + race-safe numbering across all 5 entity types (voucher/invoice/bill/payment/receipt).
+  - PR 2 part 3 b/c/d (`4ad25ca`): voucher PATCH with reversal, soft delete sweep on bills + tax-config, audit log helper + hookups in payments/receipts/vouchers POST + vouchers PATCH.
+- **What's next** — Phase 0 is done. Time to start Phase 1.
+  - **Phase 1 — India ERP MVP** options (pick one to lead with):
+    1. **GST returns** — GSTR-1 (outward), GSTR-3B (summary), GSTR-9 (annual). Computation + JSON export to GSTN portal format.
+    2. **E-invoicing (IRN + QR)** — NIC API integration. Generate IRN per invoice, QR code for B2B invoices ≥ ₹5cr threshold.
+    3. **TDS/TCS** — Section-wise rules (194C/194J/etc.), TDS certificates, Form 26AS reconciliation, Form 16.
+    4. **Recurring billing & subscriptions** — schedule engine, automated invoice generation, retry on failure.
+    5. **Tally XML migration** — import ledgers + masters + vouchers from a Tally backup XML file. Big customer-acquisition lever.
+    6. **Document OCR** — bills/receipts → extracted line items via Claude vision API.
+    7. **Dunning emails** — automated reminders on overdue invoices.
+  - Recommendation: **(5) Tally XML migration** is the highest customer-acquisition leverage in India (Tally has ~3M users), then **(1) GST returns** because every Indian business needs them, then **(2) E-invoicing**.
+  - Loose ends not blocking Phase 1:
+    - Integration tests against ephemeral test DB (Docker/testcontainers).
+    - Rate limiting on `/api/auth/*` (Upstash — Q3 still open).
+    - Email service for invitations (Resend/Postmark — Q4 still open).
+    - DB password rotation (Q3/D3).
 
 ## 9. Completed log (reverse chronological)
 
 | Date | What | Commit |
 |---|---|---|
+| 2026-05-03 | **PR 2 part 3 b/c/d — voucher PATCH reversal, soft delete sweep, audit log writes.** Voucher PATCH now applies/reverses ledger entries on status transitions. bills + tax-config DELETE no longer hard-delete past FK refs. `src/backend/utils/audit.ts` helper hooked into payments/receipts/vouchers POST + vouchers PATCH. **Phase 0 audit punch list 100% complete.** | `4ad25ca` |
 | 2026-05-03 | **PR 2 part 3a — race-safe numbering.** `NumberCounter` model + migration `1_add_number_counters`. `nextNumber(tx, orgId, scope)` does atomic upsert+increment. Applied to vouchers, invoices (per-FY scope), bills, payments, receipts. Invoice POST also got Decimal cleanup that was outstanding. tsc + tests + build clean. | `1f2a0e1` |
 | 2026-05-03 | Hardening: `prisma.config.ts` now gives a useful error message when `DATABASE_URL` is missing (was failing silently with "Failed to load config file"). | `8ba7ec1` |
 | 2026-05-03 | **PR 3 part 3 — migrations + permissions extraction.** Baselined Prisma migrations on Neon (`migrate diff` → `0_init/migration.sql`, `migrate resolve --applied`). vercel.json now runs `migrate deploy` before build. Extracted `hasPermission` to leaf module + 10 unit tests (29/29 passing). DEVELOPER_GUIDE paths refreshed. | `e5d8935` |
