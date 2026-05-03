@@ -205,18 +205,20 @@ Three sub-PRs. Tick boxes as they ship.
 - [x] ~~Rotate `AUTH_SECRET`~~ — skipped per D12. Revisit before first real user.
 - [ ] Rate limiting on `/api/auth/*` — **stubbed** with a TODO until user provisions Upstash (per Q3).
 
-### PR 2 — Accounting correctness
-- [ ] All money arithmetic via `Prisma.Decimal` (or `decimal.js`). Touch: vouchers POST, invoices POST, bills POST, all reports.
-- [ ] Payments POST: wrap in `prisma.$transaction` that creates payment + creates voucher (Dr Bank / Cr AR) + updates invoice `amountPaid`/`amountDue`/`status` + updates `BankAccount.currentBalance`.
-- [ ] Receipts POST: same pattern, opposite direction.
-- [ ] Voucher posting: update `Ledger.currentBalance` for every entry inside the same tx.
-- [ ] Voucher / invoice / bill / payment / receipt numbering: Postgres sequences per `(organizationId, type)`. Migration adds the sequences.
-- [ ] Bills POST: actually compute and persist `taxAmount`. Currently hardcoded to 0.
-- [ ] Reports filter out `status: 'DRAFT'` vouchers (`balance-sheet/route.ts:113, 132, 162` etc.).
-- [ ] Soft delete pattern: refuse delete if FK references exist; otherwise `isActive=false`. Touch: parties, ledgers, items, bank-accounts, tax-config, bills.
-- [ ] Stock movement: `WHERE quantity >= x` guard + serializable tx, recompute weighted-avg on every PURCHASE.
-- [ ] Audit log writes inside every mutation tx (entityType, entityId, oldData, newData, userId, orgId).
-- [ ] Voucher PATCH: permission check before allowing DRAFT↔APPROVED flip; reverse old entries, post new ones.
+### PR 2 — Accounting correctness (IN PROGRESS)
+- [x] **Decimal money helper** at `src/backend/utils/money.ts` (D, sum, mul, cmp, fmt, toNumber, closeEnough).
+- [x] **Posting helpers** at `src/backend/utils/posting.ts` — getOrCreatePartyLedger, getOrCreateBankLedger, getCashLedger, getFiscalYearForDate, getVoucherTypeByCode, generateVoucherNumber, applyLedgerEntries (signed by AccountNature), recomputeInvoiceStatus, recomputeBillStatus.
+- [x] **Payments POST** — full $transaction: creates voucher (Dr Party / Cr Bank), updates ledger balances, decrements BankAccount.currentBalance, creates InvoicePayment junction, recomputes Bill status.
+- [x] **Receipts POST** — mirror of payments (Dr Bank / Cr Party). Recomputes Invoice status.
+- [x] **Voucher POST** — Decimal math, requiresApproval flow (DRAFT/PENDING_APPROVAL/APPROVED+posted), Ledger.currentBalance applied in the same tx, fiscalYearId validated to org.
+- [x] **Bills POST** — actually computes and persists per-line taxAmount + totalTax (was hardcoded to 0). All math via Decimal.
+- [x] **Reports DRAFT filter** — every report (balance-sheet, trial-balance, profit-loss, cash-flow, export) now filters `status: "APPROVED"`.
+- [ ] **Decimal sweep across reports** — agent is in flight (6 files, ~69 sites: `sum + Number(...)` → `sum([...])`). PENDING.
+- [ ] Voucher PATCH: reverse old entries before applying new ones; permission check on DRAFT↔APPROVED flip.
+- [ ] Voucher / invoice / bill / payment / receipt numbering: Postgres sequences per `(organizationId, type)`. Migration adds the sequences. **DEFERRED to PR 2 part 3.**
+- [ ] Soft delete pattern: refuse delete if FK references exist; otherwise `isActive=false`. Touch: parties, ledgers, bank-accounts, tax-config, bills. (Items already does this.) **DEFERRED.**
+- [ ] Stock movement: `WHERE quantity >= x` guard + serializable tx, recompute weighted-avg on every PURCHASE. **DEFERRED.**
+- [ ] Audit log writes inside every mutation tx (entityType, entityId, oldData, newData, userId, orgId). **DEFERRED.**
 
 ### PR 3 — Ops basics
 - [ ] `src/config/env.ts` — zod schema, parse `process.env` at boot, fail-fast.
@@ -237,25 +239,25 @@ Three sub-PRs. Tick boxes as they ship.
 ## 8. Current state
 
 - **Active phase:** Phase 0
-- **Active sub-PR:** PR 1 complete — about to commit. PR 2 (accounting correctness) is next.
-- **Last updated:** 2026-05-03 by Claude (commit `381fe36`)
+- **Active sub-PR:** PR 2 part 1 shipped (`46d022b`). Decimal sweep across reports is in flight (agent). After that lands, decide: tackle voucher PATCH + stock + audit log + numbering sequences as PR 2 part 2, or close PR 2 here and move to PR 3 (ops basics).
+- **Last updated:** 2026-05-03 by Claude (commit `46d022b`)
 - **What's done since last session:**
-  - PR 1 complete (everything except rate-limiting stub):
-    - `withOrgAuth` helper at `src/backend/utils/with-org-auth.ts` (with `hasPermission` and response helpers)
-    - All 55 org-scoped routes migrated; cross-tenant leak closed
-    - `.strict()` on every PATCH schema; quick-wins shipped (test-session deleted, demo card gated, seed prod-gated, register enumeration fixed, crypto-strength temp password, permission model rewired)
-    - tsc + production build pass
+  - PR 1 complete (`ce7532d` + `381fe36` + `1cc57c0`).
+  - PR 2 part 1 shipped (`46d022b`): Decimal helpers, posting helpers, payments/receipts/bills/vouchers POST all rewritten with Decimal math + GL posting in `$transaction`. Reports filter DRAFT vouchers. Net +758/-228.
 - **What's next (exact):**
-  1. Commit & push PR 1.
-  2. Start PR 2 (accounting correctness) — see §7. Begin with payments/receipts: wrap in `prisma.$transaction` that creates payment + offsetting voucher + updates invoice + updates bank account balance.
-  3. Then voucher posting → ledger balance updates.
-  4. Then voucher numbering races → Postgres sequences.
-  5. Then Decimal math sweep across all reports.
+  1. Wait for the Decimal sweep agent to finish the 6 report files. Commit + push the result.
+  2. Stock movement fix (`stock/route.ts:294-322`) — race-prevention with `WHERE quantity >= x` and weighted-avg recompute on every PURCHASE.
+  3. Voucher PATCH with reversal logic (`vouchers/[voucherId]/route.ts`).
+  4. Soft delete sweep across parties, ledgers, bank-accounts, tax-config, bills.
+  5. Audit log writes in every mutation tx.
+  6. (PR 2 part 3 — separable): Postgres sequences for voucher/invoice/bill/payment/receipt numbering. Requires a migration.
+  7. Then PR 3 (ops basics) — see §7.
 
 ## 9. Completed log (reverse chronological)
 
 | Date | What | Commit |
 |---|---|---|
+| 2026-05-03 | **PR 2 part 1 — accounting correctness foundation.** Decimal money helper + posting helpers. Payments/receipts POST now wrap in `$transaction`, post to GL, update Ledger.currentBalance + BankAccount.currentBalance, recompute Invoice/Bill status. Voucher POST uses Decimal math + applies ledger balances. Bills POST computes per-line tax. Reports filter DRAFT vouchers. tsc clean. Net +758/-228. | `46d022b` |
 | 2026-05-03 | Chore: gitignore MS Office lock files | `381fe36` |
 | 2026-05-03 | **PR 1 — Security & tenant isolation complete.** `withOrgAuth` helper, applied to all 55 org-scoped routes, `.strict()` on PATCH schemas, demo/test gate, register enumeration fix, crypto-strength temp password, permission model rewired with `hasPermission()` + last-admin guard. tsc + build clean. Net diff: -3084 lines. | `ce7532d` |
 | 2026-05-03 | Created `update.md`; saved memory pointer | `e4dc1db` |
