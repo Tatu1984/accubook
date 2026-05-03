@@ -3,12 +3,18 @@ import type { Session } from "next-auth";
 import { auth } from "@/backend/services/auth.service";
 import { prisma } from "@/backend/database/client";
 import type { Prisma } from "@/generated/prisma";
+import { hasPermission as hasPermissionLeaf } from "@/backend/utils/permissions";
 
 export type OrgUser = Prisma.OrganizationUserGetPayload<{
   include: { role: true };
 }>;
 
 export type { Session };
+
+// Re-export the leaf-module helper so existing call sites
+// (`import { hasPermission } from "@/backend/utils/with-org-auth"`) still work.
+export const hasPermission: (orgUser: OrgUser, module: string, action: string) => boolean =
+  hasPermissionLeaf;
 
 export type OrgAuthContext<P extends Record<string, string> = Record<string, string>> = {
   session: Session;
@@ -71,40 +77,6 @@ export function withOrgAuth<P extends Record<string, string> = Record<string, st
       params,
     });
   };
-}
-
-type Permission = {
-  module: string;
-  actions: string[];
-};
-
-/**
- * Checks whether an OrgUser has a given permission via their role's
- * `permissions` JSON. Wildcard `module: "*"` grants all modules; wildcard
- * `actions: ["*"]` (not currently used) would grant all actions.
- *
- * Use inside a withOrgAuth handler:
- *   if (!hasPermission(orgUser, "items", "delete")) {
- *     return forbidden("Cannot delete items");
- *   }
- */
-export function hasPermission(
-  orgUser: OrgUser,
-  module: string,
-  action: string
-): boolean {
-  const perms = orgUser.role?.permissions;
-  if (!Array.isArray(perms)) return false;
-
-  for (const raw of perms as unknown[]) {
-    if (!raw || typeof raw !== "object") continue;
-    const p = raw as Partial<Permission>;
-    const moduleMatch = p.module === module || p.module === "*";
-    if (!moduleMatch) continue;
-    if (!Array.isArray(p.actions)) continue;
-    if (p.actions.includes(action) || p.actions.includes("*")) return true;
-  }
-  return false;
 }
 
 /** Convenience helpers for common JSON responses. */

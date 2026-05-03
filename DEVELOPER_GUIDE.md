@@ -1,5 +1,7 @@
 # Developer Guide - Enterprise Accounting Platform
 
+> **For current project status and roadmap, read [`update.md`](./update.md) first.** It tracks active phase, decisions log, completed work, and what's next. This file is the deeper architecture/onboarding reference and is partially stale where it pre-dates the `src/backend` ↔ `src/frontend` ↔ `src/shared` restructure (paths have been mechanically updated, but examples and prose may still mention the old layout).
+
 ## Table of Contents
 1. [Architecture Overview](#architecture-overview)
 2. [Project Structure](#project-structure)
@@ -632,8 +634,8 @@ npx tsc --noEmit         # Check types
 // src/app/api/organizations/[orgId]/[resource]/route.ts
 
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth/config";
-import { prisma } from "@/lib/prisma";
+import { auth } from "@/backend/services/auth.service";
+import { prisma } from "@/backend/database/client";
 import { z } from "zod";
 
 // Validation schema
@@ -711,8 +713,8 @@ export async function POST(
 
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
-import { DataTable } from "@/components/ui/data-table";
-import { Button } from "@/components/ui/button";
+import { DataTable } from "@/frontend/components/ui/data-table";
+import { Button } from "@/frontend/components/ui/button";
 import { Plus } from "lucide-react";
 
 export default function ResourcePage() {
@@ -778,8 +780,8 @@ export default function ResourcePage() {
 | Add new database model | `prisma/schema.prisma` |
 | Add new API endpoint | `src/app/api/organizations/[orgId]/` |
 | Add new dashboard page | `src/app/(dashboard)/` |
-| Add UI component | `src/components/ui/` |
-| Modify auth logic | `src/lib/auth/config.ts` |
+| Add UI component | `src/frontend/components/ui/` |
+| Modify auth logic | `src/backend/services/auth.service.ts` |
 | Add new permission | `src/app/api/organizations/[orgId]/roles/route.ts` |
 | Check session handling | `middleware.ts` |
 
