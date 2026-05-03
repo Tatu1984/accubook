@@ -91,6 +91,22 @@ Validated at boot via `src/config/env.ts` — bad config crashes startup with a 
 - **Permissions** are checked via `hasPermission(orgUser, module, action)` against the role's `permissions` JSON. Wildcards (`module: "*"` / `actions: ["*"]`) supported.
 - **Logger.** `src/backend/utils/logger.ts` — pino with redaction (password, token, authorization, cookie, AUTH_SECRET, DATABASE_URL). Use `logger.error({ err: error }, "msg")` instead of `console.error`.
 
+## Deploying to Vercel
+
+Vercel doesn't auto-load `.env` from the repo (it's gitignored). Set env vars in the project before the first deploy or it will fail with `prisma.config.ts` complaining about missing `DATABASE_URL`.
+
+1. **Settings → Environment Variables**, add each below, **check Production + Preview + Development** for every row:
+   - `DATABASE_URL` — Neon pooler URL (from your `.env`)
+   - `AUTH_SECRET` — `openssl rand -base64 32`
+   - `NEXTAUTH_SECRET` — same value as `AUTH_SECRET`
+   - `AUTH_TRUST_HOST` — `true`
+   - `NEXTAUTH_URL` — production URL (set after first successful deploy)
+2. **Deployments → ⋯ → Redeploy** (Vercel does NOT auto-redeploy when env vars change). Uncheck "Use existing Build Cache" the first time.
+3. The build runs `prisma migrate deploy && prisma generate && next build`. Migrations in `prisma/migrations/` apply on every deploy; the table `_prisma_migrations` on Neon tracks what's already applied so it's a no-op if you're up to date.
+4. Don't paste values inside quotes — Vercel stores them literally. Just paste the raw string.
+
+If a build fails with `DATABASE_URL is not set`, the env var didn't reach the build environment. Re-check the scope checkboxes; values set only for "Production" don't apply to Preview deployments triggered by PRs.
+
 ## Docs
 
 - **`update.md`** — durable plan + progress log. Read this first when picking up the project. Phase roadmap, decisions log, completed work, what's next.
