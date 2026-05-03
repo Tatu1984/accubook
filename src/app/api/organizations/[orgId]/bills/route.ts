@@ -4,6 +4,7 @@ import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { D, sum } from "@/backend/utils/money";
 import { formatNumber, nextNumber } from "@/backend/utils/posting";
+import { computeLineGst, determineSupplyType, type SupplyType } from "@/backend/utils/india-tax";
 import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
@@ -123,6 +124,21 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
     const body = await request.json();
     const validatedData = createBillSchema.parse(body);
 
+    // Place-of-supply for purchases: vendor (party) state vs receiver (org) state.
+    // Drives whether the bill carries CGST+SGST (intrastate) or IGST (interstate).
+    const [org, party] = await Promise.all([
+      prisma.organization.findUnique({
+        where: { id: orgId },
+        select: { state: true },
+      }),
+      prisma.party.findFirst({
+        where: { id: validatedData.partyId, organizationId: orgId },
+        select: { id: true, billingState: true },
+      }),
+    ]);
+    if (!party) return badRequest("Vendor not found");
+    const supplyType: SupplyType = determineSupplyType(org?.state, party.billingState);
+
     // Resolve tax rates for all items that reference a taxId, in one query.
     const taxIds = [...new Set(validatedData.items.map((i) => i.taxId).filter(Boolean) as string[])];
     const taxes = taxIds.length
@@ -133,16 +149,14 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
       : [];
     const rateById = new Map(taxes.map((t) => [t.id, D(t.rate)]));
 
-    // All money math via Decimal — never via JS floats.
+    // All money math via Decimal. Per-line GST split based on place of supply.
     const itemsData = validatedData.items.map((item, index) => {
       const lineTotal = D(item.quantity).times(D(item.unitPrice));
       const discountAmount = lineTotal.times(D(item.discountPercent)).dividedBy(D(100));
       const taxableAmount = lineTotal.minus(discountAmount);
-      const taxRate = item.taxId ? rateById.get(item.taxId) : undefined;
-      const taxAmount = taxRate
-        ? taxableAmount.times(taxRate).dividedBy(D(100))
-        : D(0);
-      const totalAmount = taxableAmount.plus(taxAmount);
+      const combinedRate = item.taxId ? rateById.get(item.taxId) ?? D(0) : D(0);
+      const split = computeLineGst(taxableAmount, combinedRate, supplyType);
+      const totalAmount = taxableAmount.plus(split.totalTaxAmount);
 
       return {
         itemId: item.itemId,
@@ -153,7 +167,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
         discountAmount,
         taxableAmount,
         taxId: item.taxId,
-        taxAmount,
+        taxAmount: split.totalTaxAmount,
         totalAmount,
         sequence: index,
       };

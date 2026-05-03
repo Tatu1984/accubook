@@ -4,6 +4,7 @@ import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { D, sum } from "@/backend/utils/money";
 import { nextNumber } from "@/backend/utils/posting";
+import { computeLineGst, determineSupplyType, type SupplyType } from "@/backend/utils/india-tax";
 import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
@@ -143,13 +144,47 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
         : new Date().getFullYear() - 1;
     const fyLabel = `${currentFY}-${(currentFY + 1).toString().slice(-2)}`;
 
+    // Place-of-supply determination: supplier (org) state vs customer state.
+    // For exports / unknown states, fail-safe to interstate (IGST).
+    const [org, party] = await Promise.all([
+      prisma.organization.findUnique({
+        where: { id: orgId },
+        select: { state: true },
+      }),
+      prisma.party.findFirst({
+        where: { id: validatedData.partyId, organizationId: orgId },
+        select: { id: true, billingState: true },
+      }),
+    ]);
+    if (!party) return badRequest("Customer not found");
+    const supplyType: SupplyType = determineSupplyType(org?.state, party.billingState);
+
+    // Pull tax rates referenced by line items in one query.
+    const taxIds = [...new Set(validatedData.items.map((i) => i.taxId).filter(Boolean) as string[])];
+    const taxes = taxIds.length
+      ? await prisma.taxConfig.findMany({
+          where: { id: { in: taxIds }, organizationId: orgId },
+          select: { id: true, rate: true, taxType: true },
+        })
+      : [];
+    const taxById = new Map(taxes.map((t) => [t.id, t]));
+
     // All money math via Decimal — never via JS floats.
+    // For each line, compute the correct CGST/SGST/IGST split based on
+    // place of supply, persisted to the InvoiceTax junction.
     const itemsWithCalculations = validatedData.items.map((item) => {
       const lineTotal = D(item.quantity).times(D(item.unitPrice));
       const discountAmount = lineTotal.times(D(item.discountPercent)).dividedBy(D(100));
       const taxableAmount = lineTotal.minus(discountAmount);
-      const taxAmount = D(item.taxAmount);
-      const totalAmount = taxableAmount.plus(taxAmount);
+
+      // If the item references a tax config, drive tax from its rate.
+      // GST/IGST/CGST/SGST taxTypes all collapse here — we recompute the
+      // split correctly from the combined rate per place of supply.
+      const taxConfig = item.taxId ? taxById.get(item.taxId) : undefined;
+      const combinedRate = taxConfig ? D(taxConfig.rate) : D(0);
+      const split = computeLineGst(taxableAmount, combinedRate, supplyType);
+
+      const totalAmount = taxableAmount.plus(split.totalTaxAmount);
 
       return {
         ...item,
@@ -158,7 +193,10 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
         discountPercent: D(item.discountPercent),
         discountAmount,
         taxableAmount,
-        taxAmount,
+        cgstAmount: split.cgstAmount,
+        sgstAmount: split.sgstAmount,
+        igstAmount: split.igstAmount,
+        taxAmount: split.totalTaxAmount,
         totalAmount,
       };
     });

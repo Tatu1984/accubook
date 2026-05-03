@@ -258,17 +258,10 @@ Three sub-PRs. Tick boxes as they ship.
   - PR 3 part 3 (`e5d8935`): Prisma migrations baselined against Neon, vercel.json updated, hasPermission extracted to leaf module, +10 unit tests (29 total), DEVELOPER_GUIDE refreshed.
   - PR 2 part 3a (`1f2a0e1`): NumberCounter model + race-safe numbering across all 5 entity types (voucher/invoice/bill/payment/receipt).
   - PR 2 part 3 b/c/d (`4ad25ca`): voucher PATCH with reversal, soft delete sweep on bills + tax-config, audit log helper + hookups in payments/receipts/vouchers POST + vouchers PATCH.
-- **What's next** — Phase 0 is done. Time to start Phase 1.
-  - **Phase 1 — India ERP MVP** options (pick one to lead with):
-    1. **GST returns** — GSTR-1 (outward), GSTR-3B (summary), GSTR-9 (annual). Computation + JSON export to GSTN portal format.
-    2. **E-invoicing (IRN + QR)** — NIC API integration. Generate IRN per invoice, QR code for B2B invoices ≥ ₹5cr threshold.
-    3. **TDS/TCS** — Section-wise rules (194C/194J/etc.), TDS certificates, Form 26AS reconciliation, Form 16.
-    4. **Recurring billing & subscriptions** — schedule engine, automated invoice generation, retry on failure.
-    5. **Tally XML migration** — import ledgers + masters + vouchers from a Tally backup XML file. Big customer-acquisition lever.
-    6. **Document OCR** — bills/receipts → extracted line items via Claude vision API.
-    7. **Dunning emails** — automated reminders on overdue invoices.
-  - Recommendation: **(5) Tally XML migration** is the highest customer-acquisition leverage in India (Tally has ~3M users), then **(1) GST returns** because every Indian business needs them, then **(2) E-invoicing**.
-  - Loose ends not blocking Phase 1:
+- **What's next** — Phase 0 is done. Starting India end-to-end build (no MVP framing — see §5).
+  - **Current focus:** Workstream 1 — Indian invoicing core. The linchpin: every other Indian compliance feature (GSTR-1, e-invoicing, e-way bill, ITC) needs invoices to carry the correct CGST/SGST/IGST split based on place of supply. Right now invoices apply tax as a single rate without splitting. Fixing this first.
+  - **Order of work (rough):** invoicing core → bills+ITC → GSTR-1 → e-invoicing → GSTR-3B → TDS → e-way bill → banking import → payroll → reports expansion → manufacturing → migration → POS → workflows → ESS. Many can interleave; this is just the rough trunk.
+  - Loose ends still open:
     - Integration tests against ephemeral test DB (Docker/testcontainers).
     - Rate limiting on `/api/auth/*` (Upstash — Q3 still open).
     - Email service for invitations (Resend/Postmark — Q4 still open).
