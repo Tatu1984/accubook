@@ -246,9 +246,9 @@ Three sub-PRs. Tick boxes as they ship.
 
 ## 8. Current state
 
-- **Active phase:** Phase 0 — **100% complete on the audit punch list.** Functional baseline shipped.
-- **Active sub-PR:** None. PR 2 parts 1-3 + PR 3 parts 1-3 all shipped. Net diff across Phase 0: **+~5k LOC, -~7k LOC** (the new auth+posting+money helpers replaced ~3k lines of duplicated boilerplate).
-- **Last updated:** 2026-05-03 by Claude (commit `4ad25ca`)
+- **Active phase:** India end-to-end build (workstreams in §5). Foundation (Phase 0) done.
+- **Active workstream:** WS1 — Indian invoicing core. Place-of-supply + CGST/SGST/IGST split shipped (`dcf10b3`). Next: HSN/SAC code library + tax setup library + reverse charge.
+- **Last updated:** 2026-05-03 by Claude (commit `dcf10b3`)
 - **What's done since last session:**
   - PR 1 (`ce7532d`+`381fe36`+`1cc57c0`): tenant isolation closed everywhere, permission model rewired, quick-wins.
   - PR 2 part 1 (`46d022b`): Decimal helpers, posting helpers, payments/receipts/bills/vouchers POST → GL posting in `$transaction`. Reports filter DRAFT.
@@ -258,8 +258,18 @@ Three sub-PRs. Tick boxes as they ship.
   - PR 3 part 3 (`e5d8935`): Prisma migrations baselined against Neon, vercel.json updated, hasPermission extracted to leaf module, +10 unit tests (29 total), DEVELOPER_GUIDE refreshed.
   - PR 2 part 3a (`1f2a0e1`): NumberCounter model + race-safe numbering across all 5 entity types (voucher/invoice/bill/payment/receipt).
   - PR 2 part 3 b/c/d (`4ad25ca`): voucher PATCH with reversal, soft delete sweep on bills + tax-config, audit log helper + hookups in payments/receipts/vouchers POST + vouchers PATCH.
-- **What's next** — Phase 0 is done. Starting India end-to-end build (no MVP framing — see §5).
-  - **Current focus:** Workstream 1 — Indian invoicing core. The linchpin: every other Indian compliance feature (GSTR-1, e-invoicing, e-way bill, ITC) needs invoices to carry the correct CGST/SGST/IGST split based on place of supply. Right now invoices apply tax as a single rate without splitting. Fixing this first.
+- **What's next** — India end-to-end build, WS1 continuing.
+  - **Done in WS1 so far:** `india-tax.ts` helper + tests. invoice POST + bill POST now produce correct CGST/SGST/IGST per place of supply (`dcf10b3`).
+  - **Next sub-steps in WS1:**
+    1. HSN/SAC code library (master data) + lookup helper.
+    2. Persist per-line tax-component breakdown to InvoiceTax/BillTax junction rows (currently computed and stored as combined `taxAmount`). Required for fast GSTR-1 aggregation.
+    3. Add `cgstAmount`/`sgstAmount`/`igstAmount` columns on InvoiceItem/BillItem (migration) so the breakdown is queryable without recomputation.
+    4. GSTIN checksum (Mod-36 check digit) validation, not just format.
+    5. Reverse charge mechanism flag on bills + RCM voucher posting.
+    6. Composition scheme handling (no GST on outward, but still tracked).
+    7. Export invoice (zero-rated, LUT vs IGST).
+    8. Place-of-supply overrides for special-category services (IGST Act §12-13: immovable property, transportation, telecom, OIDAR, etc.).
+  - **After WS1:** GSTR-1 (outward returns), then e-invoicing (NIC IRN), then GSTR-3B, then TDS/TCS, then banking import, then payroll, then reports expansion, then manufacturing, then Tally migration, then POS, then workflow builder, then ESS portal.
   - **Order of work (rough):** invoicing core → bills+ITC → GSTR-1 → e-invoicing → GSTR-3B → TDS → e-way bill → banking import → payroll → reports expansion → manufacturing → migration → POS → workflows → ESS. Many can interleave; this is just the rough trunk.
   - Loose ends still open:
     - Integration tests against ephemeral test DB (Docker/testcontainers).
@@ -271,6 +281,7 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
+| 2026-05-03 | **WS1 (India invoicing) — place-of-supply GST split.** `india-tax.ts` helper + 19 tests. Invoice POST + Bill POST now compute correct CGST/SGST/IGST per place of supply. Foundation for GSTR-1, e-invoicing, RCM. tsc + 48/48 tests + build clean. | `dcf10b3` |
 | 2026-05-03 | **PR 2 part 3 b/c/d — voucher PATCH reversal, soft delete sweep, audit log writes.** Voucher PATCH now applies/reverses ledger entries on status transitions. bills + tax-config DELETE no longer hard-delete past FK refs. `src/backend/utils/audit.ts` helper hooked into payments/receipts/vouchers POST + vouchers PATCH. **Phase 0 audit punch list 100% complete.** | `4ad25ca` |
 | 2026-05-03 | **PR 2 part 3a — race-safe numbering.** `NumberCounter` model + migration `1_add_number_counters`. `nextNumber(tx, orgId, scope)` does atomic upsert+increment. Applied to vouchers, invoices (per-FY scope), bills, payments, receipts. Invoice POST also got Decimal cleanup that was outstanding. tsc + tests + build clean. | `1f2a0e1` |
 | 2026-05-03 | Hardening: `prisma.config.ts` now gives a useful error message when `DATABASE_URL` is missing (was failing silently with "Failed to load config file"). | `8ba7ec1` |
