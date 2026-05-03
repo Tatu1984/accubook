@@ -256,10 +256,11 @@ Three sub-PRs. Tick boxes as they ship.
   - **WS6 (banking) — bank statement CSV import + auto-reconciliation matcher live.** Manual-match UI for low-confidence cases pending.
   - **WS7 (payroll) — PF/ESI/PT/TDS/LOP helpers tested.** Persistence + month-end run posting pending.
   - **WS10 (manufacturing) — BOM + work-order schema + APIs + multi-level BOM cost compute live.** Work-order issue/complete state transitions pending.
-  - **WS17 (reports) — 9 reports total.** Built-ins: balance-sheet, P&L, trial-balance, cash-flow, aging, custom + (this turn) sales-register, purchase-register, party-statement.
+  - **WS17 (reports) — 9 reports total + dashboard UI for new ones.** Built-ins: balance-sheet, P&L, trial-balance, cash-flow, aging, custom + sales-register, purchase-register, party-statement (the latter three now live at `/reports/registers`).
   - **WS18 (Tally migration) — masters import live.** Vouchers still pending.
+  - **GST returns UI** — `/taxation/gst` now wired to compute + portal-JSON download for GSTR-1/3B/9.
   - **Marketing landing page** at `/` — reactbits-style hero/features/CTA, sign-in button → /login on same domain.
-- **Last updated:** 2026-05-03 by Claude (commit `7ad121c`)
+- **Last updated:** 2026-05-03 by Claude (commit `7d6445d`)
 - **What's done since last session:**
   - PR 1 (`ce7532d`+`381fe36`+`1cc57c0`): tenant isolation closed everywhere, permission model rewired, quick-wins.
   - PR 2 part 1 (`46d022b`): Decimal helpers, posting helpers, payments/receipts/bills/vouchers POST → GL posting in `$transaction`. Reports filter DRAFT.
@@ -331,6 +332,8 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
+| 2026-05-03 | **UI — /reports/registers page.** 3-tab page (sales / purchase / party statement). Period picker, party dropdown, KPIs, full data tables. Build now 67 pages. | `7d6445d` |
+| 2026-05-03 | **UI — /taxation/gst wired to compute + portal endpoints.** Replaced static placeholder with tabs for GSTR-1/3B/9, period picker, fetch + summary + section breakdown + portal-JSON download. | `4388910` |
 | 2026-05-03 | **WS2 — GSTR-9 annual return compute.** Reuses GSTR-3B across FY. Sections 4 (outward+RCM-inward, B2B/B2C/exports/CN/DN), 5 (non-payable), 6 (ITC availed + RCM split), 7 (net ITC), 9 (tax payable / paid via ITC / paid in cash, cell-wise capped). `fyFromLabel("YYYY-YY")` helper. +11 tests (243 total). | `7ad121c` |
 | 2026-05-03 | **WS17 — sales/purchase register + party statement reports.** Three high-utility daily reports for Indian accountants. Pure read paths over existing data. Customer/vendor running balance, opening from pre-period docs, BOTH-typed parties combined. +11 tests (232 total). | `bcb891d` |
 | 2026-05-03 | **WS10 — manufacturing module.** Schema additions: Bom + BomItem + WorkOrder (migration `3_add_manufacturing` applied to Neon). `computeBomCost` + `resolveLeafCost` (multi-level w/ cycle detection). GET/POST /manufacturing/boms + /manufacturing/work-orders. +9 tests (221 total). | `6af0767` |
