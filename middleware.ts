@@ -32,8 +32,13 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Allow home page
+  // Home page is the public marketing landing. Logged-in users hitting "/"
+  // land directly in the dashboard so they don't see the marketing page
+  // every time they type the bare domain.
   if (pathname === "/") {
+    if (isLoggedIn) {
+      return NextResponse.redirect(new URL("/dashboard", nextUrl));
+    }
     return NextResponse.next();
   }
 
