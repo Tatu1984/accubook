@@ -249,7 +249,7 @@ Three sub-PRs. Tick boxes as they ship.
 - **Active phase:** India end-to-end build (workstreams in §5). Foundation (Phase 0) done.
 - **Active workstreams:**
   - WS1 (invoicing core) ~80% done.
-  - **WS2 (GST returns) — GSTR-1 + GSTR-3B both compute + portal JSON complete.** UI wiring is the only remaining piece. GSTR-9 + GSTR-2B reconciliation pending.
+  - **WS2 (GST returns) — GSTR-1 + GSTR-3B + GSTR-9 compute complete. GSTR-1 and GSTR-3B portal JSON complete.** GSTR-9 portal JSON + GSTR-2B reconciliation pending. UI wiring pending.
   - **WS3 (e-invoicing) — payload generator + preview endpoint complete.** NIC API submission still needs sandbox creds.
   - **WS4 (e-way bill) — payload generator + endpoint complete.** NIC EWB API submission still needs sandbox creds.
   - **WS5 (TDS/TCS) — pure compute helper complete.** Persistence + posting integration pending.
@@ -259,7 +259,7 @@ Three sub-PRs. Tick boxes as they ship.
   - **WS17 (reports) — 9 reports total.** Built-ins: balance-sheet, P&L, trial-balance, cash-flow, aging, custom + (this turn) sales-register, purchase-register, party-statement.
   - **WS18 (Tally migration) — masters import live.** Vouchers still pending.
   - **Marketing landing page** at `/` — reactbits-style hero/features/CTA, sign-in button → /login on same domain.
-- **Last updated:** 2026-05-03 by Claude (commit `bcb891d`)
+- **Last updated:** 2026-05-03 by Claude (commit `7ad121c`)
 - **What's done since last session:**
   - PR 1 (`ce7532d`+`381fe36`+`1cc57c0`): tenant isolation closed everywhere, permission model rewired, quick-wins.
   - PR 2 part 1 (`46d022b`): Decimal helpers, posting helpers, payments/receipts/bills/vouchers POST → GL posting in `$transaction`. Reports filter DRAFT.
@@ -331,6 +331,7 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
+| 2026-05-03 | **WS2 — GSTR-9 annual return compute.** Reuses GSTR-3B across FY. Sections 4 (outward+RCM-inward, B2B/B2C/exports/CN/DN), 5 (non-payable), 6 (ITC availed + RCM split), 7 (net ITC), 9 (tax payable / paid via ITC / paid in cash, cell-wise capped). `fyFromLabel("YYYY-YY")` helper. +11 tests (243 total). | `7ad121c` |
 | 2026-05-03 | **WS17 — sales/purchase register + party statement reports.** Three high-utility daily reports for Indian accountants. Pure read paths over existing data. Customer/vendor running balance, opening from pre-period docs, BOTH-typed parties combined. +11 tests (232 total). | `bcb891d` |
 | 2026-05-03 | **WS10 — manufacturing module.** Schema additions: Bom + BomItem + WorkOrder (migration `3_add_manufacturing` applied to Neon). `computeBomCost` + `resolveLeafCost` (multi-level w/ cycle detection). GET/POST /manufacturing/boms + /manufacturing/work-orders. +9 tests (221 total). | `6af0767` |
 | 2026-05-03 | **WS2 — GSTR-3B portal JSON converter + download endpoint.** Same shape pattern as GSTR-1: ret_period MMYYYY, sup_details (3.1), inter_sup placeholders (3.2), itc_elg with 5-row itc_avl (IMPG/IMPS/ISRC/ISD/OTH), inward_sup (5) GST/NONGST split. Serves as `GSTR3B_<gstin>_<MMYYYY>.json`. +10 tests (212 total). | `51091ea` |
