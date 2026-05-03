@@ -253,8 +253,9 @@ Three sub-PRs. Tick boxes as they ship.
   - **WS3 (e-invoicing) — payload generator + preview endpoint complete.** NIC API submission still needs sandbox creds.
   - **WS5 (TDS/TCS) — pure compute helper complete.** Persistence + posting integration pending.
   - **WS6 (banking) — bank statement CSV import live (HDFC/ICICI/SBI/Axis).** Auto-reconciliation pending.
+  - **WS7 (payroll) — PF/ESI/PT/TDS/LOP helpers exist (from before) and now have 24-test coverage.** Persistence + month-end run posting pending.
   - **WS18 (Tally migration) — masters import live.** Vouchers still pending.
-- **Last updated:** 2026-05-03 by Claude (commit `b56e2ad`)
+- **Last updated:** 2026-05-03 by Claude (commit `6914429`)
 - **What's done since last session:**
   - PR 1 (`ce7532d`+`381fe36`+`1cc57c0`): tenant isolation closed everywhere, permission model rewired, quick-wins.
   - PR 2 part 1 (`46d022b`): Decimal helpers, posting helpers, payments/receipts/bills/vouchers POST → GL posting in `$transaction`. Reports filter DRAFT.
@@ -326,6 +327,7 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
+| 2026-05-03 | **WS7 — payroll helper test coverage.** 24 tests for calculatePF / calculateESI / calculateProfessionalTax / calculateTDS / calculateLOP. Documents existing rounding/cap/threshold behavior. Migration to Decimal pending. +24 tests (153 total). | `6914429` |
 | 2026-05-03 | **WS6 — bank statement CSV importer.** `parseStatementCsv` + `importParsedTxns` for HDFC / ICICI / SBI / Axis / generic. Idempotent dedup key on (date, debit, credit, ref, desc). POST endpoint accepts multipart up to 10 MB. +9 tests (129 total). | `b56e2ad` |
 | 2026-05-03 | **WS5 — TDS/TCS computation helper.** TDS_RULES table for 194C/J/I/H/Q/O + 206C(1H)/(1F). `computeTds` with single + annual threshold logic, no-PAN penal rate, 194Q/206C "only excess over threshold" rule. +18 tests (120 total). | `0587008` |
 | 2026-05-03 | **WS18 — Tally migration: masters import.** `parseTallyXml` + `importTallyData` for groups / ledgers / parties / stock items. Two-pass group resolution, idempotent, audit-logged. POST endpoint accepts multipart up to 50 MB. fast-xml-parser dep added. +7 tests (102 total). | `1b812da` |
