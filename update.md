@@ -252,10 +252,12 @@ Three sub-PRs. Tick boxes as they ship.
   - **WS2 (GST returns) — GSTR-1 + GSTR-3B backends complete.** UI wiring is the only remaining piece.
   - **WS3 (e-invoicing) — payload generator + preview endpoint complete.** NIC API submission still needs sandbox creds.
   - **WS5 (TDS/TCS) — pure compute helper complete.** Persistence + posting integration pending.
-  - **WS6 (banking) — bank statement CSV import live (HDFC/ICICI/SBI/Axis).** Auto-reconciliation pending.
-  - **WS7 (payroll) — PF/ESI/PT/TDS/LOP helpers exist (from before) and now have 24-test coverage.** Persistence + month-end run posting pending.
+  - **WS4 (e-way bill) — payload generator + endpoint complete.** NIC EWB API submission still needs sandbox creds.
+  - **WS6 (banking) — bank statement CSV import + auto-reconciliation matcher live.** Manual-match UI for low-confidence cases pending.
+  - **WS7 (payroll) — PF/ESI/PT/TDS/LOP helpers tested.** Persistence + month-end run posting pending.
   - **WS18 (Tally migration) — masters import live.** Vouchers still pending.
-- **Last updated:** 2026-05-03 by Claude (commit `6914429`)
+  - **Marketing landing page** at `/` — reactbits-style hero/features/CTA, sign-in button → /login on same domain.
+- **Last updated:** 2026-05-03 by Claude (commit `74d8399`)
 - **What's done since last session:**
   - PR 1 (`ce7532d`+`381fe36`+`1cc57c0`): tenant isolation closed everywhere, permission model rewired, quick-wins.
   - PR 2 part 1 (`46d022b`): Decimal helpers, posting helpers, payments/receipts/bills/vouchers POST → GL posting in `$transaction`. Reports filter DRAFT.
@@ -327,7 +329,11 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
-| 2026-05-03 | **WS7 — payroll helper test coverage.** 24 tests for calculatePF / calculateESI / calculateProfessionalTax / calculateTDS / calculateLOP. Documents existing rounding/cap/threshold behavior. Migration to Decimal pending. +24 tests (153 total). | `6914429` |
+| 2026-05-03 | **Landing page** at `/` (reactbits-style). Aurora bg, BlurText reveal, TiltedCard, Magnetic CTA. Pure CSS + pointer events (no extra deps). Logged-in users hitting `/` redirect to `/dashboard`. | `74d8399` |
+| 2026-05-03 | **WS4 — e-way bill payload generator.** NIC EWB API schema v1.04: supplyType / subSupplyType / docType / from-to addresses (numeric state codes) / transport (mode/distance/vehicle/transporter). ₹50k threshold check. Vehicle normalization. EwayBillValidationError with structured details. +13 tests (202 total). | `a9df161` |
+| 2026-05-03 | **WS1 — HSN/SAC library + GSTIN Mod-36 checksum.** 50+ HSN entries + 20 SAC + lookup/search helpers + public `/api/hsn-search` endpoint. `verifyGstinChecksum` catches mistyped GSTINs that pass format. +20 tests (191 total). | `047b5b4` |
+| 2026-05-03 | **WS6 — bank reconciliation auto-matcher.** Layered scoring (amount + date proximity + ref-substring + party-token overlap, with ambiguity detection). Idempotent. POST endpoint. +18 tests (171 total). | `b77dfc3` |
+| 2026-05-03 | **WS7 — payroll helper test coverage.** 24 tests for calculatePF / calculateESI / calculateProfessionalTax / calculateTDS / calculateLOP. +24 tests (153 total). | `6914429` |
 | 2026-05-03 | **WS6 — bank statement CSV importer.** `parseStatementCsv` + `importParsedTxns` for HDFC / ICICI / SBI / Axis / generic. Idempotent dedup key on (date, debit, credit, ref, desc). POST endpoint accepts multipart up to 10 MB. +9 tests (129 total). | `b56e2ad` |
 | 2026-05-03 | **WS5 — TDS/TCS computation helper.** TDS_RULES table for 194C/J/I/H/Q/O + 206C(1H)/(1F). `computeTds` with single + annual threshold logic, no-PAN penal rate, 194Q/206C "only excess over threshold" rule. +18 tests (120 total). | `0587008` |
 | 2026-05-03 | **WS18 — Tally migration: masters import.** `parseTallyXml` + `importTallyData` for groups / ledgers / parties / stock items. Two-pass group resolution, idempotent, audit-logged. POST endpoint accepts multipart up to 50 MB. fast-xml-parser dep added. +7 tests (102 total). | `1b812da` |
