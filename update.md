@@ -237,33 +237,35 @@ Three sub-PRs. Tick boxes as they ship.
   - [x] `.env.example` documenting required + optional env vars.
   - [x] Deleted 40 zero-byte scaffold stubs + the now-empty parent dirs.
   - [x] `serverExternalPackages = ["pino","pino-pretty","thread-stream"]` so Turbopack stops trying to bundle pino's worker threads.
-- [ ] **PR 3 part 3 — DEFERRED:**
-  - [ ] Real Prisma migrations: `prisma migrate dev --create-only --name init`, `migrate resolve --applied init` against Neon, then `vercel.json` build command → `prisma migrate deploy && prisma generate && next build`.
-  - [ ] Refresh `DEVELOPER_GUIDE.md` (paths now `@/backend/...`, `@/frontend/...`, `@/shared/...`).
-  - [ ] Extract `hasPermission` to a leaf module so it can be unit-tested without pulling in next-auth (then add `with-org-auth.test.ts`).
-  - [ ] Integration tests against an ephemeral test DB.
+- [x] **PR 3 part 3 SHIPPED** (`e5d8935`):
+  - [x] Prisma migrations baselined: `prisma/migrations/0_init/migration.sql` generated via `migrate diff --from-empty --to-schema`, marked applied on Neon via `migrate resolve`. `migrate status` clean.
+  - [x] `vercel.json` build command → `prisma migrate deploy && prisma generate && next build`.
+  - [x] Extracted `hasPermission` + types to `src/backend/utils/permissions.ts` (leaf module, zero deps). Re-exported from with-org-auth.ts. **+10 unit tests** covering wildcards, malformed input, null cases.
+  - [x] DEVELOPER_GUIDE.md paths refreshed; pointer to update.md added at top.
+  - [ ] Integration tests against an ephemeral test DB (deferred — needs Docker / testcontainers setup).
 
 ## 8. Current state
 
-- **Active phase:** Phase 0 — **~95% complete**.
-- **Active sub-PR:** PR 1 + PR 2 (parts 1+2) + PR 3 (parts 1+2) all shipped. Remaining work is the Prisma migrations baseline + the deferred PR 2 part 3 items (voucher PATCH reversal, numbering sequences, soft delete sweep, audit log writes).
-- **Last updated:** 2026-05-03 by Claude (commit `31d3f43`)
+- **Active phase:** Phase 0 — **~98% complete**.
+- **Active sub-PR:** PR 1 + PR 2 (parts 1+2) + PR 3 (parts 1+2+3) all shipped. The only remaining audit-list items are bundled as PR 2 part 3 (voucher PATCH reversal, numbering sequences, soft delete sweep, audit log writes) — none are blocking, but voucher numbering races are real and worth fixing before high concurrent load.
+- **Last updated:** 2026-05-03 by Claude (commit `e5d8935`)
 - **What's done since last session:**
   - PR 1 (`ce7532d`+`381fe36`+`1cc57c0`): tenant isolation closed everywhere, permission model rewired, quick-wins.
   - PR 2 part 1 (`46d022b`): Decimal helpers, posting helpers, payments/receipts/bills/vouchers POST → GL posting in `$transaction`. Reports filter DRAFT.
   - PR 2 part 2 (`c5eba29`): Decimal sweep across 6 reports (~69 sites), stock movement guard + weighted-avg recompute.
   - PR 3 part 1 (`82a99c5`): env.ts zod, /api/health, error boundaries, security headers, pino logger, DB pool tuned, ESLint fixed, 8 unused deps pruned.
   - PR 3 part 2 (`31d3f43`): Vitest + 19 tests, GitHub Actions CI, console.error → logger sweep (129 calls / 60 files), README rewritten, .env.example, 40 scaffold stubs deleted.
-- **What's next (exact)** — Phase 1 prep:
-  - **(A) Phase 0 finishing — PR 2 part 3:** voucher PATCH with reversal → soft delete sweep → audit log writes. (Numbering sequences needs the migration baseline first.)
-  - **(B) Phase 0 finishing — PR 3 part 3:** Prisma migrations baseline + vercel.json update + DEVELOPER_GUIDE.md path refresh + hasPermission unit-testable extraction.
-  - **(C) Start Phase 1 (India ERP MVP)** — see roadmap §5. First sub-step: GST returns (GSTR-1) computation + JSON export. Or pick from: e-invoicing, TDS/TCS, recurring billing, Tally migration.
-  Recommendation: do (B) first because migrations unblock numbering sequences in (A), then (A), then Phase 1. But (C) is fine if you want to start showing customer value sooner — Phase 0 is already ~95% there.
+  - PR 3 part 3 (`e5d8935`): Prisma migrations baselined against Neon, vercel.json updated, hasPermission extracted to leaf module, +10 unit tests (29 total), DEVELOPER_GUIDE refreshed.
+- **What's next (exact)** — pick path:
+  - **(A) PR 2 part 3 — close out Phase 0:** voucher numbering Postgres sequences (now possible — migration baseline exists) → voucher PATCH reversal → soft delete sweep across parties/ledgers/bank-accounts/tax-config/bills → audit log writes inside every mutation tx.
+  - **(B) Start Phase 1 (India ERP MVP)** — pick a feature from §5: GST returns (GSTR-1/3B/9), e-invoicing (NIC IRN + QR), TDS/TCS, recurring billing, Tally XML migration, document OCR via Claude vision, dunning emails.
+  Recommendation: (A) is safer (numbering races bite under concurrency, audit log dead means compliance gap). (B) is more visible (sellable features). Either is defensible — Phase 0 is functionally complete.
 
 ## 9. Completed log (reverse chronological)
 
 | Date | What | Commit |
 |---|---|---|
+| 2026-05-03 | **PR 3 part 3 — migrations + permissions extraction.** Baselined Prisma migrations on Neon (`migrate diff` → `0_init/migration.sql`, `migrate resolve --applied`). vercel.json now runs `migrate deploy` before build. Extracted `hasPermission` to leaf module + 10 unit tests (29/29 passing). DEVELOPER_GUIDE paths refreshed. | `e5d8935` |
 | 2026-05-03 | **PR 3 part 2 — Vitest, CI, logger sweep, scaffold cleanup, README.** Vitest + 19 money-helper tests (`npm test`). GitHub Actions CI (typecheck/lint/test/build on push+PR). Replaced 129 `console.error` across 60 API files with `logger.error({ err })`. README rewritten. `.env.example`. 40 zero-byte scaffold stubs deleted. `serverExternalPackages` for pino. tsc + lint (0 errors) + tests (19/19) + build clean. | `31d3f43` |
 | 2026-05-03 | **PR 3 part 1 — ops baseline.** env.ts zod validation, /api/health endpoint, root error/global-error/not-found/loading boundaries, security headers (HSTS/XFO/CSP-lite/Permissions-Policy), pino logger with redaction, DB pool tuned for serverless (max=3), ESLint config fixed (2318 → 0 errors), Math.random-in-render bug fixed, 8 unused npm deps pruned. tsc + build + lint clean. | `82a99c5` |
 | 2026-05-03 | **PR 2 part 2.** Decimal sweep across 6 report files (~69 sites). Stock movement: atomic negative-stock guard via `updateMany` with `quantity:{gte}` predicate, weighted-avg recompute on PURCHASE/GRN/RETURN. tsc + build clean. Net +447/-376. | `c5eba29` |
