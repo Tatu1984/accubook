@@ -183,7 +183,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
       ).length;
 
       // Parse salary structure
-      let earnings = {
+      const earnings = {
         basic: Number(employee.ctc || 0) / 12 * 0.5,
         hra: 0,
         da: 0,
@@ -280,7 +280,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
           ).length;
 
           // Parse salary structure
-          let earnings = {
+          const earnings = {
             basic: Number(employee.ctc || 0) / 12 * 0.5,
             hra: 0,
             da: 0,
@@ -393,7 +393,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
         const lopDays = attendance.filter(a => a.status === "ABSENT").length;
 
         // Calculate
-        let earnings = {
+        const earnings = {
           basic: Number(employee.ctc || 0) / 12 * 0.5,
           hra: 0,
           da: 0,

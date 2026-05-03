@@ -122,7 +122,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
 
     // Calculate totals
     let subtotal = 0;
-    let totalTax = 0;
+    const totalTax = 0;
     let totalDiscount = 0;
 
     const itemsData = validatedData.items.map((item, index) => {

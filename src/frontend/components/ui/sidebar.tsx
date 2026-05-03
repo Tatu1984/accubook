@@ -599,6 +599,12 @@ function SidebarMenuBadge({
   )
 }
 
+// Pre-computed pseudo-random widths — lookup-by-index instead of calling
+// Math.random() during render (which the React Compiler flags as impure
+// and which would jitter on every rerender).
+const SKELETON_WIDTHS = [62, 78, 54, 89, 67, 73, 58, 81, 70, 85, 64, 76]
+let skeletonCursor = 0
+
 function SidebarMenuSkeleton({
   className,
   showIcon = false,
@@ -606,9 +612,10 @@ function SidebarMenuSkeleton({
 }: React.ComponentProps<"div"> & {
   showIcon?: boolean
 }) {
-  // Random width between 50 to 90%.
   const width = React.useMemo(() => {
-    return `${Math.floor(Math.random() * 40) + 50}%`
+    const w = SKELETON_WIDTHS[skeletonCursor % SKELETON_WIDTHS.length]
+    skeletonCursor++
+    return `${w}%`
   }, [])
 
   return (

@@ -450,7 +450,22 @@ export default function EmployeesPage() {
       if (response.ok) {
         const data = await response.json();
         if (data.length > 0) {
-          setEmployeesData(data.map((emp: any) => ({
+          type ApiEmployee = {
+            id: string;
+            employeeCode: string;
+            firstName: string;
+            lastName?: string | null;
+            email?: string | null;
+            phone?: string | null;
+            department?: { name?: string | null } | null;
+            designation?: { name?: string | null } | null;
+            joiningDate: string;
+            employmentType: Employee["employmentType"];
+            status: Employee["status"];
+            ctc?: number | string | null;
+            reportingTo?: string | null;
+          };
+          setEmployeesData((data as ApiEmployee[]).map<Employee>((emp) => ({
             id: emp.id,
             employeeCode: emp.employeeCode,
             firstName: emp.firstName,
@@ -463,7 +478,7 @@ export default function EmployeesPage() {
             employmentType: emp.employmentType,
             status: emp.status,
             ctc: Number(emp.ctc) || 0,
-            reportingTo: emp.reportingTo,
+            reportingTo: emp.reportingTo ?? undefined,
           })));
         }
       }
