@@ -257,7 +257,7 @@ Three sub-PRs. Tick boxes as they ship.
   - **WS7 (payroll) — PF/ESI/PT/TDS/LOP helpers tested.** Persistence + month-end run posting pending.
   - **WS18 (Tally migration) — masters import live.** Vouchers still pending.
   - **Marketing landing page** at `/` — reactbits-style hero/features/CTA, sign-in button → /login on same domain.
-- **Last updated:** 2026-05-03 by Claude (commit `74d8399`)
+- **Last updated:** 2026-05-03 by Claude (commit `6af0767`)
 - **What's done since last session:**
   - PR 1 (`ce7532d`+`381fe36`+`1cc57c0`): tenant isolation closed everywhere, permission model rewired, quick-wins.
   - PR 2 part 1 (`46d022b`): Decimal helpers, posting helpers, payments/receipts/bills/vouchers POST → GL posting in `$transaction`. Reports filter DRAFT.
@@ -329,6 +329,9 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
+| 2026-05-03 | **WS10 — manufacturing module.** Schema additions: Bom + BomItem + WorkOrder (migration `3_add_manufacturing` applied to Neon). `computeBomCost` + `resolveLeafCost` (multi-level w/ cycle detection). GET/POST /manufacturing/boms + /manufacturing/work-orders. +9 tests (221 total). | `6af0767` |
+| 2026-05-03 | **WS2 — GSTR-3B portal JSON converter + download endpoint.** Same shape pattern as GSTR-1: ret_period MMYYYY, sup_details (3.1), inter_sup placeholders (3.2), itc_elg with 5-row itc_avl (IMPG/IMPS/ISRC/ISD/OTH), inward_sup (5) GST/NONGST split. Serves as `GSTR3B_<gstin>_<MMYYYY>.json`. +10 tests (212 total). | `51091ea` |
+| 2026-05-03 | **chore(login):** show demo creds unconditionally. (Was env-gated; revert documented inline. Re-gate when real customers onboard.) | `daa03af` |
 | 2026-05-03 | **Landing page** at `/` (reactbits-style). Aurora bg, BlurText reveal, TiltedCard, Magnetic CTA. Pure CSS + pointer events (no extra deps). Logged-in users hitting `/` redirect to `/dashboard`. | `74d8399` |
 | 2026-05-03 | **WS4 — e-way bill payload generator.** NIC EWB API schema v1.04: supplyType / subSupplyType / docType / from-to addresses (numeric state codes) / transport (mode/distance/vehicle/transporter). ₹50k threshold check. Vehicle normalization. EwayBillValidationError with structured details. +13 tests (202 total). | `a9df161` |
 | 2026-05-03 | **WS1 — HSN/SAC library + GSTIN Mod-36 checksum.** 50+ HSN entries + 20 SAC + lookup/search helpers + public `/api/hsn-search` endpoint. `verifyGstinChecksum` catches mistyped GSTINs that pass format. +20 tests (191 total). | `047b5b4` |
