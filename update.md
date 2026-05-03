@@ -247,8 +247,8 @@ Three sub-PRs. Tick boxes as they ship.
 ## 8. Current state
 
 - **Active phase:** India end-to-end build (workstreams in §5). Foundation (Phase 0) done.
-- **Active workstreams:** WS1 (invoicing core) ~80% done; WS2 (GSTR-1 compute) first pass shipped.
-- **Last updated:** 2026-05-03 by Claude (commit `d2204a4`)
+- **Active workstreams:** WS1 (invoicing core) ~80% done; **WS2 (GSTR-1) backend complete end-to-end** — compute + all 9 sections + GSTN portal JSON download. UI wiring is the only remaining piece.
+- **Last updated:** 2026-05-03 by Claude (commit `9f93061`)
 - **What's done since last session:**
   - PR 1 (`ce7532d`+`381fe36`+`1cc57c0`): tenant isolation closed everywhere, permission model rewired, quick-wins.
   - PR 2 part 1 (`46d022b`): Decimal helpers, posting helpers, payments/receipts/bills/vouchers POST → GL posting in `$transaction`. Reports filter DRAFT.
@@ -269,18 +269,19 @@ Three sub-PRs. Tick boxes as they ship.
     4. Composition scheme handling (outward at 1%/5%/6%, no ITC).
     5. Export invoice (zero-rated outward, LUT vs IGST).
     6. Place-of-supply overrides for special-category services (IGST Act §12-13).
-  - **WS2 (GSTR-1) — first pass shipped (`d2204a4`):**
-    * `computeGstr1` aggregates B2B/B2CS/HSN/DOCS sections from persisted breakdown.
-    * `summarizeGstr1` for dashboard totals.
-    * GET `/api/organizations/[orgId]/gst-returns/gstr1?from=...&to=...`.
-    * 7 unit tests.
+  - **WS2 (GSTR-1) — backend complete:**
+    * `computeGstr1` covers all 9 sections: B2B / B2CL / B2CS / CDNR / CDNUR / EXP (WPAY/WOPAY) / NIL / HSN / DOCS (`d2204a4`, `95614c4`).
+    * `summarizeGstr1` includes credit-note / debit-note totals.
+    * `gstr1ToPortalJson` + GET `/api/.../gst-returns/gstr1/portal?...&download=true` produces the GSTN portal upload JSON in the exact format the portal accepts (DD-MM-YYYY dates, numeric state codes, rchrg Y/N, etc.) and serves it as `GSTR1_<gstin>_<MMYYYY>.json` (`9f93061`).
+    * Invoice POST sets `supplyType="EXPORT"` for non-Indian customers.
+    * 26 GSTR-1 unit tests (B2B/B2CL/B2CS/CDNR/CDNUR/EXP/NIL/HSN/DOCS + portal conversion).
   - **WS2 — still pending:**
-    1. B2CL (interstate B2C ≥ ₹2.5L) — currently bucketed into B2CS which is wrong per portal rules.
-    2. CDNR / CDNUR (credit/debit notes registered/unregistered) — line-level aggregation currently treats them as outward.
-    3. EXP (exports), ATXP (advances), NIL/EXEMPT.
-    4. Cess test coverage.
-    5. **GSTN portal JSON format conversion** + download endpoint.
-    6. UI: wire `taxation/gst/page.tsx` to call the new endpoint and display sections.
+    1. UI: wire `taxation/gst/page.tsx` to call the endpoints (compute + portal download), period picker, section tabs.
+    2. Org-level "preceding FY turnover" setting → flow into portal `gt` field. Current FY rolling turnover computation → `cur_gt`.
+    3. CDNUR `typ` discrimination (currently hardcoded "B2CL"; should detect EXPWP/EXPWOP for credit notes against export invoices).
+    4. inv_typ overrides (SEWP/SEWOP for SEZ, DE for deemed exports).
+    5. LUT-on-org flag → forces EXP exp_typ to WOPAY.
+    6. ATXP (advances), SUPECO (e-commerce supplies) — need new domain models.
   - **Order of work (rough trunk):** invoicing core → bills+ITC → GSTR-1 → e-invoicing → GSTR-3B → TDS → e-way bill → banking import → payroll → reports expansion → manufacturing → migration → POS → workflows → ESS.
   - Loose ends still open:
     - Integration tests against ephemeral test DB (Docker/testcontainers).
@@ -292,7 +293,10 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
-| 2026-05-03 | **WS2 — GSTR-1 outward returns first pass.** `computeGstr1` + `summarizeGstr1` services. B2B/B2CS/HSN/DOCS aggregation from persisted breakdown. GET `/api/.../gst-returns/gstr1` endpoint. 7 unit tests. tsc + 55/55 tests + build clean. | `d2204a4` |
+| 2026-05-03 | **WS2 — GSTR-1 GSTN portal JSON converter + download endpoint.** `gstr1ToPortalJson` + GET `/api/.../gst-returns/gstr1/portal?...&download=true` emits exact GSTN portal format (DD-MM-YYYY, numeric state codes, etc.). Serves as `GSTR1_<gstin>_<MMYYYY>.json`. +12 tests (74 total). | `9f93061` |
+| 2026-05-03 | **WS2 — GSTR-1 complete sections (B2CL, CDNR/CDNUR, EXP, NIL).** Refactored `computeGstr1` with `bucketize()` dispatcher. Added all missing GSTR-1 sections. Invoice POST sets supplyType="EXPORT" for non-IN customers. +7 tests (62 total). | `95614c4` |
+| 2026-05-03 | docs: Vercel deployment guide added to README. | `909a25d` |
+| 2026-05-03 | **WS2 — GSTR-1 outward returns first pass.** `computeGstr1` + `summarizeGstr1` services. B2B/B2CS/HSN/DOCS aggregation from persisted breakdown. GET `/api/.../gst-returns/gstr1` endpoint. 7 unit tests. | `d2204a4` |
 | 2026-05-03 | **WS1 — persist CGST/SGST/IGST breakdown.** Migration `2_add_gst_breakdown` adds placeOfSupply/supplyType/reverseCharge to invoices+bills, and cgstRate/cgstAmount/sgstRate/sgstAmount/igstRate/igstAmount/cessRate/cessAmount to invoice_items+bill_items. POST handlers populate them. Audit trail locked at write time. | `f948ce6` |
 | 2026-05-03 | **WS1 (India invoicing) — place-of-supply GST split.** `india-tax.ts` helper + 19 tests. Invoice POST + Bill POST now compute correct CGST/SGST/IGST per place of supply. Foundation for GSTR-1, e-invoicing, RCM. tsc + 48/48 tests + build clean. | `dcf10b3` |
 | 2026-05-03 | **PR 2 part 3 b/c/d — voucher PATCH reversal, soft delete sweep, audit log writes.** Voucher PATCH now applies/reverses ledger entries on status transitions. bills + tax-config DELETE no longer hard-delete past FK refs. `src/backend/utils/audit.ts` helper hooked into payments/receipts/vouchers POST + vouchers PATCH. **Phase 0 audit punch list 100% complete.** | `4ad25ca` |
