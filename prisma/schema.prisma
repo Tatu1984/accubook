@@ -151,6 +151,8 @@ model Organization {
   payments          Payment[]
   receipts          Receipt[]
   numberCounters    NumberCounter[]
+  boms              Bom[]
+  workOrders        WorkOrder[]
 
   @@map("organizations")
 }
@@ -643,11 +645,105 @@ model Item {
   quotationItems     QuotationItem[]
   invoiceItems       InvoiceItem[]
   billItems          BillItem[]
+  boms               Bom[]               @relation("BomFinishedGood")
+  bomComponents      BomItem[]
+  workOrders         WorkOrder[]
 
   @@unique([organizationId, name])
   @@unique([organizationId, sku])
   @@index([organizationId, categoryId])
   @@map("items")
+}
+
+// ============================================
+// MANUFACTURING — BOM + WORK ORDERS
+// ============================================
+
+/**
+ * Bill of Materials. Each finished-good Item can have one or more BOMs
+ * (revisions). The "active" BOM is what work orders use by default.
+ *
+ * Multi-level: a component on one BOM can itself be a finished-good
+ * with its own BOM. Resolution to leaf raw materials happens at compute
+ * time, not in the schema.
+ */
+model Bom {
+  id              String   @id @default(cuid())
+  organizationId  String
+  itemId          String   // The finished good produced.
+  bomNumber       String
+  /** Output quantity per BOM run (e.g. "1 laptop" or "100 bottles"). */
+  outputQuantity  Decimal  @db.Decimal(18, 4)
+  outputUnitId    String
+  description     String?
+  isActive        Boolean  @default(true)
+  effectiveFrom   DateTime?
+  effectiveTo     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  item         Item          @relation("BomFinishedGood", fields: [itemId], references: [id])
+  outputUnit   UnitOfMeasure @relation("BomOutputUnit", fields: [outputUnitId], references: [id])
+  components   BomItem[]
+  workOrders   WorkOrder[]
+
+  @@unique([organizationId, bomNumber])
+  @@index([organizationId, itemId])
+  @@map("boms")
+}
+
+model BomItem {
+  id          String   @id @default(cuid())
+  bomId       String
+  itemId      String
+  quantity    Decimal  @db.Decimal(18, 4)
+  unitId      String
+  /** Per-unit cost at the time of BOM authoring (snapshot). Caller may
+      override with current item cost when computing landed cost. */
+  unitCost    Decimal? @db.Decimal(18, 4)
+  notes       String?
+  sequence    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  bom         Bom           @relation(fields: [bomId], references: [id], onDelete: Cascade)
+  item        Item          @relation(fields: [itemId], references: [id])
+  unit        UnitOfMeasure @relation("BomItemUnit", fields: [unitId], references: [id])
+
+  @@map("bom_items")
+}
+
+/**
+ * Work order. Captures a manufacturing run: produce N units of a
+ * finished good against a BOM. Tracks quantity completed, scrap, and
+ * the resulting stock movements (raw issued + finished GRN'd).
+ */
+model WorkOrder {
+  id                String    @id @default(cuid())
+  organizationId    String
+  workOrderNumber   String
+  bomId             String
+  itemId            String      // denormalized from BOM for quick filter
+  plannedQuantity   Decimal   @db.Decimal(18, 4)
+  completedQuantity Decimal   @default(0) @db.Decimal(18, 4)
+  scrapQuantity     Decimal   @default(0) @db.Decimal(18, 4)
+  warehouseId       String?
+  status            String    @default("DRAFT") // DRAFT, IN_PROGRESS, COMPLETED, CANCELLED
+  startDate         DateTime?
+  endDate           DateTime?
+  notes             String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  bom          Bom          @relation(fields: [bomId], references: [id])
+  item         Item         @relation(fields: [itemId], references: [id])
+  warehouse    Warehouse?   @relation("WorkOrderWarehouse", fields: [warehouseId], references: [id])
+
+  @@unique([organizationId, workOrderNumber])
+  @@index([organizationId, status])
+  @@map("work_orders")
 }
 
 model UnitOfMeasure {
@@ -662,6 +758,8 @@ model UnitOfMeasure {
   items          Item[]
   itemUnits      ItemUnit[]
   stockMovements StockMovement[]
+  bomOutputs     Bom[]           @relation("BomOutputUnit")
+  bomItemUnits   BomItem[]       @relation("BomItemUnit")
 
   @@unique([name])
   @@map("units_of_measure")
@@ -707,6 +805,7 @@ model Warehouse {
   batches        Batch[]
   stockMovementsFrom StockMovement[] @relation("MovementFromWarehouse")
   stockMovementsTo   StockMovement[] @relation("MovementToWarehouse")
+  workOrders     WorkOrder[]         @relation("WorkOrderWarehouse")
 
   @@unique([organizationId, name])
   @@map("warehouses")
