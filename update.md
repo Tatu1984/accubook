@@ -251,8 +251,10 @@ Three sub-PRs. Tick boxes as they ship.
   - WS1 (invoicing core) ~80% done.
   - **WS2 (GST returns) — GSTR-1 + GSTR-3B backends complete.** UI wiring is the only remaining piece.
   - **WS3 (e-invoicing) — payload generator + preview endpoint complete.** NIC API submission still needs sandbox creds.
+  - **WS5 (TDS/TCS) — pure compute helper complete.** Persistence + posting integration pending.
+  - **WS6 (banking) — bank statement CSV import live (HDFC/ICICI/SBI/Axis).** Auto-reconciliation pending.
   - **WS18 (Tally migration) — masters import live.** Vouchers still pending.
-- **Last updated:** 2026-05-03 by Claude (commit `1b812da`)
+- **Last updated:** 2026-05-03 by Claude (commit `b56e2ad`)
 - **What's done since last session:**
   - PR 1 (`ce7532d`+`381fe36`+`1cc57c0`): tenant isolation closed everywhere, permission model rewired, quick-wins.
   - PR 2 part 1 (`46d022b`): Decimal helpers, posting helpers, payments/receipts/bills/vouchers POST → GL posting in `$transaction`. Reports filter DRAFT.
@@ -324,6 +326,8 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
+| 2026-05-03 | **WS6 — bank statement CSV importer.** `parseStatementCsv` + `importParsedTxns` for HDFC / ICICI / SBI / Axis / generic. Idempotent dedup key on (date, debit, credit, ref, desc). POST endpoint accepts multipart up to 10 MB. +9 tests (129 total). | `b56e2ad` |
+| 2026-05-03 | **WS5 — TDS/TCS computation helper.** TDS_RULES table for 194C/J/I/H/Q/O + 206C(1H)/(1F). `computeTds` with single + annual threshold logic, no-PAN penal rate, 194Q/206C "only excess over threshold" rule. +18 tests (120 total). | `0587008` |
 | 2026-05-03 | **WS18 — Tally migration: masters import.** `parseTallyXml` + `importTallyData` for groups / ledgers / parties / stock items. Two-pass group resolution, idempotent, audit-logged. POST endpoint accepts multipart up to 50 MB. fast-xml-parser dep added. +7 tests (102 total). | `1b812da` |
 | 2026-05-03 | **WS3 — E-invoice NIC IRN payload generator.** `buildEInvoicePayload` produces NIC schema v1.1 payload. Strict pre-flight validation with structured error `details: string[]`. GET preview/validation endpoint. +11 tests (95 total). NIC API submission separate. | `66fe987` |
 | 2026-05-03 | **WS2 — GSTR-3B compute + endpoint.** `computeGstr3b` covers Section 3.1 outward classifications (taxable/zero-rated/nil-rated/RCM-inward), Section 4 ITC available + net, Section 5 exempt inward (intra/inter split). Signed CN accumulation. Decimal end-to-end. +10 tests (84 total). | `3b5aa5e` |
