@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth } from "@/backend/utils/with-org-auth";
+import { D, sum, toNumber } from "@/backend/utils/money";
+import { Prisma } from "@/generated/prisma";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,8 +12,8 @@ interface PLLineItem {
   ledgerName: string;
   groupId: string;
   groupName: string;
-  amount: number;
-  previousAmount?: number;
+  amount: Prisma.Decimal;
+  previousAmount?: Prisma.Decimal;
 }
 
 interface PLGroup {
@@ -19,8 +21,8 @@ interface PLGroup {
   groupName: string;
   affectsGrossProfit: boolean;
   items: PLLineItem[];
-  total: number;
-  previousTotal?: number;
+  total: Prisma.Decimal;
+  previousTotal?: Prisma.Decimal;
 }
 
 export const GET = withOrgAuth(async (request, { orgId }) => {
@@ -86,7 +88,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
         voucher: {
           organizationId: orgId,
           date: { gte: periodStart, lte: periodEnd },
-          status: { in: ["APPROVED", "DRAFT"] },
+          status: "APPROVED",
         },
       },
     });
@@ -100,34 +102,36 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
           voucher: {
             organizationId: orgId,
             date: { gte: prevPeriodStart, lte: prevPeriodEnd },
-            status: { in: ["APPROVED", "DRAFT"] },
+            status: "APPROVED",
           },
         },
       });
     }
 
     // Calculate amounts for each ledger
-    const ledgerAmounts = new Map<string, { current: number; previous: number }>();
+    const ledgerAmounts = new Map<string, { current: Prisma.Decimal; previous: Prisma.Decimal }>();
 
     ledgers.forEach((ledger) => {
       const isIncome = ledger.group.nature === "INCOME";
 
       // Current period
       const currentLedgerEntries = currentEntries.filter((e) => e.ledgerId === ledger.id);
-      const currentDebit = currentLedgerEntries.reduce((sum, e) => sum + Number(e.debitAmount), 0);
-      const currentCredit = currentLedgerEntries.reduce((sum, e) => sum + Number(e.creditAmount), 0);
+      const currentDebit = sum(currentLedgerEntries.map((e) => e.debitAmount));
+      const currentCredit = sum(currentLedgerEntries.map((e) => e.creditAmount));
 
       // For income: credit - debit (income increases with credit)
       // For expenses: debit - credit (expenses increase with debit)
-      const currentAmount = isIncome ? currentCredit - currentDebit : currentDebit - currentCredit;
+      const currentAmount = isIncome
+        ? currentCredit.minus(currentDebit)
+        : currentDebit.minus(currentCredit);
 
       // Previous period
-      let previousAmount = 0;
+      let previousAmount = D(0);
       if (compareWithPrevious) {
         const prevLedgerEntries = previousEntries.filter((e) => e.ledgerId === ledger.id);
-        const prevDebit = prevLedgerEntries.reduce((sum, e) => sum + Number(e.debitAmount), 0);
-        const prevCredit = prevLedgerEntries.reduce((sum, e) => sum + Number(e.creditAmount), 0);
-        previousAmount = isIncome ? prevCredit - prevDebit : prevDebit - prevCredit;
+        const prevDebit = sum(prevLedgerEntries.map((e) => e.debitAmount));
+        const prevCredit = sum(prevLedgerEntries.map((e) => e.creditAmount));
+        previousAmount = isIncome ? prevCredit.minus(prevDebit) : prevDebit.minus(prevCredit);
       }
 
       ledgerAmounts.set(ledger.id, { current: currentAmount, previous: previousAmount });
@@ -142,7 +146,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
     const groupMap = new Map<string, PLGroup>();
 
     ledgers.forEach((ledger) => {
-      const amounts = ledgerAmounts.get(ledger.id) || { current: 0, previous: 0 };
+      const amounts = ledgerAmounts.get(ledger.id) || { current: D(0), previous: D(0) };
 
       if (!groupMap.has(ledger.group.id)) {
         groupMap.set(ledger.group.id, {
@@ -150,15 +154,15 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
           groupName: ledger.group.name,
           affectsGrossProfit: ledger.group.affectsGrossProfit,
           items: [],
-          total: 0,
-          previousTotal: 0,
+          total: D(0),
+          previousTotal: D(0),
         });
       }
 
       const group = groupMap.get(ledger.group.id)!;
 
       // Only add if there's any amount
-      if (amounts.current !== 0 || amounts.previous !== 0) {
+      if (!amounts.current.isZero() || !amounts.previous.isZero()) {
         group.items.push({
           ledgerId: ledger.id,
           ledgerName: ledger.name,
@@ -167,8 +171,8 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
           amount: amounts.current,
           previousAmount: compareWithPrevious ? amounts.previous : undefined,
         });
-        group.total += amounts.current;
-        group.previousTotal = (group.previousTotal || 0) + amounts.previous;
+        group.total = group.total.plus(amounts.current);
+        group.previousTotal = (group.previousTotal ?? D(0)).plus(amounts.previous);
       }
     });
 
@@ -187,18 +191,25 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
     });
 
     // Calculate totals
-    const totalIncome = incomeGroups.reduce((sum, g) => sum + g.total, 0);
-    const totalDirectExpenses = directExpenseGroups.reduce((sum, g) => sum + g.total, 0);
-    const totalIndirectExpenses = indirectExpenseGroups.reduce((sum, g) => sum + g.total, 0);
-    const grossProfit = totalIncome - totalDirectExpenses;
-    const netProfit = grossProfit - totalIndirectExpenses;
+    const totalIncome = sum(incomeGroups.map((g) => g.total));
+    const totalDirectExpenses = sum(directExpenseGroups.map((g) => g.total));
+    const totalIndirectExpenses = sum(indirectExpenseGroups.map((g) => g.total));
+    const grossProfit = totalIncome.minus(totalDirectExpenses);
+    const netProfit = grossProfit.minus(totalIndirectExpenses);
 
     // Previous period totals
-    const prevTotalIncome = incomeGroups.reduce((sum, g) => sum + (g.previousTotal || 0), 0);
-    const prevTotalDirectExpenses = directExpenseGroups.reduce((sum, g) => sum + (g.previousTotal || 0), 0);
-    const prevTotalIndirectExpenses = indirectExpenseGroups.reduce((sum, g) => sum + (g.previousTotal || 0), 0);
-    const prevGrossProfit = prevTotalIncome - prevTotalDirectExpenses;
-    const prevNetProfit = prevGrossProfit - prevTotalIndirectExpenses;
+    const prevTotalIncome = sum(incomeGroups.map((g) => g.previousTotal ?? D(0)));
+    const prevTotalDirectExpenses = sum(directExpenseGroups.map((g) => g.previousTotal ?? D(0)));
+    const prevTotalIndirectExpenses = sum(indirectExpenseGroups.map((g) => g.previousTotal ?? D(0)));
+    const prevGrossProfit = prevTotalIncome.minus(prevTotalDirectExpenses);
+    const prevNetProfit = prevGrossProfit.minus(prevTotalIndirectExpenses);
+
+    const grossMargin = totalIncome.greaterThan(D(0))
+      ? toNumber(grossProfit.div(totalIncome).times(D(100)))
+      : 0;
+    const netMargin = totalIncome.greaterThan(D(0))
+      ? toNumber(netProfit.div(totalIncome).times(D(100)))
+      : 0;
 
     return NextResponse.json({
       period: {
@@ -223,7 +234,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       grossProfit: {
         amount: grossProfit,
         previousAmount: compareWithPrevious ? prevGrossProfit : undefined,
-        percentage: totalIncome > 0 ? (grossProfit / totalIncome) * 100 : 0,
+        percentage: grossMargin,
       },
       indirectExpenses: {
         groups: indirectExpenseGroups,
@@ -234,15 +245,15 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       netProfit: {
         amount: netProfit,
         previousAmount: compareWithPrevious ? prevNetProfit : undefined,
-        percentage: totalIncome > 0 ? (netProfit / totalIncome) * 100 : 0,
+        percentage: netMargin,
       },
       summary: {
         totalIncome,
-        totalExpenses: totalDirectExpenses + totalIndirectExpenses,
+        totalExpenses: totalDirectExpenses.plus(totalIndirectExpenses),
         grossProfit,
-        grossProfitMargin: totalIncome > 0 ? (grossProfit / totalIncome) * 100 : 0,
+        grossProfitMargin: grossMargin,
         netProfit,
-        netProfitMargin: totalIncome > 0 ? (netProfit / totalIncome) * 100 : 0,
+        netProfitMargin: netMargin,
       },
     });
   } catch (error) {

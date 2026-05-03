@@ -1,20 +1,22 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth } from "@/backend/utils/with-org-auth";
+import { D, sum } from "@/backend/utils/money";
+import { Prisma } from "@/generated/prisma";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 interface CashFlowItem {
   description: string;
-  amount: number;
+  amount: Prisma.Decimal;
   type: "inflow" | "outflow";
 }
 
 interface CashFlowSection {
   label: string;
   items: CashFlowItem[];
-  netAmount: number;
+  netAmount: Prisma.Decimal;
 }
 
 export const GET = withOrgAuth(async (request, { orgId }) => {
@@ -55,10 +57,10 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
     const cashBankIds = cashBankLedgers.map((l) => l.id);
 
     // Opening balance from ledgers
-    let openingBalance = cashBankLedgers.reduce((sum, l) => {
-      const balance = Number(l.openingBalance) || 0;
-      return l.openingBalanceType === "DR" ? sum + balance : sum - balance;
-    }, 0);
+    let openingBalance = cashBankLedgers.reduce<Prisma.Decimal>((acc, l) => {
+      const balance = D(l.openingBalance ?? 0);
+      return l.openingBalanceType === "DR" ? acc.plus(balance) : acc.minus(balance);
+    }, D(0));
 
     // Add transactions before period start
     const preperiodEntries = await prisma.voucherEntry.findMany({
@@ -67,13 +69,13 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
         voucher: {
           organizationId: orgId,
           date: { lt: periodStart },
-          status: { in: ["APPROVED", "DRAFT"] },
+          status: "APPROVED",
         },
       },
     });
 
     preperiodEntries.forEach((entry) => {
-      openingBalance += Number(entry.debitAmount) - Number(entry.creditAmount);
+      openingBalance = openingBalance.plus(D(entry.debitAmount)).minus(D(entry.creditAmount));
     });
 
     // Get all receipts in period
@@ -144,15 +146,17 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
     const operatingActivities: CashFlowSection = {
       label: "Cash Flow from Operating Activities",
       items: [],
-      netAmount: 0,
+      netAmount: D(0),
     };
 
     // Collections from customers
-    const customerReceipts = receipts
-      .filter((r) => r.party?.type === "CUSTOMER" || r.party?.type === "BOTH")
-      .reduce((sum, r) => sum + Number(r.amount), 0);
+    const customerReceipts = sum(
+      receipts
+        .filter((r) => r.party?.type === "CUSTOMER" || r.party?.type === "BOTH")
+        .map((r) => r.amount)
+    );
 
-    if (customerReceipts > 0) {
+    if (customerReceipts.greaterThan(D(0))) {
       operatingActivities.items.push({
         description: "Cash received from customers",
         amount: customerReceipts,
@@ -161,11 +165,13 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
     }
 
     // Other receipts
-    const otherReceipts = receipts
-      .filter((r) => r.party?.type !== "CUSTOMER" && r.party?.type !== "BOTH")
-      .reduce((sum, r) => sum + Number(r.amount), 0);
+    const otherReceipts = sum(
+      receipts
+        .filter((r) => r.party?.type !== "CUSTOMER" && r.party?.type !== "BOTH")
+        .map((r) => r.amount)
+    );
 
-    if (otherReceipts > 0) {
+    if (otherReceipts.greaterThan(D(0))) {
       operatingActivities.items.push({
         description: "Other cash receipts",
         amount: otherReceipts,
@@ -174,77 +180,77 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
     }
 
     // Payments to suppliers
-    const supplierPayments = payments
-      .filter((p) => p.party?.type === "VENDOR" || p.party?.type === "BOTH")
-      .reduce((sum, p) => sum + Number(p.amount), 0);
+    const supplierPayments = sum(
+      payments
+        .filter((p) => p.party?.type === "VENDOR" || p.party?.type === "BOTH")
+        .map((p) => p.amount)
+    );
 
-    if (supplierPayments > 0) {
+    if (supplierPayments.greaterThan(D(0))) {
       operatingActivities.items.push({
         description: "Cash paid to suppliers",
-        amount: -supplierPayments,
+        amount: supplierPayments.negated(),
         type: "outflow",
       });
     }
 
     // Salary payments
-    const salaryPayments = Number(payslips._sum.netSalary || 0);
-    if (salaryPayments > 0) {
+    const salaryPayments = D(payslips._sum.netSalary ?? 0);
+    if (salaryPayments.greaterThan(D(0))) {
       operatingActivities.items.push({
         description: "Salaries and wages paid",
-        amount: -salaryPayments,
+        amount: salaryPayments.negated(),
         type: "outflow",
       });
     }
 
     // Expense reimbursements
-    const expenseReimbursements = Number(expenseClaims._sum.amount || 0);
-    if (expenseReimbursements > 0) {
+    const expenseReimbursements = D(expenseClaims._sum.amount ?? 0);
+    if (expenseReimbursements.greaterThan(D(0))) {
       operatingActivities.items.push({
         description: "Employee expense reimbursements",
-        amount: -expenseReimbursements,
+        amount: expenseReimbursements.negated(),
         type: "outflow",
       });
     }
 
     // Other payments
-    const otherPayments = payments
-      .filter((p) => p.party?.type !== "VENDOR" && p.party?.type !== "BOTH")
-      .reduce((sum, p) => sum + Number(p.amount), 0);
+    const otherPayments = sum(
+      payments
+        .filter((p) => p.party?.type !== "VENDOR" && p.party?.type !== "BOTH")
+        .map((p) => p.amount)
+    );
 
-    if (otherPayments > 0) {
+    if (otherPayments.greaterThan(D(0))) {
       operatingActivities.items.push({
         description: "Other operating payments",
-        amount: -otherPayments,
+        amount: otherPayments.negated(),
         type: "outflow",
       });
     }
 
-    operatingActivities.netAmount = operatingActivities.items.reduce(
-      (sum, item) => sum + item.amount,
-      0
-    );
+    operatingActivities.netAmount = sum(operatingActivities.items.map((item) => item.amount));
 
     // Investing activities (placeholder - would need asset purchase data)
     const investingActivities: CashFlowSection = {
       label: "Cash Flow from Investing Activities",
       items: [],
-      netAmount: 0,
+      netAmount: D(0),
     };
 
     // Financing activities (placeholder - would need loan data)
     const financingActivities: CashFlowSection = {
       label: "Cash Flow from Financing Activities",
       items: [],
-      netAmount: 0,
+      netAmount: D(0),
     };
 
     // Calculate closing balance
-    const netCashFlow =
-      operatingActivities.netAmount +
-      investingActivities.netAmount +
-      financingActivities.netAmount;
+    const netCashFlow = operatingActivities.netAmount
+      .plus(investingActivities.netAmount)
+      .plus(financingActivities.netAmount);
 
-    const closingBalance = openingBalance + netCashFlow;
+    const closingBalance = openingBalance.plus(netCashFlow);
 
     // Get actual closing from voucher entries
     const periodEntries = await prisma.voucherEntry.findMany({
@@ -253,17 +259,16 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
         voucher: {
           organizationId: orgId,
           date: { gte: periodStart, lte: periodEnd },
-          status: { in: ["APPROVED", "DRAFT"] },
+          status: "APPROVED",
         },
       },
     });
 
-    const periodMovement = periodEntries.reduce(
-      (sum, entry) => sum + Number(entry.debitAmount) - Number(entry.creditAmount),
-      0
+    const periodMovement = sum(periodEntries.map((entry) => entry.debitAmount)).minus(
+      sum(periodEntries.map((entry) => entry.creditAmount))
     );
 
-    const actualClosingBalance = openingBalance + periodMovement;
+    const actualClosingBalance = openingBalance.plus(periodMovement);
 
     return NextResponse.json({
       period: {
@@ -280,18 +285,16 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       reconciliation: {
         calculated: closingBalance,
         actual: actualClosingBalance,
-        difference: closingBalance - actualClosingBalance,
-        isReconciled: Math.abs(closingBalance - actualClosingBalance) < 0.01,
+        difference: closingBalance.minus(actualClosingBalance),
+        isReconciled: closingBalance.minus(actualClosingBalance).abs().lessThan(D("0.01")),
       },
       summary: {
-        totalInflow: operatingActivities.items
-          .filter((i) => i.type === "inflow")
-          .reduce((sum, i) => sum + i.amount, 0),
-        totalOutflow: Math.abs(
-          operatingActivities.items
-            .filter((i) => i.type === "outflow")
-            .reduce((sum, i) => sum + i.amount, 0)
+        totalInflow: sum(
+          operatingActivities.items.filter((i) => i.type === "inflow").map((i) => i.amount)
         ),
+        totalOutflow: sum(
+          operatingActivities.items.filter((i) => i.type === "outflow").map((i) => i.amount)
+        ).abs(),
         netChange: netCashFlow,
         openingBalance,
         closingBalance: actualClosingBalance,

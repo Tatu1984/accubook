@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth } from "@/backend/utils/with-org-auth";
+import { D, sum } from "@/backend/utils/money";
+import { Prisma } from "@/generated/prisma";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,12 +14,12 @@ interface TrialBalanceItem {
   groupId: string;
   groupName: string;
   nature: string;
-  openingDebit: number;
-  openingCredit: number;
-  periodDebit: number;
-  periodCredit: number;
-  closingDebit: number;
-  closingCredit: number;
+  openingDebit: Prisma.Decimal;
+  openingCredit: Prisma.Decimal;
+  periodDebit: Prisma.Decimal;
+  periodCredit: Prisma.Decimal;
+  closingDebit: Prisma.Decimal;
+  closingCredit: Prisma.Decimal;
 }
 
 export const GET = withOrgAuth(async (request, { orgId }) => {
@@ -83,7 +85,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
         voucher: {
           organizationId: orgId,
           date: { lte: fyEnd },
-          status: { in: ["APPROVED", "DRAFT"] }, // Include draft for now
+          status: "APPROVED",
           isPosted: true,
         },
       },
@@ -99,11 +101,11 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
     // Calculate balances for each ledger
     const trialBalanceItems: TrialBalanceItem[] = ledgers.map((ledger) => {
       // Opening balance from ledger
-      const openingBalance = Number(ledger.openingBalance) || 0;
+      const openingBalance = D(ledger.openingBalance ?? 0);
       const isDebitNature = ["ASSETS", "EXPENSES"].includes(ledger.group.nature);
 
-      let openingDebit = 0;
-      let openingCredit = 0;
+      let openingDebit = D(0);
+      let openingCredit = D(0);
 
       if (ledger.openingBalanceType === "DR" || (isDebitNature && !ledger.openingBalanceType)) {
         openingDebit = openingBalance;
@@ -116,31 +118,31 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
 
       // Entries before FY start (for opening)
       const beforeFYEntries = ledgerEntries.filter((e) => e.voucher.date < fyStart);
-      const beforeDebit = beforeFYEntries.reduce((sum, e) => sum + Number(e.debitAmount), 0);
-      const beforeCredit = beforeFYEntries.reduce((sum, e) => sum + Number(e.creditAmount), 0);
+      const beforeDebit = sum(beforeFYEntries.map((e) => e.debitAmount));
+      const beforeCredit = sum(beforeFYEntries.map((e) => e.creditAmount));
 
       // Add transaction-based opening to ledger opening
-      openingDebit += beforeDebit;
-      openingCredit += beforeCredit;
+      openingDebit = openingDebit.plus(beforeDebit);
+      openingCredit = openingCredit.plus(beforeCredit);
 
       // Period entries (from FY start to asOfDate)
       const periodEntries = ledgerEntries.filter(
         (e) => e.voucher.date >= fyStart && e.voucher.date <= fyEnd
       );
-      const periodDebit = periodEntries.reduce((sum, e) => sum + Number(e.debitAmount), 0);
-      const periodCredit = periodEntries.reduce((sum, e) => sum + Number(e.creditAmount), 0);
+      const periodDebit = sum(periodEntries.map((e) => e.debitAmount));
+      const periodCredit = sum(periodEntries.map((e) => e.creditAmount));
 
       // Calculate closing balance
-      const totalDebit = openingDebit + periodDebit;
-      const totalCredit = openingCredit + periodCredit;
+      const totalDebit = openingDebit.plus(periodDebit);
+      const totalCredit = openingCredit.plus(periodCredit);
 
-      let closingDebit = 0;
-      let closingCredit = 0;
+      let closingDebit = D(0);
+      let closingCredit = D(0);
 
-      if (totalDebit > totalCredit) {
-        closingDebit = totalDebit - totalCredit;
+      if (totalDebit.greaterThan(totalCredit)) {
+        closingDebit = totalDebit.minus(totalCredit);
       } else {
-        closingCredit = totalCredit - totalDebit;
+        closingCredit = totalCredit.minus(totalDebit);
       }
 
       return {
@@ -165,31 +167,31 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       ? trialBalanceItems
       : trialBalanceItems.filter(
           (item) =>
-            item.openingDebit !== 0 ||
-            item.openingCredit !== 0 ||
-            item.periodDebit !== 0 ||
-            item.periodCredit !== 0 ||
-            item.closingDebit !== 0 ||
-            item.closingCredit !== 0
+            !item.openingDebit.isZero() ||
+            !item.openingCredit.isZero() ||
+            !item.periodDebit.isZero() ||
+            !item.periodCredit.isZero() ||
+            !item.closingDebit.isZero() ||
+            !item.closingCredit.isZero()
         );
 
     // Calculate totals
     const totals = filteredItems.reduce(
       (acc, item) => ({
-        openingDebit: acc.openingDebit + item.openingDebit,
-        openingCredit: acc.openingCredit + item.openingCredit,
-        periodDebit: acc.periodDebit + item.periodDebit,
-        periodCredit: acc.periodCredit + item.periodCredit,
-        closingDebit: acc.closingDebit + item.closingDebit,
-        closingCredit: acc.closingCredit + item.closingCredit,
+        openingDebit: acc.openingDebit.plus(item.openingDebit),
+        openingCredit: acc.openingCredit.plus(item.openingCredit),
+        periodDebit: acc.periodDebit.plus(item.periodDebit),
+        periodCredit: acc.periodCredit.plus(item.periodCredit),
+        closingDebit: acc.closingDebit.plus(item.closingDebit),
+        closingCredit: acc.closingCredit.plus(item.closingCredit),
       }),
       {
-        openingDebit: 0,
-        openingCredit: 0,
-        periodDebit: 0,
-        periodCredit: 0,
-        closingDebit: 0,
-        closingCredit: 0,
+        openingDebit: D(0),
+        openingCredit: D(0),
+        periodDebit: D(0),
+        periodCredit: D(0),
+        closingDebit: D(0),
+        closingCredit: D(0),
       }
     );
 
@@ -199,12 +201,12 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       groupName: string;
       ledgers: typeof filteredItems;
       totals: {
-        openingDebit: number;
-        openingCredit: number;
-        periodDebit: number;
-        periodCredit: number;
-        closingDebit: number;
-        closingCredit: number;
+        openingDebit: Prisma.Decimal;
+        openingCredit: Prisma.Decimal;
+        periodDebit: Prisma.Decimal;
+        periodCredit: Prisma.Decimal;
+        closingDebit: Prisma.Decimal;
+        closingCredit: Prisma.Decimal;
       };
     }
     interface NatureGroup {
@@ -224,22 +226,23 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
           groupName: item.groupName,
           ledgers: [],
           totals: {
-            openingDebit: 0,
-            openingCredit: 0,
-            periodDebit: 0,
-            periodCredit: 0,
-            closingDebit: 0,
-            closingCredit: 0,
+            openingDebit: D(0),
+            openingCredit: D(0),
+            periodDebit: D(0),
+            periodCredit: D(0),
+            closingDebit: D(0),
+            closingCredit: D(0),
           },
         };
       }
+      const groupTotals = acc[item.nature].groups[item.groupName].totals;
       acc[item.nature].groups[item.groupName].ledgers.push(item);
-      acc[item.nature].groups[item.groupName].totals.openingDebit += item.openingDebit;
-      acc[item.nature].groups[item.groupName].totals.openingCredit += item.openingCredit;
-      acc[item.nature].groups[item.groupName].totals.periodDebit += item.periodDebit;
-      acc[item.nature].groups[item.groupName].totals.periodCredit += item.periodCredit;
-      acc[item.nature].groups[item.groupName].totals.closingDebit += item.closingDebit;
-      acc[item.nature].groups[item.groupName].totals.closingCredit += item.closingCredit;
+      groupTotals.openingDebit = groupTotals.openingDebit.plus(item.openingDebit);
+      groupTotals.openingCredit = groupTotals.openingCredit.plus(item.openingCredit);
+      groupTotals.periodDebit = groupTotals.periodDebit.plus(item.periodDebit);
+      groupTotals.periodCredit = groupTotals.periodCredit.plus(item.periodCredit);
+      groupTotals.closingDebit = groupTotals.closingDebit.plus(item.closingDebit);
+      groupTotals.closingCredit = groupTotals.closingCredit.plus(item.closingCredit);
       return acc;
     }, {} as Record<string, NatureGroup>);
 
@@ -249,8 +252,8 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       items: filteredItems,
       groupedByNature,
       totals,
-      isBalanced: Math.abs(totals.closingDebit - totals.closingCredit) < 0.01,
-      difference: totals.closingDebit - totals.closingCredit,
+      isBalanced: totals.closingDebit.minus(totals.closingCredit).abs().lessThan(D("0.01")),
+      difference: totals.closingDebit.minus(totals.closingCredit),
     });
   } catch (error) {
     console.error("Error generating trial balance:", error);

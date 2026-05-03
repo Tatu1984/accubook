@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
+import { D, mul, toNumber } from "@/backend/utils/money";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -10,8 +11,8 @@ export const dynamic = "force-dynamic";
 const stockMovementSchema = z.object({
   itemId: z.string().min(1, "Item is required"),
   movementType: z.enum(["PURCHASE", "SALE", "TRANSFER", "ADJUSTMENT", "RETURN", "GRN", "ISSUE"]),
-  quantity: z.number().min(0.01, "Quantity must be greater than 0"),
-  rate: z.number().min(0).default(0),
+  quantity: z.union([z.number().positive(), z.string()]).transform((v) => D(v)),
+  rate: z.union([z.number().min(0), z.string()]).default(0).transform((v) => D(v)),
   fromWarehouseId: z.string().optional(),
   toWarehouseId: z.string().optional(),
   unitId: z.string().min(1, "Unit is required"),
@@ -140,10 +141,10 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
         prisma.stock.count({ where }),
       ]);
 
-      // Calculate stock value
+      // Stock value via Decimal — never JS float multiplication.
       const stocksWithValue = stocks.map((stock) => ({
         ...stock,
-        stockValue: Number(stock.quantity) * Number(stock.avgCost || 0),
+        stockValue: toNumber(mul(stock.quantity, stock.avgCost ?? 0)),
       }));
 
       return NextResponse.json({
@@ -209,11 +210,18 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
       }
     }
 
-    const totalValue = validatedData.quantity * validatedData.rate;
+    const qty = D(validatedData.quantity);
+    const rate = D(validatedData.rate);
+    const totalValue = qty.times(rate);
 
-    // Start transaction
+    // Movements that *increase* stock at the destination should also recompute
+    // the weighted-average cost. Sales/issues/transfers consume; receipts revalue.
+    const isIncomingMovement =
+      validatedData.movementType === "PURCHASE" ||
+      validatedData.movementType === "GRN" ||
+      validatedData.movementType === "RETURN";
+
     const result = await prisma.$transaction(async (tx) => {
-      // Create stock movement record
       const movement = await tx.stockMovement.create({
         data: {
           itemId: validatedData.itemId,
@@ -221,8 +229,8 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
           toWarehouseId: validatedData.toWarehouseId,
           unitId: validatedData.unitId,
           movementType: validatedData.movementType,
-          quantity: validatedData.quantity,
-          rate: validatedData.rate,
+          quantity: qty,
+          rate,
           totalValue,
           batchId: validatedData.batchId,
           referenceType: validatedData.referenceType,
@@ -232,59 +240,81 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
         },
       });
 
-      // Update stock in source warehouse (decrease)
+      // SOURCE warehouse: decrement only if there is enough stock.
+      // updateMany lets us add a `quantity >= qty` predicate atomically.
+      // If count is 0, stock was insufficient → reject.
       if (validatedData.fromWarehouseId) {
-        const currentStock = await tx.stock.findUnique({
+        const updated = await tx.stock.updateMany({
           where: {
-            itemId_warehouseId: {
-              itemId: validatedData.itemId,
-              warehouseId: validatedData.fromWarehouseId,
-            },
-          },
-        });
-
-        await tx.stock.upsert({
-          where: {
-            itemId_warehouseId: {
-              itemId: validatedData.itemId,
-              warehouseId: validatedData.fromWarehouseId,
-            },
-          },
-          update: {
-            quantity: {
-              decrement: validatedData.quantity,
-            },
-          },
-          create: {
             itemId: validatedData.itemId,
             warehouseId: validatedData.fromWarehouseId,
-            quantity: -validatedData.quantity,
-            avgCost: validatedData.rate,
+            quantity: { gte: qty },
           },
+          data: { quantity: { decrement: qty } },
         });
+        if (updated.count === 0) {
+          // Either no stock row exists, or insufficient quantity. Either way, reject.
+          throw new InsufficientStockError(
+            `Insufficient stock in source warehouse for this item`
+          );
+        }
       }
 
-      // Update stock in destination warehouse (increase)
+      // DESTINATION warehouse: upsert.
+      //   - On create: quantity = qty, avgCost = rate.
+      //   - On update for incoming movements: weighted-average recompute.
+      //   - On update for non-incoming (e.g. transfer): just increment qty,
+      //     avgCost stays as it was for that warehouse.
       if (validatedData.toWarehouseId) {
-        await tx.stock.upsert({
+        const existing = await tx.stock.findUnique({
           where: {
             itemId_warehouseId: {
               itemId: validatedData.itemId,
               warehouseId: validatedData.toWarehouseId,
             },
           },
-          update: {
-            quantity: {
-              increment: validatedData.quantity,
-            },
-          },
-          create: {
-            itemId: validatedData.itemId,
-            warehouseId: validatedData.toWarehouseId,
-            quantity: validatedData.quantity,
-            avgCost: validatedData.rate,
-          },
+          select: { quantity: true, avgCost: true },
         });
+
+        if (!existing) {
+          await tx.stock.create({
+            data: {
+              itemId: validatedData.itemId,
+              warehouseId: validatedData.toWarehouseId,
+              quantity: qty,
+              avgCost: rate,
+            },
+          });
+        } else if (isIncomingMovement) {
+          // newAvg = (oldQty*oldAvg + incomingQty*incomingRate) / (oldQty + incomingQty)
+          // Falls back to the incoming rate when oldQty is 0.
+          const oldQty = D(existing.quantity);
+          const oldAvg = D(existing.avgCost ?? 0);
+          const newQty = oldQty.plus(qty);
+          const newAvg = newQty.isZero()
+            ? rate
+            : oldQty.times(oldAvg).plus(qty.times(rate)).dividedBy(newQty);
+          await tx.stock.update({
+            where: {
+              itemId_warehouseId: {
+                itemId: validatedData.itemId,
+                warehouseId: validatedData.toWarehouseId,
+              },
+            },
+            data: { quantity: newQty, avgCost: newAvg },
+          });
+        } else {
+          // Transfer-in or similar: don't revalue; just increment.
+          await tx.stock.update({
+            where: {
+              itemId_warehouseId: {
+                itemId: validatedData.itemId,
+                warehouseId: validatedData.toWarehouseId,
+              },
+            },
+            data: { quantity: { increment: qty } },
+          });
+        }
       }
 
       return { movement };
@@ -295,6 +325,9 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
     }
+    if (error instanceof InsufficientStockError) {
+      return badRequest(error.message);
+    }
     console.error("Error processing stock movement:", error);
     return NextResponse.json(
       { error: "Failed to process stock movement" },
@@ -302,3 +335,10 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
     );
   }
 });
+
+class InsufficientStockError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InsufficientStockError";
+  }
+}

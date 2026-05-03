@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth } from "@/backend/utils/with-org-auth";
+import { D, sum } from "@/backend/utils/money";
+import { Prisma } from "@/generated/prisma";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,8 +12,8 @@ interface BSLineItem {
   ledgerName: string;
   groupId: string;
   groupName: string;
-  balance: number;
-  previousBalance?: number;
+  balance: Prisma.Decimal;
+  previousBalance?: Prisma.Decimal;
 }
 
 interface BSGroup {
@@ -20,8 +22,8 @@ interface BSGroup {
   parentId: string | null;
   items: BSLineItem[];
   subGroups: BSGroup[];
-  total: number;
-  previousTotal?: number;
+  total: Prisma.Decimal;
+  previousTotal?: Prisma.Decimal;
 }
 
 export const GET = withOrgAuth(async (request, { orgId }) => {
@@ -85,7 +87,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
         voucher: {
           organizationId: orgId,
           date: { lte: asOfDate },
-          status: { in: ["APPROVED", "DRAFT"] },
+          status: "APPROVED",
         },
       },
       include: {
@@ -104,7 +106,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
           voucher: {
             organizationId: orgId,
             date: { lte: prevAsOfDate },
-            status: { in: ["APPROVED", "DRAFT"] },
+            status: "APPROVED",
           },
         },
         include: {
@@ -135,21 +137,21 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
         voucher: {
           organizationId: orgId,
           date: { gte: fyStart, lte: asOfDate },
-          status: { in: ["APPROVED", "DRAFT"] },
+          status: "APPROVED",
         },
       },
     });
 
     // Calculate net profit for current year
-    let currentYearProfit = 0;
+    let currentYearProfit = D(0);
     plLedgers.forEach((ledger) => {
       const ledgerEntries = plEntries.filter((e) => e.ledgerId === ledger.id);
-      const debit = ledgerEntries.reduce((sum, e) => sum + Number(e.debitAmount), 0);
-      const credit = ledgerEntries.reduce((sum, e) => sum + Number(e.creditAmount), 0);
+      const debit = sum(ledgerEntries.map((e) => e.debitAmount));
+      const credit = sum(ledgerEntries.map((e) => e.creditAmount));
       if (ledger.group.nature === "INCOME") {
-        currentYearProfit += credit - debit;
+        currentYearProfit = currentYearProfit.plus(credit.minus(debit));
       } else {
-        currentYearProfit -= debit - credit;
+        currentYearProfit = currentYearProfit.minus(debit.minus(credit));
       }
     });
 
@@ -157,39 +159,39 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
     const calculateBalance = (
       ledger: typeof ledgers[0],
       entries: typeof voucherEntries
-    ): number => {
+    ): Prisma.Decimal => {
       const isDebitNature = ledger.group.nature === "ASSETS";
 
       // Opening balance
-      const openingBalance = Number(ledger.openingBalance) || 0;
+      const openingBalance = D(ledger.openingBalance ?? 0);
       let balance = ledger.openingBalanceType === "DR" || (isDebitNature && !ledger.openingBalanceType)
         ? openingBalance
-        : -openingBalance;
+        : openingBalance.negated();
 
       // Add transaction movements
       const ledgerEntries = entries.filter((e) => e.ledgerId === ledger.id);
-      const debit = ledgerEntries.reduce((sum, e) => sum + Number(e.debitAmount), 0);
-      const credit = ledgerEntries.reduce((sum, e) => sum + Number(e.creditAmount), 0);
+      const debit = sum(ledgerEntries.map((e) => e.debitAmount));
+      const credit = sum(ledgerEntries.map((e) => e.creditAmount));
 
-      balance += debit - credit;
+      balance = balance.plus(debit).minus(credit);
 
       // For assets: positive is debit balance
       // For liabilities/equity: negative is credit balance (show as positive)
-      return isDebitNature ? balance : -balance;
+      return isDebitNature ? balance : balance.negated();
     };
 
     // Build balance map
-    const balances = new Map<string, { current: number; previous: number }>();
+    const balances = new Map<string, { current: Prisma.Decimal; previous: Prisma.Decimal }>();
     ledgers.forEach((ledger) => {
       const current = calculateBalance(ledger, voucherEntries);
-      const previous = compareWithPrevious ? calculateBalance(ledger, prevEntries) : 0;
+      const previous = compareWithPrevious ? calculateBalance(ledger, prevEntries) : D(0);
       balances.set(ledger.id, { current, previous });
     });
 
     // Build hierarchical structure
     const buildGroupStructure = (
       nature: string,
-      entries: typeof voucherEntries
+      _entries: typeof voucherEntries
     ): BSGroup[] => {
       const natureLedgers = ledgers.filter((l) => l.group.nature === nature);
       const natureGroups = ledgerGroups.filter((g) => g.nature === nature && !g.parentId);
@@ -199,7 +201,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
 
         const items: BSLineItem[] = groupLedgers
           .map((ledger) => {
-            const bal = balances.get(ledger.id) || { current: 0, previous: 0 };
+            const bal = balances.get(ledger.id) || { current: D(0), previous: D(0) };
             return {
               ledgerId: ledger.id,
               ledgerName: ledger.name,
@@ -209,7 +211,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
               previousBalance: compareWithPrevious ? bal.previous : undefined,
             };
           })
-          .filter((item) => item.balance !== 0 || (item.previousBalance && item.previousBalance !== 0));
+          .filter((item) => !item.balance.isZero() || (item.previousBalance && !item.previousBalance.isZero()));
 
         // Get child groups
         const childGroups = ledgerGroups.filter((g) => g.parentId === group.id);
@@ -217,7 +219,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
           const childLedgers = natureLedgers.filter((l) => l.group.id === childGroup.id);
           const childItems: BSLineItem[] = childLedgers
             .map((ledger) => {
-              const bal = balances.get(ledger.id) || { current: 0, previous: 0 };
+              const bal = balances.get(ledger.id) || { current: D(0), previous: D(0) };
               return {
                 ledgerId: ledger.id,
                 ledgerName: ledger.name,
@@ -227,7 +229,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
                 previousBalance: compareWithPrevious ? bal.previous : undefined,
               };
             })
-            .filter((item) => item.balance !== 0 || (item.previousBalance && item.previousBalance !== 0));
+            .filter((item) => !item.balance.isZero() || (item.previousBalance && !item.previousBalance.isZero()));
 
           return {
             groupId: childGroup.id,
@@ -235,19 +237,21 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
             parentId: childGroup.parentId,
             items: childItems,
             subGroups: [],
-            total: childItems.reduce((sum, i) => sum + i.balance, 0),
+            total: sum(childItems.map((i) => i.balance)),
             previousTotal: compareWithPrevious
-              ? childItems.reduce((sum, i) => sum + (i.previousBalance || 0), 0)
+              ? sum(childItems.map((i) => i.previousBalance ?? D(0)))
               : undefined,
           };
         });
 
-        const total = items.reduce((sum, i) => sum + i.balance, 0) +
-          subGroups.reduce((sum, g) => sum + g.total, 0);
+        const total = sum(items.map((i) => i.balance)).plus(
+          sum(subGroups.map((g) => g.total))
+        );
 
         const previousTotal = compareWithPrevious
-          ? items.reduce((sum, i) => sum + (i.previousBalance || 0), 0) +
-            subGroups.reduce((sum, g) => sum + (g.previousTotal || 0), 0)
+          ? sum(items.map((i) => i.previousBalance ?? D(0))).plus(
+              sum(subGroups.map((g) => g.previousTotal ?? D(0)))
+            )
           : undefined;
 
         return {
@@ -267,18 +271,18 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
     const equity = buildGroupStructure("EQUITY", voucherEntries);
 
     // Calculate totals
-    const totalAssets = assets.reduce((sum, g) => sum + g.total, 0);
-    const totalLiabilities = liabilities.reduce((sum, g) => sum + g.total, 0);
-    const totalEquity = equity.reduce((sum, g) => sum + g.total, 0);
+    const totalAssets = sum(assets.map((g) => g.total));
+    const totalLiabilities = sum(liabilities.map((g) => g.total));
+    const totalEquity = sum(equity.map((g) => g.total));
 
     // Add current year profit to equity
-    const totalEquityWithProfit = totalEquity + currentYearProfit;
-    const totalLiabilitiesAndEquity = totalLiabilities + totalEquityWithProfit;
+    const totalEquityWithProfit = totalEquity.plus(currentYearProfit);
+    const totalLiabilitiesAndEquity = totalLiabilities.plus(totalEquityWithProfit);
 
     // Previous totals
-    const prevTotalAssets = assets.reduce((sum, g) => sum + (g.previousTotal || 0), 0);
-    const prevTotalLiabilities = liabilities.reduce((sum, g) => sum + (g.previousTotal || 0), 0);
-    const prevTotalEquity = equity.reduce((sum, g) => sum + (g.previousTotal || 0), 0);
+    const prevTotalAssets = sum(assets.map((g) => g.previousTotal ?? D(0)));
+    const prevTotalLiabilities = sum(liabilities.map((g) => g.previousTotal ?? D(0)));
+    const prevTotalEquity = sum(equity.map((g) => g.previousTotal ?? D(0)));
 
     return NextResponse.json({
       asOfDate: asOfDate.toISOString(),
@@ -306,8 +310,8 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
         totalLiabilities,
         totalEquity: totalEquityWithProfit,
         totalLiabilitiesAndEquity,
-        isBalanced: Math.abs(totalAssets - totalLiabilitiesAndEquity) < 0.01,
-        difference: totalAssets - totalLiabilitiesAndEquity,
+        isBalanced: totalAssets.minus(totalLiabilitiesAndEquity).abs().lessThan(D("0.01")),
+        difference: totalAssets.minus(totalLiabilitiesAndEquity),
       },
       currentYearProfit: {
         amount: currentYearProfit,

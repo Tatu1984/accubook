@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth } from "@/backend/utils/with-org-auth";
+import { D, sum, toNumber } from "@/backend/utils/money";
+import { Prisma } from "@/generated/prisma";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,7 +11,7 @@ interface AgingBucket {
   label: string;
   minDays: number;
   maxDays: number | null;
-  amount: number;
+  amount: Prisma.Decimal;
   count: number;
   items: AgingItem[];
 }
@@ -23,7 +25,7 @@ interface AgingItem {
   dueDate: Date;
   totalAmount: number;
   amountPaid: number;
-  amountDue: number;
+  amountDue: Prisma.Decimal;
   daysOverdue: number;
   bucket: string;
 }
@@ -32,12 +34,12 @@ interface PartyAging {
   partyId: string;
   partyName: string;
   partyType: string;
-  current: number;
-  days1to30: number;
-  days31to60: number;
-  days61to90: number;
-  over90: number;
-  total: number;
+  current: Prisma.Decimal;
+  days1to30: Prisma.Decimal;
+  days31to60: Prisma.Decimal;
+  days61to90: Prisma.Decimal;
+  over90: Prisma.Decimal;
+  total: Prisma.Decimal;
   items: AgingItem[];
 }
 
@@ -55,11 +57,11 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
 
     // Define aging buckets
     const buckets: AgingBucket[] = [
-      { label: "Current", minDays: -Infinity, maxDays: 0, amount: 0, count: 0, items: [] },
-      { label: "1-30 Days", minDays: 1, maxDays: 30, amount: 0, count: 0, items: [] },
-      { label: "31-60 Days", minDays: 31, maxDays: 60, amount: 0, count: 0, items: [] },
-      { label: "61-90 Days", minDays: 61, maxDays: 90, amount: 0, count: 0, items: [] },
-      { label: "Over 90 Days", minDays: 91, maxDays: null, amount: 0, count: 0, items: [] },
+      { label: "Current", minDays: -Infinity, maxDays: 0, amount: D(0), count: 0, items: [] },
+      { label: "1-30 Days", minDays: 1, maxDays: 30, amount: D(0), count: 0, items: [] },
+      { label: "31-60 Days", minDays: 31, maxDays: 60, amount: D(0), count: 0, items: [] },
+      { label: "61-90 Days", minDays: 61, maxDays: 90, amount: D(0), count: 0, items: [] },
+      { label: "Over 90 Days", minDays: 91, maxDays: null, amount: D(0), count: 0, items: [] },
     ];
 
     if (type === "receivables") {
@@ -87,7 +89,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
         const daysOverdue = Math.floor(
           (today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24)
         );
-        const amountDue = Number(invoice.totalAmount) - Number(invoice.amountPaid);
+        const amountDue = D(invoice.totalAmount).minus(D(invoice.amountPaid));
 
         let bucketLabel = "Current";
         if (daysOverdue > 90) bucketLabel = "Over 90 Days";
@@ -114,7 +116,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       items.forEach((item) => {
         const bucket = buckets.find((b) => b.label === item.bucket);
         if (bucket) {
-          bucket.amount += item.amountDue;
+          bucket.amount = bucket.amount.plus(item.amountDue);
           bucket.count++;
           bucket.items.push(item);
         }
@@ -128,30 +130,32 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
             partyId: item.partyId,
             partyName: item.partyName,
             partyType: "CUSTOMER",
-            current: 0,
-            days1to30: 0,
-            days31to60: 0,
-            days61to90: 0,
-            over90: 0,
-            total: 0,
+            current: D(0),
+            days1to30: D(0),
+            days31to60: D(0),
+            days61to90: D(0),
+            over90: D(0),
+            total: D(0),
             items: [],
           });
         }
 
         const partyAging = partyAgingMap.get(item.partyId)!;
         partyAging.items.push(item);
-        partyAging.total += item.amountDue;
+        partyAging.total = partyAging.total.plus(item.amountDue);
 
-        if (item.bucket === "Current") partyAging.current += item.amountDue;
-        else if (item.bucket === "1-30 Days") partyAging.days1to30 += item.amountDue;
-        else if (item.bucket === "31-60 Days") partyAging.days31to60 += item.amountDue;
-        else if (item.bucket === "61-90 Days") partyAging.days61to90 += item.amountDue;
-        else partyAging.over90 += item.amountDue;
+        if (item.bucket === "Current") partyAging.current = partyAging.current.plus(item.amountDue);
+        else if (item.bucket === "1-30 Days") partyAging.days1to30 = partyAging.days1to30.plus(item.amountDue);
+        else if (item.bucket === "31-60 Days") partyAging.days31to60 = partyAging.days31to60.plus(item.amountDue);
+        else if (item.bucket === "61-90 Days") partyAging.days61to90 = partyAging.days61to90.plus(item.amountDue);
+        else partyAging.over90 = partyAging.over90.plus(item.amountDue);
       });
 
       const partyAging = Array.from(partyAgingMap.values()).sort(
-        (a, b) => b.total - a.total
+        (a, b) => b.total.cmp(a.total)
       );
+
+      const totalOutstanding = sum(buckets.map((b) => b.amount));
 
       return NextResponse.json({
         type: "receivables",
@@ -160,20 +164,20 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
           label: b.label,
           amount: b.amount,
           count: b.count,
-          percentage: buckets.reduce((s, x) => s + x.amount, 0) > 0
-            ? (b.amount / buckets.reduce((s, x) => s + x.amount, 0)) * 100
+          percentage: totalOutstanding.greaterThan(D(0))
+            ? toNumber(b.amount.div(totalOutstanding).times(D(100)))
             : 0,
         })),
         partyAging,
         summary: {
-          totalOutstanding: buckets.reduce((sum, b) => sum + b.amount, 0),
+          totalOutstanding,
           totalCurrent: buckets[0].amount,
-          totalOverdue: buckets.slice(1).reduce((sum, b) => sum + b.amount, 0),
+          totalOverdue: sum(buckets.slice(1).map((b) => b.amount)),
           totalCount: items.length,
           overdueCount: items.filter((i) => i.daysOverdue > 0).length,
           averageDaysOverdue:
             items.length > 0
-              ? items.reduce((sum, i) => sum + i.daysOverdue, 0) / items.length
+              ? items.reduce((s, i) => s + i.daysOverdue, 0) / items.length
               : 0,
         },
         details: items,
@@ -203,7 +207,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
         const daysOverdue = Math.floor(
           (today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24)
         );
-        const amountDue = Number(bill.totalAmount) - Number(bill.amountPaid);
+        const amountDue = D(bill.totalAmount).minus(D(bill.amountPaid));
 
         let bucketLabel = "Current";
         if (daysOverdue > 90) bucketLabel = "Over 90 Days";
@@ -230,7 +234,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       items.forEach((item) => {
         const bucket = buckets.find((b) => b.label === item.bucket);
         if (bucket) {
-          bucket.amount += item.amountDue;
+          bucket.amount = bucket.amount.plus(item.amountDue);
           bucket.count++;
           bucket.items.push(item);
         }
@@ -244,30 +248,32 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
             partyId: item.partyId,
             partyName: item.partyName,
             partyType: "VENDOR",
-            current: 0,
-            days1to30: 0,
-            days31to60: 0,
-            days61to90: 0,
-            over90: 0,
-            total: 0,
+            current: D(0),
+            days1to30: D(0),
+            days31to60: D(0),
+            days61to90: D(0),
+            over90: D(0),
+            total: D(0),
             items: [],
           });
         }
 
         const partyAging = partyAgingMap.get(item.partyId)!;
         partyAging.items.push(item);
-        partyAging.total += item.amountDue;
+        partyAging.total = partyAging.total.plus(item.amountDue);
 
-        if (item.bucket === "Current") partyAging.current += item.amountDue;
-        else if (item.bucket === "1-30 Days") partyAging.days1to30 += item.amountDue;
-        else if (item.bucket === "31-60 Days") partyAging.days31to60 += item.amountDue;
-        else if (item.bucket === "61-90 Days") partyAging.days61to90 += item.amountDue;
-        else partyAging.over90 += item.amountDue;
+        if (item.bucket === "Current") partyAging.current = partyAging.current.plus(item.amountDue);
+        else if (item.bucket === "1-30 Days") partyAging.days1to30 = partyAging.days1to30.plus(item.amountDue);
+        else if (item.bucket === "31-60 Days") partyAging.days31to60 = partyAging.days31to60.plus(item.amountDue);
+        else if (item.bucket === "61-90 Days") partyAging.days61to90 = partyAging.days61to90.plus(item.amountDue);
+        else partyAging.over90 = partyAging.over90.plus(item.amountDue);
       });
 
       const partyAging = Array.from(partyAgingMap.values()).sort(
-        (a, b) => b.total - a.total
+        (a, b) => b.total.cmp(a.total)
       );
+
+      const totalOutstanding = sum(buckets.map((b) => b.amount));
 
       return NextResponse.json({
         type: "payables",
@@ -276,20 +282,20 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
           label: b.label,
           amount: b.amount,
           count: b.count,
-          percentage: buckets.reduce((s, x) => s + x.amount, 0) > 0
-            ? (b.amount / buckets.reduce((s, x) => s + x.amount, 0)) * 100
+          percentage: totalOutstanding.greaterThan(D(0))
+            ? toNumber(b.amount.div(totalOutstanding).times(D(100)))
             : 0,
         })),
         partyAging,
         summary: {
-          totalOutstanding: buckets.reduce((sum, b) => sum + b.amount, 0),
+          totalOutstanding,
           totalCurrent: buckets[0].amount,
-          totalOverdue: buckets.slice(1).reduce((sum, b) => sum + b.amount, 0),
+          totalOverdue: sum(buckets.slice(1).map((b) => b.amount)),
           totalCount: items.length,
           overdueCount: items.filter((i) => i.daysOverdue > 0).length,
           averageDaysOverdue:
             items.length > 0
-              ? items.reduce((sum, i) => sum + i.daysOverdue, 0) / items.length
+              ? items.reduce((s, i) => s + i.daysOverdue, 0) / items.length
               : 0,
         },
         details: items,
