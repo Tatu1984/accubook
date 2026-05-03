@@ -156,6 +156,9 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
       const taxableAmount = lineTotal.minus(discountAmount);
       const combinedRate = item.taxId ? rateById.get(item.taxId) ?? D(0) : D(0);
       const split = computeLineGst(taxableAmount, combinedRate, supplyType);
+      const rates = supplyType === "INTRASTATE"
+        ? { cgst: combinedRate.dividedBy(2), sgst: combinedRate.dividedBy(2), igst: D(0) }
+        : { cgst: D(0), sgst: D(0), igst: combinedRate };
       const totalAmount = taxableAmount.plus(split.totalTaxAmount);
 
       return {
@@ -168,6 +171,12 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
         taxableAmount,
         taxId: item.taxId,
         taxAmount: split.totalTaxAmount,
+        cgstRate: rates.cgst,
+        cgstAmount: split.cgstAmount,
+        sgstRate: rates.sgst,
+        sgstAmount: split.sgstAmount,
+        igstRate: rates.igst,
+        igstAmount: split.igstAmount,
         totalAmount,
         sequence: index,
       };
@@ -197,6 +206,9 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
         taxAmount: totalTax,
         totalAmount,
         amountDue: totalAmount,
+        // GST audit trail.
+        placeOfSupply: party.billingState ?? null,
+        supplyType,
         items: {
           create: itemsData,
         },

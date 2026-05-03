@@ -183,6 +183,9 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
       const taxConfig = item.taxId ? taxById.get(item.taxId) : undefined;
       const combinedRate = taxConfig ? D(taxConfig.rate) : D(0);
       const split = computeLineGst(taxableAmount, combinedRate, supplyType);
+      const rates = supplyType === "INTRASTATE"
+        ? { cgst: combinedRate.dividedBy(2), sgst: combinedRate.dividedBy(2), igst: D(0) }
+        : { cgst: D(0), sgst: D(0), igst: combinedRate };
 
       const totalAmount = taxableAmount.plus(split.totalTaxAmount);
 
@@ -193,8 +196,11 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
         discountPercent: D(item.discountPercent),
         discountAmount,
         taxableAmount,
+        cgstRate: rates.cgst,
         cgstAmount: split.cgstAmount,
+        sgstRate: rates.sgst,
         sgstAmount: split.sgstAmount,
+        igstRate: rates.igst,
         igstAmount: split.igstAmount,
         taxAmount: split.totalTaxAmount,
         totalAmount,
@@ -232,6 +238,9 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
           totalAmount: grandTotal,
           amountDue: grandTotal,
           status: "DRAFT",
+          // GST audit trail — locked at write time so reports are stable.
+          placeOfSupply: party.billingState ?? null,
+          supplyType,
           items: {
             create: itemsWithCalculations.map((item, index) => ({
               itemId: item.itemId,
@@ -244,6 +253,12 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
               taxableAmount: item.taxableAmount,
               taxId: item.taxId,
               taxAmount: item.taxAmount,
+              cgstRate: item.cgstRate,
+              cgstAmount: item.cgstAmount,
+              sgstRate: item.sgstRate,
+              sgstAmount: item.sgstAmount,
+              igstRate: item.igstRate,
+              igstAmount: item.igstAmount,
               totalAmount: item.totalAmount,
               sequence: index + 1,
             })),

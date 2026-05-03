@@ -982,6 +982,12 @@ model Invoice {
   irnNumber        String?   // India e-invoice IRN
   qrCode           String?   // QR code for e-invoice
   eInvoiceStatus   String?   // PENDING, GENERATED, CANCELLED
+  // India GST: place of supply (2-letter state code) drives intra/inter
+  // determination at invoice creation time. Locked here so the breakdown
+  // doesn't shift if party.billingState is later edited.
+  placeOfSupply    String?
+  supplyType       String?   // INTRASTATE | INTERSTATE | EXPORT
+  reverseCharge    Boolean   @default(false)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -1013,6 +1019,16 @@ model InvoiceItem {
   taxableAmount   Decimal  @db.Decimal(18, 4)
   taxId           String?
   taxAmount       Decimal  @default(0) @db.Decimal(18, 4)
+  // GST breakdown — one combined rate splits into either CGST+SGST
+  // (intrastate) or IGST (interstate). CESS is rare; modeled separately.
+  cgstRate        Decimal? @db.Decimal(5, 2)
+  cgstAmount      Decimal? @db.Decimal(18, 4)
+  sgstRate        Decimal? @db.Decimal(5, 2)
+  sgstAmount      Decimal? @db.Decimal(18, 4)
+  igstRate        Decimal? @db.Decimal(5, 2)
+  igstAmount      Decimal? @db.Decimal(18, 4)
+  cessRate        Decimal? @db.Decimal(5, 2)
+  cessAmount      Decimal? @db.Decimal(18, 4)
   totalAmount     Decimal  @db.Decimal(18, 4)
   sequence        Int      @default(0)
   createdAt       DateTime @default(now())
@@ -1062,6 +1078,12 @@ model Bill {
   exchangeRate     Decimal   @default(1) @db.Decimal(18, 8)
   notes            String?
   attachments      Json?
+  // India GST: place of supply on the purchase side. Place of supply is
+  // the receiver's state for goods; for services it can differ. Locked at
+  // creation so the breakdown doesn't shift under us.
+  placeOfSupply    String?
+  supplyType       String?   // INTRASTATE | INTERSTATE | IMPORT
+  reverseCharge    Boolean   @default(false)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -1091,6 +1113,15 @@ model BillItem {
   taxableAmount   Decimal  @db.Decimal(18, 4)
   taxId           String?
   taxAmount       Decimal  @default(0) @db.Decimal(18, 4)
+  // GST breakdown — same shape as InvoiceItem (purchases need ITC tracking).
+  cgstRate        Decimal? @db.Decimal(5, 2)
+  cgstAmount      Decimal? @db.Decimal(18, 4)
+  sgstRate        Decimal? @db.Decimal(5, 2)
+  sgstAmount      Decimal? @db.Decimal(18, 4)
+  igstRate        Decimal? @db.Decimal(5, 2)
+  igstAmount      Decimal? @db.Decimal(18, 4)
+  cessRate        Decimal? @db.Decimal(5, 2)
+  cessAmount      Decimal? @db.Decimal(18, 4)
   totalAmount     Decimal  @db.Decimal(18, 4)
   sequence        Int      @default(0)
   createdAt       DateTime @default(now())
