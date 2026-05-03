@@ -6,12 +6,14 @@ import { logger } from "@/backend/utils/logger";
 import { D } from "@/backend/utils/money";
 import {
   applyLedgerEntries,
+  formatNumber,
   generateVoucherNumber,
   getCashLedger,
   getFiscalYearForDate,
   getOrCreateBankLedger,
   getOrCreatePartyLedger,
   getVoucherTypeByCode,
+  nextNumber,
   recomputeBillStatus,
 } from "@/backend/utils/posting";
 
@@ -137,14 +139,7 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
         fy.id,
         "PAY"
       );
-      const lastPayment = await tx.payment.findFirst({
-        where: { organizationId: orgId },
-        orderBy: { createdAt: "desc" },
-        select: { paymentNumber: true },
-      });
-      const paymentNumber = lastPayment
-        ? `PAY-${String(parseInt(lastPayment.paymentNumber.split("-")[1] || "0", 10) + 1).padStart(6, "0")}`
-        : "PAY-000001";
+      const paymentNumber = formatNumber("PAY", await nextNumber(tx, orgId, "PAYMENT"));
 
       // 4. Create the voucher with two entries:
       //      Dr <Party Ledger> (reducing AP)

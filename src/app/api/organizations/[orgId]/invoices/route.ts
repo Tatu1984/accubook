@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
+import { D, sum } from "@/backend/utils/money";
+import { nextNumber } from "@/backend/utils/posting";
 import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
@@ -134,53 +136,44 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
     const body = await request.json();
     const validatedData = createInvoiceSchema.parse(body);
 
-    // Generate invoice number
-    const lastInvoice = await prisma.invoice.findFirst({
-      where: { organizationId: orgId },
-      orderBy: { createdAt: "desc" },
-    });
-
+    // FY label for the invoice number prefix. India fiscal year starts April.
     const currentFY =
       new Date().getMonth() >= 3
         ? new Date().getFullYear()
         : new Date().getFullYear() - 1;
+    const fyLabel = `${currentFY}-${(currentFY + 1).toString().slice(-2)}`;
 
-    const nextNumber = lastInvoice
-      ? parseInt(lastInvoice.invoiceNumber.split("/").pop() || "0") + 1
-      : 1;
-
-    const invoiceNumber = `INV/${currentFY}-${(currentFY + 1)
-      .toString()
-      .slice(-2)}/${nextNumber.toString().padStart(5, "0")}`;
-
-    // Calculate totals
-    let subtotal = 0;
-    let totalTax = 0;
-    let totalDiscount = 0;
-
+    // All money math via Decimal — never via JS floats.
     const itemsWithCalculations = validatedData.items.map((item) => {
-      const lineTotal = item.quantity * item.unitPrice;
-      const discountAmount = (lineTotal * item.discountPercent) / 100;
-      const taxableAmount = lineTotal - discountAmount;
-      const taxAmount = item.taxAmount;
-      const total = taxableAmount + taxAmount;
-
-      subtotal += taxableAmount;
-      totalTax += taxAmount;
-      totalDiscount += discountAmount;
+      const lineTotal = D(item.quantity).times(D(item.unitPrice));
+      const discountAmount = lineTotal.times(D(item.discountPercent)).dividedBy(D(100));
+      const taxableAmount = lineTotal.minus(discountAmount);
+      const taxAmount = D(item.taxAmount);
+      const totalAmount = taxableAmount.plus(taxAmount);
 
       return {
         ...item,
+        quantity: D(item.quantity),
+        unitPrice: D(item.unitPrice),
+        discountPercent: D(item.discountPercent),
         discountAmount,
         taxableAmount,
-        totalAmount: total,
+        taxAmount,
+        totalAmount,
       };
     });
 
-    const grandTotal = subtotal + totalTax;
+    const subtotal = sum(itemsWithCalculations.map((i) => i.taxableAmount));
+    const totalTax = sum(itemsWithCalculations.map((i) => i.taxAmount));
+    const totalDiscount = sum(itemsWithCalculations.map((i) => i.discountAmount));
+    const grandTotal = subtotal.plus(totalTax);
 
-    // Create invoice with items
+    // Create invoice with items, race-safe numbering inside the same tx.
+    // Scope = "INVOICE:<fyLabel>" so each fiscal year resets to 1.
     const invoice = await prisma.$transaction(async (tx) => {
+      const seq = await nextNumber(tx, orgId, `INVOICE:${fyLabel}`);
+      const invoiceNumber = `INV/${fyLabel}/${String(seq).padStart(5, "0")}`;
+
       const newInvoice = await tx.invoice.create({
         data: {
           organizationId: orgId,

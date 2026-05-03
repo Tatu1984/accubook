@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { D, sum } from "@/backend/utils/money";
+import { formatNumber, nextNumber } from "@/backend/utils/posting";
 import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
@@ -122,17 +123,6 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
     const body = await request.json();
     const validatedData = createBillSchema.parse(body);
 
-    // Generate bill number
-    const lastBill = await prisma.bill.findFirst({
-      where: { organizationId: orgId },
-      orderBy: { createdAt: "desc" },
-      select: { billNumber: true },
-    });
-
-    const billNumber = lastBill
-      ? `BILL-${String(parseInt(lastBill.billNumber.split("-")[1] || "0") + 1).padStart(6, "0")}`
-      : "BILL-000001";
-
     // Resolve tax rates for all items that reference a taxId, in one query.
     const taxIds = [...new Set(validatedData.items.map((i) => i.taxId).filter(Boolean) as string[])];
     const taxes = taxIds.length
@@ -174,7 +164,9 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
     const totalTax = sum(itemsData.map((i) => i.taxAmount));
     const totalAmount = subtotal.minus(totalDiscount).plus(totalTax);
 
-    const bill = await prisma.bill.create({
+    const bill = await prisma.$transaction(async (tx) => {
+      const billNumber = formatNumber("BILL", await nextNumber(tx, orgId, "BILL"));
+      return tx.bill.create({
       data: {
         organizationId: orgId,
         billNumber,
@@ -203,6 +195,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
           },
         },
       },
+    });
     });
 
     return NextResponse.json(bill, { status: 201 });

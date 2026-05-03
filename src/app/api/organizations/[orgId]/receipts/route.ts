@@ -6,12 +6,14 @@ import { logger } from "@/backend/utils/logger";
 import { D } from "@/backend/utils/money";
 import {
   applyLedgerEntries,
+  formatNumber,
   generateVoucherNumber,
   getCashLedger,
   getFiscalYearForDate,
   getOrCreateBankLedger,
   getOrCreatePartyLedger,
   getVoucherTypeByCode,
+  nextNumber,
   recomputeInvoiceStatus,
 } from "@/backend/utils/posting";
 
@@ -138,14 +140,7 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
         fy.id,
         "RCV"
       );
-      const lastReceipt = await tx.receipt.findFirst({
-        where: { organizationId: orgId },
-        orderBy: { createdAt: "desc" },
-        select: { receiptNumber: true },
-      });
-      const receiptNumber = lastReceipt
-        ? `RCT-${String(parseInt(lastReceipt.receiptNumber.split("-")[1] || "0", 10) + 1).padStart(6, "0")}`
-        : "RCT-000001";
+      const receiptNumber = formatNumber("RCT", await nextNumber(tx, orgId, "RECEIPT"));
 
       // Voucher entries:
       //   Dr <Bank/Cash Ledger>  (asset goes up)

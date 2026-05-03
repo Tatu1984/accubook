@@ -150,6 +150,7 @@ model Organization {
   bills             Bill[]
   payments          Payment[]
   receipts          Receipt[]
+  numberCounters    NumberCounter[]
 
   @@map("organizations")
 }
@@ -421,6 +422,30 @@ model VoucherType {
   approvalWorkflow ApprovalWorkflow? @relation(fields: [approvalWorkflowId], references: [id])
 
   @@map("voucher_types")
+}
+
+// Race-safe numbering counters. One row per (organization, scope), where
+// `scope` partitions the counter — e.g.:
+//   - "VOUCHER:<voucherTypeId>:<fiscalYearId>"  for voucher numbers
+//   - "INVOICE"                                  for invoice numbers
+//   - "BILL"                                     for bill numbers
+//   - "PAYMENT"                                  for payment numbers
+//   - "RECEIPT"                                  for receipt numbers
+// Atomic increment via Prisma's `upsert + increment` makes concurrent
+// inserts collision-free, replacing the old findFirst+1 pattern that
+// raced under load.
+model NumberCounter {
+  id             String   @id @default(cuid())
+  organizationId String
+  scope          String
+  lastNumber     Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, scope])
+  @@map("number_counters")
 }
 
 model VoucherEntry {

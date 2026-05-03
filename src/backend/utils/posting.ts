@@ -139,9 +139,41 @@ export async function getVoucherTypeByCode(
 }
 
 /**
- * Generate the next voucher number for a given (organization, voucher type).
- * Caller MUST be inside a transaction. Race-prone in theory; fine in practice
- * until we migrate to Postgres sequences (deferred PR-2 follow-up).
+ * Atomically reserve the next number for a given (organization, scope) pair.
+ *
+ * Uses Prisma's upsert+increment pattern, which Postgres serializes at the
+ * row level — collision-free under concurrent inserts. Replaces the old
+ * `findFirst + 1` pattern that raced under load and produced 500s on the
+ * loser of any concurrent POST.
+ *
+ * Caller is expected to call this inside the same `prisma.$transaction`
+ * that creates the entity, so the counter increment rolls back if the
+ * insert fails.
+ */
+export async function nextNumber(
+  tx: Tx,
+  organizationId: string,
+  scope: string
+): Promise<number> {
+  const row = await tx.numberCounter.upsert({
+    where: { organizationId_scope: { organizationId, scope } },
+    update: { lastNumber: { increment: 1 } },
+    create: { organizationId, scope, lastNumber: 1 },
+    select: { lastNumber: true },
+  });
+  return row.lastNumber;
+}
+
+/**
+ * Format a counter value as `<prefix>-NNNNNN` (e.g. `PAY-000042`).
+ */
+export function formatNumber(prefix: string, n: number, pad = 6): string {
+  return `${prefix}-${String(n).padStart(pad, "0")}`;
+}
+
+/**
+ * Convenience: race-safe voucher number for (organization, voucherType, fiscalYear).
+ * Scope = `VOUCHER:<voucherTypeId>:<fiscalYearId>` so each (type, FY) has its own counter.
  */
 export async function generateVoucherNumber(
   tx: Tx,
@@ -150,15 +182,8 @@ export async function generateVoucherNumber(
   fiscalYearId: string,
   prefix: string
 ): Promise<string> {
-  const last = await tx.voucher.findFirst({
-    where: { organizationId, voucherTypeId, fiscalYearId },
-    orderBy: { createdAt: "desc" },
-    select: { voucherNumber: true },
-  });
-  const nextNum = last
-    ? parseInt(last.voucherNumber.split("-").pop() || "0", 10) + 1
-    : 1;
-  return `${prefix}-${String(nextNum).padStart(6, "0")}`;
+  const n = await nextNumber(tx, organizationId, `VOUCHER:${voucherTypeId}:${fiscalYearId}`);
+  return formatNumber(prefix, n);
 }
 
 /**
