@@ -238,7 +238,7 @@ Three sub-PRs. Tick boxes as they ship.
 
 - **Active phase:** Phase 0
 - **Active sub-PR:** PR 1 complete — about to commit. PR 2 (accounting correctness) is next.
-- **Last updated:** 2026-05-03 by Claude (commit `<pending>`)
+- **Last updated:** 2026-05-03 by Claude (commit `381fe36`)
 - **What's done since last session:**
   - PR 1 complete (everything except rate-limiting stub):
     - `withOrgAuth` helper at `src/backend/utils/with-org-auth.ts` (with `hasPermission` and response helpers)
@@ -256,7 +256,8 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
-| 2026-05-03 | **PR 1 — Security & tenant isolation complete.** `withOrgAuth` helper, applied to all 55 org-scoped routes, `.strict()` on PATCH schemas, demo/test gate, register enumeration fix, crypto-strength temp password, permission model rewired with `hasPermission()` + last-admin guard. tsc + build clean. | `<pending>` |
+| 2026-05-03 | Chore: gitignore MS Office lock files | `381fe36` |
+| 2026-05-03 | **PR 1 — Security & tenant isolation complete.** `withOrgAuth` helper, applied to all 55 org-scoped routes, `.strict()` on PATCH schemas, demo/test gate, register enumeration fix, crypto-strength temp password, permission model rewired with `hasPermission()` + last-admin guard. tsc + build clean. Net diff: -3084 lines. | `ce7532d` |
 | 2026-05-03 | Created `update.md`; saved memory pointer | `e4dc1db` |
 | 2026-05-03 | Production audit (auth, data integrity, ops, code quality) — 4 agents | n/a |
 | 2026-05-03 | Pushed all migration work to `origin/main` | `a734b34` |
