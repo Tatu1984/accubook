@@ -215,10 +215,10 @@ Three sub-PRs. Tick boxes as they ship.
 - [x] **Reports DRAFT filter** — every report (balance-sheet, trial-balance, profit-loss, cash-flow, export) now filters `status: "APPROVED"`.
 - [x] **Decimal sweep across reports** — 6 files, ~69 sites in `aging/balance-sheet/cash-flow/export/profit-loss/trial-balance`. Decimal accumulators throughout. Internal report types promoted to Decimal.
 - [x] **Stock movement fix** — `updateMany` with `quantity: { gte: qty }` predicate atomically guards negative stock; `InsufficientStockError` → 400. Weighted-avg recompute on PURCHASE/GRN/RETURN: `newAvg = (oldQty*oldAvg + qty*rate)/(oldQty+qty)`. All Decimal.
-- [ ] Voucher PATCH: reverse old entries before applying new ones; permission check on DRAFT↔APPROVED flip. **DEFERRED to PR 2 part 3.**
-- [ ] Voucher / invoice / bill / payment / receipt numbering: Postgres sequences per `(organizationId, type)`. Migration adds the sequences. **DEFERRED to PR 2 part 3.**
-- [ ] Soft delete pattern: refuse delete if FK references exist; otherwise `isActive=false`. Touch: parties, ledgers, bank-accounts, tax-config, bills. (Items already does this.) **DEFERRED to PR 2 part 3.**
-- [ ] Audit log writes inside every mutation tx (entityType, entityId, oldData, newData, userId, orgId). **DEFERRED to PR 2 part 3.**
+- [ ] Voucher PATCH: reverse old entries before applying new ones; permission check on DRAFT↔APPROVED flip. **PR 2 part 3b — pending.**
+- [x] Voucher / invoice / bill / payment / receipt numbering races — fixed via `NumberCounter` table + atomic `nextNumber()` upsert+increment (`1f2a0e1`). Migration `1_add_number_counters` applied to Neon. Scopes: `VOUCHER:<typeId>:<fyId>`, `INVOICE:<FY>`, `BILL`, `PAYMENT`, `RECEIPT`.
+- [ ] Soft delete pattern: refuse delete if FK references exist; otherwise `isActive=false`. Touch: parties, ledgers, bank-accounts, tax-config, bills. (Items already does this.) **PR 2 part 3c — pending.**
+- [ ] Audit log writes inside every mutation tx (entityType, entityId, oldData, newData, userId, orgId). **PR 2 part 3d — pending.**
 
 ### PR 3 — Ops basics (PART 1 SHIPPED)
 - [x] `src/config/env.ts` — zod schema, fail-fast at boot. Always import `env` from here, never `process.env.X` directly.
@@ -246,9 +246,9 @@ Three sub-PRs. Tick boxes as they ship.
 
 ## 8. Current state
 
-- **Active phase:** Phase 0 — **~98% complete**.
-- **Active sub-PR:** PR 1 + PR 2 (parts 1+2) + PR 3 (parts 1+2+3) all shipped. The only remaining audit-list items are bundled as PR 2 part 3 (voucher PATCH reversal, numbering sequences, soft delete sweep, audit log writes) — none are blocking, but voucher numbering races are real and worth fixing before high concurrent load.
-- **Last updated:** 2026-05-03 by Claude (commit `e5d8935`)
+- **Active phase:** Phase 0 — **~99% complete**.
+- **Active sub-PR:** PR 2 part 3a shipped (`1f2a0e1`). Remaining: 3b (voucher PATCH reversal), 3c (soft delete sweep), 3d (audit log writes). Plus a build-config issue: prisma's pooler-URL advisory locks made `migrate deploy` flaky locally — used `db execute` + `migrate resolve` for the latest migration. On Vercel this should work since each lambda gets a fresh connection, but worth watching the first prod deploy logs.
+- **Last updated:** 2026-05-03 by Claude (commit `1f2a0e1`)
 - **What's done since last session:**
   - PR 1 (`ce7532d`+`381fe36`+`1cc57c0`): tenant isolation closed everywhere, permission model rewired, quick-wins.
   - PR 2 part 1 (`46d022b`): Decimal helpers, posting helpers, payments/receipts/bills/vouchers POST → GL posting in `$transaction`. Reports filter DRAFT.
@@ -265,6 +265,8 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
+| 2026-05-03 | **PR 2 part 3a — race-safe numbering.** `NumberCounter` model + migration `1_add_number_counters`. `nextNumber(tx, orgId, scope)` does atomic upsert+increment. Applied to vouchers, invoices (per-FY scope), bills, payments, receipts. Invoice POST also got Decimal cleanup that was outstanding. tsc + tests + build clean. | `1f2a0e1` |
+| 2026-05-03 | Hardening: `prisma.config.ts` now gives a useful error message when `DATABASE_URL` is missing (was failing silently with "Failed to load config file"). | `8ba7ec1` |
 | 2026-05-03 | **PR 3 part 3 — migrations + permissions extraction.** Baselined Prisma migrations on Neon (`migrate diff` → `0_init/migration.sql`, `migrate resolve --applied`). vercel.json now runs `migrate deploy` before build. Extracted `hasPermission` to leaf module + 10 unit tests (29/29 passing). DEVELOPER_GUIDE paths refreshed. | `e5d8935` |
 | 2026-05-03 | **PR 3 part 2 — Vitest, CI, logger sweep, scaffold cleanup, README.** Vitest + 19 money-helper tests (`npm test`). GitHub Actions CI (typecheck/lint/test/build on push+PR). Replaced 129 `console.error` across 60 API files with `logger.error({ err })`. README rewritten. `.env.example`. 40 zero-byte scaffold stubs deleted. `serverExternalPackages` for pino. tsc + lint (0 errors) + tests (19/19) + build clean. | `31d3f43` |
 | 2026-05-03 | **PR 3 part 1 — ops baseline.** env.ts zod validation, /api/health endpoint, root error/global-error/not-found/loading boundaries, security headers (HSTS/XFO/CSP-lite/Permissions-Policy), pino logger with redaction, DB pool tuned for serverless (max=3), ESLint config fixed (2318 → 0 errors), Math.random-in-render bug fixed, 8 unused npm deps pruned. tsc + build + lint clean. | `82a99c5` |
