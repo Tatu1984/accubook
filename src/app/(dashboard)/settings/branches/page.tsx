@@ -1,17 +1,17 @@
 "use client";
 
 import * as React from "react";
-import { useOrganization } from "@/hooks/use-organization";
-import { Button } from "@/components/ui/button";
+import { useOrganization } from "@/frontend/hooks/use-organization";
+import { Button } from "@/frontend/components/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+} from "@/frontend/components/ui/card";
+import { Input } from "@/frontend/components/ui/input";
+import { Label } from "@/frontend/components/ui/label";
 import {
   Table,
   TableBody,
@@ -19,7 +19,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
+} from "@/frontend/components/ui/table";
 import {
   Dialog,
   DialogContent,
@@ -28,9 +28,9 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/components/ui/dialog";
-import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
+} from "@/frontend/components/ui/dialog";
+import { Switch } from "@/frontend/components/ui/switch";
+import { Badge } from "@/frontend/components/ui/badge";
 import { toast } from "sonner";
 import {
   Building,

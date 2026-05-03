@@ -20,14 +20,14 @@ import {
   FileText,
   Loader2,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/frontend/components/ui/button";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+} from "@/frontend/components/ui/card";
+import { Badge } from "@/frontend/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,7 +35,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@/frontend/components/ui/dropdown-menu";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -45,14 +45,14 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Checkbox } from "@/components/ui/checkbox";
-import { DataTable } from "@/components/ui/data-table";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Progress } from "@/components/ui/progress";
-import { cn } from "@/lib/utils";
+} from "@/frontend/components/ui/alert-dialog";
+import { Checkbox } from "@/frontend/components/ui/checkbox";
+import { DataTable } from "@/frontend/components/ui/data-table";
+import { Tabs, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
+import { Progress } from "@/frontend/components/ui/progress";
+import { cn } from "@/shared/utils/common.util";
 import Link from "next/link";
-import { useOrganization } from "@/hooks/use-organization";
+import { useOrganization } from "@/frontend/hooks/use-organization";
 import { toast } from "sonner";
 
 interface Invoice {

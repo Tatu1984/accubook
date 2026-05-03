@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useOrganization } from "@/hooks/use-organization";
+import { useOrganization } from "@/frontend/hooks/use-organization";
 import Link from "next/link";
 import {
   TrendingUp,
@@ -25,22 +25,22 @@ import {
   Loader2,
   RefreshCw,
 } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/frontend/components/ui/card";
+import { Button } from "@/frontend/components/ui/button";
+import { Badge } from "@/frontend/components/ui/badge";
+import { Progress } from "@/frontend/components/ui/progress";
+import { Skeleton } from "@/frontend/components/ui/skeleton";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@/frontend/components/ui/dropdown-menu";
 import {
   ChartContainer,
   ChartTooltip,
   ChartTooltipContent,
-} from "@/components/ui/chart";
+} from "@/frontend/components/ui/chart";
 import {
   Area,
   AreaChart,
@@ -61,7 +61,7 @@ import {
   CreatePurchaseOrderDialog,
   RecordReceiptDialog,
   RecordPaymentDialog,
-} from "@/components/transactions";
+} from "@/frontend/components/features/transactions";
 
 interface DashboardData {
   kpis: {

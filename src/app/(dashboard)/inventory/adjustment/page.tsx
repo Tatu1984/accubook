@@ -10,16 +10,16 @@ import {
   TrendingUp,
   TrendingDown,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/frontend/components/ui/button";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { DataTable } from "@/components/ui/data-table";
-import { useOrganization } from "@/hooks/use-organization";
+} from "@/frontend/components/ui/card";
+import { Badge } from "@/frontend/components/ui/badge";
+import { DataTable } from "@/frontend/components/ui/data-table";
+import { useOrganization } from "@/frontend/hooks/use-organization";
 import { toast } from "sonner";
 
 interface StockAdjustment {

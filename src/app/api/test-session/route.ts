@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth/config";
+import { auth } from "@/backend/services/auth.service";
 import { cookies } from "next/headers";
 
 export const runtime = "nodejs";

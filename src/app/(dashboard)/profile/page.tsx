@@ -10,18 +10,18 @@ import {
   Phone,
   Shield,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/frontend/components/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useOrganization } from "@/hooks/use-organization";
+} from "@/frontend/components/ui/card";
+import { Input } from "@/frontend/components/ui/input";
+import { Label } from "@/frontend/components/ui/label";
+import { Avatar, AvatarFallback, AvatarImage } from "@/frontend/components/ui/avatar";
+import { useOrganization } from "@/frontend/hooks/use-organization";
 import { toast } from "sonner";
 
 export default function ProfilePage() {

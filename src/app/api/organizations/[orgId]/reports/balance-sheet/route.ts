@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth/config";
-import { prisma } from "@/lib/prisma";
+import { auth } from "@/backend/services/auth.service";
+import { prisma } from "@/backend/database/client";
 import { cookies } from "next/headers";
 
 export const runtime = "nodejs";

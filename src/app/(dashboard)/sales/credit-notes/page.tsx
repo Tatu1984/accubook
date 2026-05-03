@@ -14,14 +14,14 @@ import {
   FileText,
   Loader2,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/frontend/components/ui/button";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+} from "@/frontend/components/ui/card";
+import { Badge } from "@/frontend/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,7 +29,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@/frontend/components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
@@ -38,7 +38,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/components/ui/dialog";
+} from "@/frontend/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -48,19 +48,19 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+} from "@/frontend/components/ui/alert-dialog";
+import { Input } from "@/frontend/components/ui/input";
+import { Label } from "@/frontend/components/ui/label";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import { DataTable } from "@/components/ui/data-table";
-import { useOrganization } from "@/hooks/use-organization";
+} from "@/frontend/components/ui/select";
+import { Textarea } from "@/frontend/components/ui/textarea";
+import { DataTable } from "@/frontend/components/ui/data-table";
+import { useOrganization } from "@/frontend/hooks/use-organization";
 import { toast } from "sonner";
 
 interface Party {

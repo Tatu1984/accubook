@@ -9,21 +9,21 @@ import {
   ExternalLink,
   Search,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/frontend/components/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+} from "@/frontend/components/ui/card";
+import { Input } from "@/frontend/components/ui/input";
 import {
   Accordion,
   AccordionContent,
   AccordionItem,
   AccordionTrigger,
-} from "@/components/ui/accordion";
+} from "@/frontend/components/ui/accordion";
 
 const faqs = [
   {

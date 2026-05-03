@@ -15,18 +15,18 @@ import {
   Users,
   Settings,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/frontend/components/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn } from "@/lib/utils";
+} from "@/frontend/components/ui/card";
+import { Badge } from "@/frontend/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
+import { ScrollArea } from "@/frontend/components/ui/scroll-area";
+import { cn } from "@/shared/utils/common.util";
 
 interface Notification {
   id: string;

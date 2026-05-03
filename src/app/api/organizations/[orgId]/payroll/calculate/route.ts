@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth/config";
-import { prisma } from "@/lib/prisma";
+import { auth } from "@/backend/services/auth.service";
+import { prisma } from "@/backend/database/client";
 import { cookies } from "next/headers";
 import { z } from "zod";
 import {
@@ -13,7 +13,7 @@ import {
   ESI_CONFIG,
   NEW_REGIME_SLABS,
   OLD_REGIME_SLABS,
-} from "@/lib/payroll-calculations";
+} from "@/backend/utils/payroll-calculations.util";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -7,15 +7,15 @@ import {
   Plus,
   Settings,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/frontend/components/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { useOrganization } from "@/hooks/use-organization";
+} from "@/frontend/components/ui/card";
+import { useOrganization } from "@/frontend/hooks/use-organization";
 
 export default function CustomReportsPage() {
   const { organizationId, isLoading: orgLoading } = useOrganization();

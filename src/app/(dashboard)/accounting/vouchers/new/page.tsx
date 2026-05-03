@@ -3,25 +3,25 @@
 import * as React from "react";
 import { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useOrganization } from "@/hooks/use-organization";
-import { Button } from "@/components/ui/button";
+import { useOrganization } from "@/frontend/hooks/use-organization";
+import { Button } from "@/frontend/components/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+} from "@/frontend/components/ui/card";
+import { Input } from "@/frontend/components/ui/input";
+import { Label } from "@/frontend/components/ui/label";
+import { Textarea } from "@/frontend/components/ui/textarea";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@/frontend/components/ui/select";
 import {
   Table,
   TableBody,
@@ -30,7 +30,7 @@ import {
   TableHeader,
   TableRow,
   TableFooter,
-} from "@/components/ui/table";
+} from "@/frontend/components/ui/table";
 import { toast } from "sonner";
 import { ArrowLeft, Plus, Trash2, Loader2, AlertCircle } from "lucide-react";
 import Link from "next/link";
