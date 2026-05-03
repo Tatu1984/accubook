@@ -256,9 +256,10 @@ Three sub-PRs. Tick boxes as they ship.
   - **WS6 (banking) — bank statement CSV import + auto-reconciliation matcher live.** Manual-match UI for low-confidence cases pending.
   - **WS7 (payroll) — PF/ESI/PT/TDS/LOP helpers tested.** Persistence + month-end run posting pending.
   - **WS10 (manufacturing) — BOM + work-order schema + APIs + multi-level BOM cost compute live.** Work-order issue/complete state transitions pending.
+  - **WS17 (reports) — 9 reports total.** Built-ins: balance-sheet, P&L, trial-balance, cash-flow, aging, custom + (this turn) sales-register, purchase-register, party-statement.
   - **WS18 (Tally migration) — masters import live.** Vouchers still pending.
   - **Marketing landing page** at `/` — reactbits-style hero/features/CTA, sign-in button → /login on same domain.
-- **Last updated:** 2026-05-03 by Claude (commit `6af0767`)
+- **Last updated:** 2026-05-03 by Claude (commit `bcb891d`)
 - **What's done since last session:**
   - PR 1 (`ce7532d`+`381fe36`+`1cc57c0`): tenant isolation closed everywhere, permission model rewired, quick-wins.
   - PR 2 part 1 (`46d022b`): Decimal helpers, posting helpers, payments/receipts/bills/vouchers POST → GL posting in `$transaction`. Reports filter DRAFT.
@@ -330,6 +331,7 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
+| 2026-05-03 | **WS17 — sales/purchase register + party statement reports.** Three high-utility daily reports for Indian accountants. Pure read paths over existing data. Customer/vendor running balance, opening from pre-period docs, BOTH-typed parties combined. +11 tests (232 total). | `bcb891d` |
 | 2026-05-03 | **WS10 — manufacturing module.** Schema additions: Bom + BomItem + WorkOrder (migration `3_add_manufacturing` applied to Neon). `computeBomCost` + `resolveLeafCost` (multi-level w/ cycle detection). GET/POST /manufacturing/boms + /manufacturing/work-orders. +9 tests (221 total). | `6af0767` |
 | 2026-05-03 | **WS2 — GSTR-3B portal JSON converter + download endpoint.** Same shape pattern as GSTR-1: ret_period MMYYYY, sup_details (3.1), inter_sup placeholders (3.2), itc_elg with 5-row itc_avl (IMPG/IMPS/ISRC/ISD/OTH), inward_sup (5) GST/NONGST split. Serves as `GSTR3B_<gstin>_<MMYYYY>.json`. +10 tests (212 total). | `51091ea` |
 | 2026-05-03 | **chore(login):** show demo creds unconditionally. (Was env-gated; revert documented inline. Re-gate when real customers onboard.) | `daa03af` |
