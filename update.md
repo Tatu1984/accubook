@@ -247,8 +247,12 @@ Three sub-PRs. Tick boxes as they ship.
 ## 8. Current state
 
 - **Active phase:** India end-to-end build (workstreams in §5). Foundation (Phase 0) done.
-- **Active workstreams:** WS1 (invoicing core) ~80% done; **WS2 (GSTR-1) backend complete end-to-end** — compute + all 9 sections + GSTN portal JSON download. UI wiring is the only remaining piece.
-- **Last updated:** 2026-05-03 by Claude (commit `9f93061`)
+- **Active workstreams:**
+  - WS1 (invoicing core) ~80% done.
+  - **WS2 (GST returns) — GSTR-1 + GSTR-3B backends complete.** UI wiring is the only remaining piece.
+  - **WS3 (e-invoicing) — payload generator + preview endpoint complete.** NIC API submission still needs sandbox creds.
+  - **WS18 (Tally migration) — masters import live.** Vouchers still pending.
+- **Last updated:** 2026-05-03 by Claude (commit `1b812da`)
 - **What's done since last session:**
   - PR 1 (`ce7532d`+`381fe36`+`1cc57c0`): tenant isolation closed everywhere, permission model rewired, quick-wins.
   - PR 2 part 1 (`46d022b`): Decimal helpers, posting helpers, payments/receipts/bills/vouchers POST → GL posting in `$transaction`. Reports filter DRAFT.
@@ -276,12 +280,39 @@ Three sub-PRs. Tick boxes as they ship.
     * Invoice POST sets `supplyType="EXPORT"` for non-Indian customers.
     * 26 GSTR-1 unit tests (B2B/B2CL/B2CS/CDNR/CDNUR/EXP/NIL/HSN/DOCS + portal conversion).
   - **WS2 — still pending:**
-    1. UI: wire `taxation/gst/page.tsx` to call the endpoints (compute + portal download), period picker, section tabs.
-    2. Org-level "preceding FY turnover" setting → flow into portal `gt` field. Current FY rolling turnover computation → `cur_gt`.
-    3. CDNUR `typ` discrimination (currently hardcoded "B2CL"; should detect EXPWP/EXPWOP for credit notes against export invoices).
-    4. inv_typ overrides (SEWP/SEWOP for SEZ, DE for deemed exports).
-    5. LUT-on-org flag → forces EXP exp_typ to WOPAY.
-    6. ATXP (advances), SUPECO (e-commerce supplies) — need new domain models.
+    1. UI: wire `taxation/gst/page.tsx` to call the endpoints (GSTR-1 + GSTR-3B + portal download), period picker, section tabs.
+    2. Org-level "preceding FY turnover" setting → flow into portal `gt` field.
+    3. GSTR-3B portal JSON conversion (different shape from GSTR-1).
+    4. CDNUR `typ` discrimination, inv_typ overrides (SEWP/SEWOP/DE), LUT flag → EXPWOP override.
+    5. ATXP (advances), SUPECO (e-commerce) — need new domain models.
+    6. GSTR-3B Section 4.A.(1)(2)(4) — imports of goods/services + ISD; needs Bill type extension.
+
+  - **WS3 (e-invoicing NIC IRN) — first chunk shipped (`66fe987`):**
+    * `buildEInvoicePayload` produces NIC schema v1.1 payload from any invoice.
+    * Strict pre-flight validation: GSTIN format, address completeness, HSN per line. Returns `EInvoiceValidationError` with `details: string[]` so the UI can render a checklist.
+    * GET `/api/organizations/[orgId]/invoices/[invoiceId]/einvoice-payload` for preview/validation.
+    * 11 tests.
+  - **WS3 — still pending:**
+    1. Actual NIC sandbox/prod API integration (auth-token endpoint, POST /eivital/v1.04/Invoice).
+    2. Persist IRN/QR on Invoice (columns `irnNumber`, `qrCode` exist already).
+    3. Cancellation endpoint (24-hour window).
+    4. E-way bill auto-generation from invoice.
+    5. SEZ supplies (SEWP/SEWOP), deemed exports (DEXP) classification.
+    6. `Party.legalName` field for proper LglNm vs TrdNm distinction.
+
+  - **WS18 (Tally migration) — masters import shipped (`1b812da`):**
+    * `parseTallyXml` + `importTallyData` import groups, ledgers, parties, stock items from a Tally All-Masters XML.
+    * Two-pass group import resolves child-before-parent ordering.
+    * POST `/api/organizations/[orgId]/migration/tally` accepts multipart upload up to 50 MB.
+    * Idempotent (re-running upserts by name).
+    * Audit-logged.
+    * 7 tests.
+  - **WS18 — still pending:**
+    1. VOUCHER import (sales/purchase/payment/receipt) — biggest piece left.
+    2. UNIT masters import (currently uses existing org UoMs).
+    3. STOCKGROUP → ItemCategory mapping (currently flattens).
+    4. BILLALLOCATIONS — Tally bill-wise outstanding for parties.
+    5. Tally GST registration types → enum normalization.
   - **Order of work (rough trunk):** invoicing core → bills+ITC → GSTR-1 → e-invoicing → GSTR-3B → TDS → e-way bill → banking import → payroll → reports expansion → manufacturing → migration → POS → workflows → ESS.
   - Loose ends still open:
     - Integration tests against ephemeral test DB (Docker/testcontainers).
@@ -293,7 +324,10 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
-| 2026-05-03 | **WS2 — GSTR-1 GSTN portal JSON converter + download endpoint.** `gstr1ToPortalJson` + GET `/api/.../gst-returns/gstr1/portal?...&download=true` emits exact GSTN portal format (DD-MM-YYYY, numeric state codes, etc.). Serves as `GSTR1_<gstin>_<MMYYYY>.json`. +12 tests (74 total). | `9f93061` |
+| 2026-05-03 | **WS18 — Tally migration: masters import.** `parseTallyXml` + `importTallyData` for groups / ledgers / parties / stock items. Two-pass group resolution, idempotent, audit-logged. POST endpoint accepts multipart up to 50 MB. fast-xml-parser dep added. +7 tests (102 total). | `1b812da` |
+| 2026-05-03 | **WS3 — E-invoice NIC IRN payload generator.** `buildEInvoicePayload` produces NIC schema v1.1 payload. Strict pre-flight validation with structured error `details: string[]`. GET preview/validation endpoint. +11 tests (95 total). NIC API submission separate. | `66fe987` |
+| 2026-05-03 | **WS2 — GSTR-3B compute + endpoint.** `computeGstr3b` covers Section 3.1 outward classifications (taxable/zero-rated/nil-rated/RCM-inward), Section 4 ITC available + net, Section 5 exempt inward (intra/inter split). Signed CN accumulation. Decimal end-to-end. +10 tests (84 total). | `3b5aa5e` |
+| 2026-05-03 | **WS2 — GSTR-1 GSTN portal JSON converter + download endpoint.** `gstr1ToPortalJson` + GET `/api/.../gst-returns/gstr1/portal?...&download=true` emits exact GSTN portal format. Serves as `GSTR1_<gstin>_<MMYYYY>.json`. +12 tests (74 total). | `9f93061` |
 | 2026-05-03 | **WS2 — GSTR-1 complete sections (B2CL, CDNR/CDNUR, EXP, NIL).** Refactored `computeGstr1` with `bucketize()` dispatcher. Added all missing GSTR-1 sections. Invoice POST sets supplyType="EXPORT" for non-IN customers. +7 tests (62 total). | `95614c4` |
 | 2026-05-03 | docs: Vercel deployment guide added to README. | `909a25d` |
 | 2026-05-03 | **WS2 — GSTR-1 outward returns first pass.** `computeGstr1` + `summarizeGstr1` services. B2B/B2CS/HSN/DOCS aggregation from persisted breakdown. GET `/api/.../gst-returns/gstr1` endpoint. 7 unit tests. | `d2204a4` |
