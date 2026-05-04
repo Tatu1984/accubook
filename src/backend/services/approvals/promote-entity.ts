@@ -1,4 +1,4 @@
-import { D, sum } from "@/backend/utils/money";
+import { D } from "@/backend/utils/money";
 import type { Tx } from "@/backend/utils/posting";
 import { applyLedgerEntries } from "@/backend/utils/posting";
 import { postBillToGl } from "@/backend/services/billing/post-bill";
@@ -38,7 +38,8 @@ export type PromotionResult = {
 export async function maybePromoteEntity(
   tx: Tx,
   entityType: string,
-  entityId: string
+  entityId: string,
+  organizationId: string
 ): Promise<PromotionResult> {
   const result: PromotionResult = {
     acted: false,
@@ -48,7 +49,7 @@ export async function maybePromoteEntity(
   };
 
   const approvals = await tx.approval.findMany({
-    where: { entityType, entityId },
+    where: { organizationId, entityType, entityId },
     select: { status: true },
   });
 
@@ -66,8 +67,8 @@ export async function maybePromoteEntity(
 
   if (anyRejected) {
     if (entityType === "VOUCHER") {
-      const v = await tx.voucher.findUnique({
-        where: { id: entityId },
+      const v = await tx.voucher.findFirst({
+        where: { id: entityId, organizationId },
         select: { status: true },
       });
       if (v && v.status === "PENDING_APPROVAL") {
@@ -79,8 +80,8 @@ export async function maybePromoteEntity(
         result.outcome = "DEMOTED";
       }
     } else if (entityType === "BILL") {
-      const b = await tx.bill.findUnique({
-        where: { id: entityId },
+      const b = await tx.bill.findFirst({
+        where: { id: entityId, organizationId },
         select: { status: true },
       });
       if (b && b.status === "PENDING_APPROVAL") {
@@ -92,8 +93,11 @@ export async function maybePromoteEntity(
         result.outcome = "DEMOTED";
       }
     } else if (entityType === "EXPENSE_CLAIM") {
-      const ec = await tx.expenseClaim.findUnique({
-        where: { id: entityId },
+      const ec = await tx.expenseClaim.findFirst({
+        where: {
+          id: entityId,
+          employee: { organizationId },
+        },
         select: { status: true },
       });
       if (ec && ec.status === "PENDING") {
@@ -105,8 +109,11 @@ export async function maybePromoteEntity(
         result.outcome = "DEMOTED";
       }
     } else if (entityType === "LEAVE") {
-      const l = await tx.leave.findUnique({
-        where: { id: entityId },
+      const l = await tx.leave.findFirst({
+        where: {
+          id: entityId,
+          employee: { organizationId },
+        },
         select: { status: true },
       });
       if (l && l.status === "PENDING") {
@@ -123,8 +130,8 @@ export async function maybePromoteEntity(
 
   if (allApproved) {
     if (entityType === "VOUCHER") {
-      const v = await tx.voucher.findUnique({
-        where: { id: entityId },
+      const v = await tx.voucher.findFirst({
+        where: { id: entityId, organizationId },
         select: { status: true },
       });
       if (v && v.status === "PENDING_APPROVAL") {
@@ -153,19 +160,12 @@ export async function maybePromoteEntity(
             creditAmount: D(e.creditAmount),
           }))
         );
-        // Sanity-check: totalDebit ≈ totalCredit. We don't reject on
-        // mismatch here (the entity-level check already happened at
-        // create); just log if seen.
-        const drTotal = sum(entries.map((e) => D(e.debitAmount)));
-        const crTotal = sum(entries.map((e) => D(e.creditAmount)));
-        void drTotal;
-        void crTotal;
         result.acted = true;
         result.outcome = "PROMOTED";
       }
     } else if (entityType === "BILL") {
-      const b = await tx.bill.findUnique({
-        where: { id: entityId },
+      const b = await tx.bill.findFirst({
+        where: { id: entityId, organizationId },
         select: {
           status: true,
           organizationId: true,
@@ -184,16 +184,22 @@ export async function maybePromoteEntity(
           try {
             // Pull the most-recent approver as the "createdBy" for the
             // posting voucher — that's the user who effectively booked
-            // the bill on the org's behalf.
-            const lastApprover = await tx.approval.findFirst({
-              where: { entityType, entityId, status: "APPROVED" },
+            // the bill on the org's behalf. Fall back to the requester
+            // (the bill creator) so we never set createdById to "" and
+            // hit a FK violation.
+            const lastDecision = await tx.approval.findFirst({
+              where: { organizationId, entityType, entityId, status: "APPROVED" },
               orderBy: { approvedAt: "desc" },
-              select: { approverId: true },
+              select: { approverId: true, requesterId: true },
             });
+            const createdBy = lastDecision?.approverId ?? lastDecision?.requesterId;
+            if (!createdBy) {
+              throw new Error(`Cannot post bill ${entityId}: no approver / requester to attribute`);
+            }
             await postBillToGl(tx, {
               billId: entityId,
               organizationId: b.organizationId,
-              userId: lastApprover?.approverId ?? "",
+              userId: createdBy,
               // tdsSection on the bill row was stamped at create time
               // when the requester opted in; postBillToGl re-uses it.
               // (If we later add a "TDS section editable by approver"
@@ -213,15 +219,15 @@ export async function maybePromoteEntity(
         result.outcome = "PROMOTED";
       }
     } else if (entityType === "EXPENSE_CLAIM") {
-      const ec = await tx.expenseClaim.findUnique({
-        where: { id: entityId },
+      const ec = await tx.expenseClaim.findFirst({
+        where: { id: entityId, employee: { organizationId } },
         select: { status: true, approvedBy: true },
       });
       if (ec && ec.status === "PENDING") {
         // Stamp approvedBy with the most-recent approver so the claim
         // history shows who signed off. We pull the latest APPROVED row.
         const lastApprover = await tx.approval.findFirst({
-          where: { entityType, entityId, status: "APPROVED" },
+          where: { organizationId, entityType, entityId, status: "APPROVED" },
           orderBy: { approvedAt: "desc" },
           select: { approverId: true },
         });
@@ -237,13 +243,13 @@ export async function maybePromoteEntity(
         result.outcome = "PROMOTED";
       }
     } else if (entityType === "LEAVE") {
-      const l = await tx.leave.findUnique({
-        where: { id: entityId },
+      const l = await tx.leave.findFirst({
+        where: { id: entityId, employee: { organizationId } },
         select: { status: true },
       });
       if (l && l.status === "PENDING") {
         const lastApprover = await tx.approval.findFirst({
-          where: { entityType, entityId, status: "APPROVED" },
+          where: { organizationId, entityType, entityId, status: "APPROVED" },
           orderBy: { approvedAt: "desc" },
           select: { approverId: true },
         });

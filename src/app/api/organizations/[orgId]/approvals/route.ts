@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/backend/database/client";
-import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
+import { withOrgAuth, badRequest, notFound, hasPermission, forbidden } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
 import { maybePromoteEntity } from "@/backend/services/approvals/promote-entity";
 
@@ -11,16 +11,16 @@ export const dynamic = "force-dynamic";
 
 const createWorkflowSchema = z.object({
   name: z.string().min(1, "Name is required"),
-  entityType: z.string().min(1, "Entity type is required"),
+  entityType: z.enum(["VOUCHER", "BILL", "INVOICE", "PURCHASE_ORDER", "EXPENSE_CLAIM", "LEAVE"]),
   isActive: z.boolean().default(true),
   steps: z.array(z.object({
-    stepNumber: z.number().min(1),
+    stepNumber: z.number().int().min(1),
     approverType: z.enum(["ROLE", "USER", "MANAGER"]),
     approverId: z.string().optional(),
-    amountLimit: z.number().optional(),
+    amountLimit: z.number().nonnegative().optional(),
     isRequired: z.boolean().default(true),
-  })).min(1, "At least one step is required"),
-});
+  }).strict()).min(1, "At least one step is required"),
+}).strict();
 
 const processApprovalSchema = z.object({
   approvalId: z.string().min(1, "Approval ID is required"),
@@ -171,10 +171,58 @@ export const GET = withOrgAuth(async (request, { orgId, userId }) => {
   }
 });
 
-export const POST = withOrgAuth(async (request, { orgId }) => {
+export const POST = withOrgAuth(async (request, { orgId, orgUser }) => {
+  if (!hasPermission(orgUser, "approvals", "create")) {
+    return forbidden("You don't have permission to create approval workflows");
+  }
   try {
     const body = await request.json();
     const validatedData = createWorkflowSchema.parse(body);
+
+    // Cross-tenant defense: every USER step must reference a member of THIS
+    // org; every ROLE step must reference a role that exists in THIS org.
+    // Without this guard a malicious admin could route approvals to a user
+    // in a different org. (MANAGER steps don't carry an approverId.)
+    const userIds = validatedData.steps
+      .filter((s) => s.approverType === "USER" && s.approverId)
+      .map((s) => s.approverId!);
+    if (userIds.length > 0) {
+      const foundUsers = await prisma.organizationUser.findMany({
+        where: { organizationId: orgId, userId: { in: userIds } },
+        select: { userId: true },
+      });
+      const foundUserSet = new Set(foundUsers.map((u) => u.userId));
+      const stranger = userIds.find((id) => !foundUserSet.has(id));
+      if (stranger) {
+        return badRequest(`USER step approverId ${stranger} is not a member of this organization`);
+      }
+    }
+    const roleIds = validatedData.steps
+      .filter((s) => s.approverType === "ROLE" && s.approverId)
+      .map((s) => s.approverId!);
+    if (roleIds.length > 0) {
+      // Roles are global (not org-scoped) in our schema; the routing
+      // helper filters role-holders by organizationId at routing time
+      // so cross-tenant leakage is impossible. Here we just verify the
+      // role exists AND has at least one active holder in this org —
+      // otherwise the workflow can never produce an Approval row.
+      const usableRoles = await prisma.organizationUser.findMany({
+        where: {
+          organizationId: orgId,
+          roleId: { in: roleIds },
+          isActive: true,
+        },
+        select: { roleId: true },
+        distinct: ["roleId"],
+      });
+      const usableSet = new Set(usableRoles.map((r) => r.roleId));
+      const dud = roleIds.find((id) => !usableSet.has(id));
+      if (dud) {
+        return badRequest(
+          `ROLE step approverId ${dud} has no active holders in this organization (workflow would never trigger)`
+        );
+      }
+    }
 
     // Check for duplicate name
     const existingWorkflow = await prisma.approvalWorkflow.findFirst({
@@ -224,7 +272,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
   }
 });
 
-export const PATCH = withOrgAuth(async (request, { userId }) => {
+export const PATCH = withOrgAuth(async (request, { orgId, userId }) => {
   try {
     const body = await request.json();
 
@@ -232,10 +280,15 @@ export const PATCH = withOrgAuth(async (request, { userId }) => {
     if (body.approvalId) {
       const validatedData = processApprovalSchema.parse(body);
 
-      // Verify approval exists and user can approve
+      // Cross-tenant boundary: organizationId on the URL must match the
+      // Approval row's. Without this filter a member of org A could
+      // approve/reject an Approval routed through org B (route-entity
+      // could create them across orgs before migration 9; defense in
+      // depth even after).
       const approval = await prisma.approval.findFirst({
         where: {
           id: validatedData.approvalId,
+          organizationId: orgId,
           status: "PENDING",
           approverId: userId,
         },
@@ -269,6 +322,7 @@ export const PATCH = withOrgAuth(async (request, { userId }) => {
         // every other holder's inbox after the decision is made.
         const siblings = await tx.approval.updateMany({
           where: {
+            organizationId: orgId,
             entityType: u.entityType,
             entityId: u.entityId,
             stepNumber: u.stepNumber,
@@ -284,7 +338,7 @@ export const PATCH = withOrgAuth(async (request, { userId }) => {
         // Auto-promote / demote the underlying entity once all
         // approvals have decided. Catches both the "all APPROVED →
         // post the voucher" and "any REJECTED → kick it back" paths.
-        const p = await maybePromoteEntity(tx, u.entityType, u.entityId);
+        const p = await maybePromoteEntity(tx, u.entityType, u.entityId, orgId);
         return { updatedApproval: u, promotion: p, siblingsCancelled: siblings.count };
       });
 
@@ -304,7 +358,10 @@ export const PATCH = withOrgAuth(async (request, { userId }) => {
   }
 });
 
-export const DELETE = withOrgAuth(async (request, { orgId }) => {
+export const DELETE = withOrgAuth(async (request, { orgId, orgUser }) => {
+  if (!hasPermission(orgUser, "approvals", "delete")) {
+    return forbidden("You don't have permission to delete approval workflows");
+  }
   try {
     const { searchParams } = new URL(request.url);
     const workflowId = searchParams.get("workflowId");

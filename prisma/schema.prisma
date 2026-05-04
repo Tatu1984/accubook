@@ -167,6 +167,7 @@ model Organization {
   tdsDeductions     TdsDeduction[]
   tcsCollections    TcsCollection[]
   recurringInvoices RecurringInvoice[]
+  approvals         Approval[]
 
   @@map("organizations")
 }
@@ -1929,22 +1930,25 @@ model ApprovalWorkflowStep {
 }
 
 model Approval {
-  id           String    @id @default(cuid())
-  entityType   String    // VOUCHER, BILL, etc.
-  entityId     String
-  stepNumber   Int
-  approverId   String
-  requesterId  String
-  status       String    @default("PENDING") // PENDING, APPROVED, REJECTED
-  comments     String?
-  approvedAt   DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id             String    @id @default(cuid())
+  organizationId String    // tenant boundary — must match the routed entity's org
+  entityType     String    // VOUCHER, BILL, etc.
+  entityId       String
+  stepNumber     Int
+  approverId     String
+  requesterId    String
+  status         String    @default("PENDING") // PENDING, APPROVED, REJECTED, CANCELLED
+  comments       String?
+  approvedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  approver  User @relation("ApprovalApprover", fields: [approverId], references: [id])
-  requester User @relation("ApprovalRequester", fields: [requesterId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  approver     User         @relation("ApprovalApprover", fields: [approverId], references: [id])
+  requester    User         @relation("ApprovalRequester", fields: [requesterId], references: [id])
 
-  @@index([entityType, entityId])
+  @@index([organizationId, entityType, entityId])
+  @@index([organizationId, approverId, status])
   @@map("approvals")
 }
 

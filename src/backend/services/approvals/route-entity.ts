@@ -98,8 +98,29 @@ export async function routeEntityForApproval(
         });
         continue;
       }
+      // Cross-tenant defense: never route an Approval to a user outside
+      // the entity's org. The workflow create UI should prevent this,
+      // but enforce at write time so a corrupted workflow row can't
+      // leak entities across orgs.
+      const isMember = await tx.organizationUser.findUnique({
+        where: {
+          organizationId_userId: {
+            organizationId: opts.organizationId,
+            userId: step.approverId,
+          },
+        },
+        select: { isActive: true },
+      });
+      if (!isMember || !isMember.isActive) {
+        result.skipped.push({
+          stepNumber: step.stepNumber,
+          reason: `USER step skipped — approverId is not an active member of org ${opts.organizationId}`,
+        });
+        continue;
+      }
       await tx.approval.create({
         data: {
+          organizationId: opts.organizationId,
           entityType: opts.entityType,
           entityId: opts.entityId,
           stepNumber: step.stepNumber,
@@ -135,6 +156,7 @@ export async function routeEntityForApproval(
       for (const ou of orgUsers) {
         await tx.approval.create({
           data: {
+            organizationId: opts.organizationId,
             entityType: opts.entityType,
             entityId: opts.entityId,
             stepNumber: step.stepNumber,
@@ -174,6 +196,7 @@ export async function routeEntityForApproval(
       }
       await tx.approval.create({
         data: {
+          organizationId: opts.organizationId,
           entityType: opts.entityType,
           entityId: opts.entityId,
           stepNumber: step.stepNumber,
