@@ -418,6 +418,7 @@ model Voucher {
   payslips      Payslip[]      @relation("PayslipVoucher")
   tdsDeductions TdsDeduction[] @relation("TdsVoucher")
   tcsCollections TcsCollection[] @relation("TcsVoucher")
+  bill          Bill?          @relation("BillVoucher")
 
   @@unique([organizationId, voucherTypeId, voucherNumber, fiscalYearId])
   @@index([organizationId, date])
@@ -1252,6 +1253,14 @@ model Bill {
   placeOfSupply    String?
   supplyType       String?   // INTRASTATE | INTERSTATE | IMPORT
   reverseCharge    Boolean   @default(false)
+  // Set once the bill is APPROVED and posted to GL via postBillToGl.
+  // The Voucher carries the actual ledger entries; this is the FK back.
+  voucherId        String?   @unique
+  // TDS at bill time (accrual basis). When set, the posting voucher
+  // includes Cr TDS Payable and a TdsDeduction row is persisted for
+  // Form 16A reporting.
+  tdsSection       String?
+  tdsRationale     String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -1259,6 +1268,8 @@ model Bill {
   party         Party          @relation(fields: [partyId], references: [id])
   purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
   currency      Currency?      @relation(fields: [currencyId], references: [id])
+  voucher       Voucher?       @relation("BillVoucher", fields: [voucherId], references: [id])
+  tdsDeductions TdsDeduction[]
   items         BillItem[]
   taxes         BillTax[]
   payments      Payment[]
@@ -1424,7 +1435,13 @@ model Payment {
 model TdsDeduction {
   id             String   @id @default(cuid())
   organizationId String
-  paymentId      String
+  /**
+   * Source of the deduction. Exactly ONE of paymentId / billId is set:
+   *   paymentId → cash-basis (deducted at payment time, the original flow).
+   *   billId    → accrual-basis (deducted at bill recording time).
+   */
+  paymentId      String?
+  billId         String?
   partyId        String
   voucherId      String   // the JV that booked the deduction
   fiscalYearId   String
@@ -1435,7 +1452,7 @@ model TdsDeduction {
   deducteeType   String
   /** Effective rate as percent (1 means 1%, not 0.01). */
   ratePercent    Decimal  @db.Decimal(5, 2)
-  /** Base on which TDS was applied (typically the payment amount net of GST). */
+  /** Base on which TDS was applied (typically the payment/bill amount net of GST). */
   baseAmount     Decimal  @db.Decimal(18, 4)
   /** Actual TDS deducted. */
   taxAmount      Decimal  @db.Decimal(18, 4)
@@ -1448,7 +1465,8 @@ model TdsDeduction {
   createdAt      DateTime @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  payment      Payment      @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  payment      Payment?     @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  bill         Bill?        @relation(fields: [billId], references: [id], onDelete: Cascade)
   party        Party        @relation(fields: [partyId], references: [id])
   voucher      Voucher      @relation("TdsVoucher", fields: [voucherId], references: [id])
   fiscalYear   FiscalYear   @relation("TdsFY", fields: [fiscalYearId], references: [id])
@@ -1456,6 +1474,7 @@ model TdsDeduction {
   @@index([organizationId, fiscalYearId, section])
   @@index([organizationId, partyId, fiscalYearId])
   @@index([paymentId])
+  @@index([billId])
   @@map("tds_deductions")
 }
 

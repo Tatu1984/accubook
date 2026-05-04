@@ -7,6 +7,7 @@ import { formatNumber, nextNumber } from "@/backend/utils/posting";
 import { computeLineGst, determineSupplyType, type SupplyType } from "@/backend/utils/india-tax";
 import { logger } from "@/backend/utils/logger";
 import { routeEntityForApproval, notifyNewApprovers } from "@/backend/services/approvals/route-entity";
+import { postBillToGl } from "@/backend/services/billing/post-bill";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -19,6 +20,11 @@ const attachmentSchema = z.object({
   data: z.string(),
 });
 
+const TDS_SECTIONS = [
+  "194C", "194C_TRANSPORT", "194J", "194I_LAND", "194I_PM",
+  "194H", "194Q", "194O",
+] as const;
+
 const createBillSchema = z.object({
   partyId: z.string().min(1, "Vendor is required"),
   date: z.string().transform((val) => new Date(val)),
@@ -28,6 +34,12 @@ const createBillSchema = z.object({
   status: z.enum(["DRAFT", "PENDING_APPROVAL", "APPROVED", "PARTIAL", "PAID", "OVERDUE", "CANCELLED"]).default("DRAFT"),
   notes: z.string().optional(),
   attachments: z.array(attachmentSchema).optional(),
+  /** RCM flag — when true, bill posts with Cr GST Output (RCM payable) instead of charging vendor for GST. */
+  reverseCharge: z.boolean().default(false),
+  /** TDS at bill time (accrual). When set, posting voucher gets a Cr TDS Payable line and a TdsDeduction row is persisted. */
+  tdsSection: z.enum(TDS_SECTIONS).optional(),
+  deducteeType: z.enum(["INDIVIDUAL_HUF", "COMPANY_OTHER"]).optional(),
+  noPan: z.boolean().optional(),
   items: z.array(z.object({
     itemId: z.string().min(1),
     quantity: z.number().min(1),
@@ -210,6 +222,12 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
           // GST audit trail.
           placeOfSupply: party.billingState ?? null,
           supplyType,
+          reverseCharge: validatedData.reverseCharge,
+          // Capture tdsSection on the bill row at create time so a
+          // workflow-promoted bill (where the approver acts later)
+          // still applies the requester's intended TDS section in the
+          // posting voucher. Re-stamped during postBillToGl, harmless.
+          tdsSection: validatedData.tdsSection ?? null,
           items: {
             create: itemsData,
           },
@@ -234,6 +252,31 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
           });
         } catch (e) {
           logger.error({ err: e, billId: created.id }, "Approval routing failed (bill still PENDING_APPROVAL)");
+        }
+      }
+
+      // If the bill was created already APPROVED (no workflow gating),
+      // post it to GL right now. The same posting flow runs from
+      // maybePromoteEntity for workflow-gated bills.
+      if (validatedData.status === "APPROVED") {
+        try {
+          await postBillToGl(tx, {
+            billId: created.id,
+            organizationId: orgId,
+            userId,
+            tds: validatedData.tdsSection
+              ? {
+                  section: validatedData.tdsSection,
+                  deducteeType: validatedData.deducteeType,
+                  noPan: validatedData.noPan,
+                }
+              : undefined,
+          });
+        } catch (e) {
+          // Posting failure is fatal — refusing the bill keeps the books
+          // consistent. Log and rethrow so the tx rolls back.
+          logger.error({ err: e, billId: created.id }, "Bill posting to GL failed");
+          throw e;
         }
       }
       return created;

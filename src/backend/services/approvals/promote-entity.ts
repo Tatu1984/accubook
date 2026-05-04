@@ -1,6 +1,9 @@
 import { D, sum } from "@/backend/utils/money";
 import type { Tx } from "@/backend/utils/posting";
 import { applyLedgerEntries } from "@/backend/utils/posting";
+import { postBillToGl } from "@/backend/services/billing/post-bill";
+import type { TdsSectionCode } from "@/backend/services/tax/tds";
+import { logger } from "@/backend/utils/logger";
 
 /**
  * Auto-promote / demote an entity based on its Approval rows.
@@ -163,13 +166,49 @@ export async function maybePromoteEntity(
     } else if (entityType === "BILL") {
       const b = await tx.bill.findUnique({
         where: { id: entityId },
-        select: { status: true },
+        select: {
+          status: true,
+          organizationId: true,
+          tdsSection: true,
+          voucherId: true,
+        },
       });
       if (b && b.status === "PENDING_APPROVAL") {
         await tx.bill.update({
           where: { id: entityId },
           data: { status: "APPROVED" },
         });
+        // Post to GL once approved. Skip if already posted (idempotent
+        // safeguard — postBillToGl also refuses on a non-null voucherId).
+        if (!b.voucherId) {
+          try {
+            // Pull the most-recent approver as the "createdBy" for the
+            // posting voucher — that's the user who effectively booked
+            // the bill on the org's behalf.
+            const lastApprover = await tx.approval.findFirst({
+              where: { entityType, entityId, status: "APPROVED" },
+              orderBy: { approvedAt: "desc" },
+              select: { approverId: true },
+            });
+            await postBillToGl(tx, {
+              billId: entityId,
+              organizationId: b.organizationId,
+              userId: lastApprover?.approverId ?? "",
+              // tdsSection on the bill row was stamped at create time
+              // when the requester opted in; postBillToGl re-uses it.
+              // (If we later add a "TDS section editable by approver"
+              // flow, this is where the field surfaces from.)
+              ...(b.tdsSection
+                ? { tds: { section: b.tdsSection as TdsSectionCode } }
+                : {}),
+            });
+          } catch (e) {
+            logger.error({ err: e, billId: entityId }, "Bill posting on promotion failed");
+            // Re-raise to roll back the promotion — keeping a bill in
+            // APPROVED-but-not-posted state would silently break reports.
+            throw e;
+          }
+        }
         result.acted = true;
         result.outcome = "PROMOTED";
       }
