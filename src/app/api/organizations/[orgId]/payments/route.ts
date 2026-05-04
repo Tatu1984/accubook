@@ -161,6 +161,7 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
       //    know whether to add a 3rd Cr line and reduce the bank movement.
       const amount = D(validatedData.amount);
       let tdsAmount = D(0);
+      let tdsRate = D(0);
       let tdsLedgerId: string | null = null;
       let tdsRationale: string | null = null;
       if (validatedData.tdsSection) {
@@ -186,6 +187,7 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
           noPan: validatedData.noPan,
         });
         tdsAmount = D(tdsResult.amount);
+        tdsRate = D(tdsResult.rate);
         tdsRationale = tdsResult.appliedReason;
         if (tdsResult.amount.greaterThan(D(0))) {
           const tdsLedger = await getTdsPayableLedger(tx, orgId);
@@ -297,6 +299,30 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
           bankAccount: true,
         },
       });
+
+      // 7b. If TDS was deducted, persist the per-payment deduction
+      //     row. This is the queryable source for Form 16A / 26AS.
+      //     The audit log captures the same data but isn't structured
+      //     for reporting.
+      if (validatedData.tdsSection && tdsAmount.greaterThan(D(0))) {
+        await tx.tdsDeduction.create({
+          data: {
+            organizationId: orgId,
+            paymentId: payment.id,
+            partyId: party.id,
+            voucherId: voucher.id,
+            fiscalYearId: fy.id,
+            section: validatedData.tdsSection,
+            deducteeType: validatedData.deducteeType ?? "COMPANY_OTHER",
+            ratePercent: tdsRate,
+            baseAmount: amount,
+            taxAmount: tdsAmount,
+            noPan: validatedData.noPan ?? false,
+            rationale: tdsRationale ?? "DEDUCTED",
+            deductedAt: validatedData.date,
+          },
+        });
+      }
 
       // 8. If linked to a bill, create the InvoicePayment junction and recompute bill status.
       if (bill) {

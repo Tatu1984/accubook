@@ -153,6 +153,8 @@ model Organization {
   numberCounters    NumberCounter[]
   boms              Bom[]
   workOrders        WorkOrder[]
+  tdsDeductions     TdsDeduction[]
+  tcsCollections    TcsCollection[]
 
   @@map("organizations")
 }
@@ -275,10 +277,12 @@ model FiscalYear {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  periods      FiscalPeriod[]
-  vouchers     Voucher[]
-  budgets      Budget[]
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  periods        FiscalPeriod[]
+  vouchers       Voucher[]
+  budgets        Budget[]
+  tdsDeductions  TdsDeduction[]   @relation("TdsFY")
+  tcsCollections TcsCollection[]  @relation("TcsFY")
 
   @@unique([organizationId, name])
   @@map("fiscal_years")
@@ -400,6 +404,8 @@ model Voucher {
   entries       VoucherEntry[]
   invoicePayments InvoicePayment[]
   payslips      Payslip[]      @relation("PayslipVoucher")
+  tdsDeductions TdsDeduction[] @relation("TdsVoucher")
+  tcsCollections TcsCollection[] @relation("TcsVoucher")
 
   @@unique([organizationId, voucherTypeId, voucherNumber, fiscalYearId])
   @@index([organizationId, date])
@@ -570,6 +576,8 @@ model Party {
   bills          Bill[]
   receipts       Receipt[]
   payments       Payment[]
+  tdsDeductions  TdsDeduction[]
+  tcsCollections TcsCollection[]
 
   @@unique([organizationId, name])
   @@index([organizationId, type])
@@ -1271,13 +1279,50 @@ model Receipt {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  party        Party        @relation(fields: [partyId], references: [id])
-  invoice      Invoice?     @relation(fields: [invoiceId], references: [id])
-  bankAccount  BankAccount? @relation(fields: [bankAccountId], references: [id])
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  party           Party            @relation(fields: [partyId], references: [id])
+  invoice         Invoice?         @relation(fields: [invoiceId], references: [id])
+  bankAccount     BankAccount?     @relation(fields: [bankAccountId], references: [id])
+  tcsCollections  TcsCollection[]
 
   @@unique([organizationId, receiptNumber])
   @@map("receipts")
+}
+
+/**
+ * Per-receipt TCS collection record. Mirrors TdsDeduction; powers
+ * Form 27D quarterly statement, 26AS reconciliation, and the TCS
+ * register.
+ */
+model TcsCollection {
+  id             String   @id @default(cuid())
+  organizationId String
+  receiptId      String
+  partyId        String
+  voucherId      String
+  fiscalYearId   String
+
+  section        String   // "206C_1H" | "206C_1F"
+  deducteeType   String
+  ratePercent    Decimal  @db.Decimal(5, 2)
+  baseAmount     Decimal  @db.Decimal(18, 4)
+  taxAmount      Decimal  @db.Decimal(18, 4)
+  noPan          Boolean  @default(false)
+  rationale      String
+
+  collectedAt    DateTime
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  receipt      Receipt      @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  party        Party        @relation(fields: [partyId], references: [id])
+  voucher      Voucher      @relation("TcsVoucher", fields: [voucherId], references: [id])
+  fiscalYear   FiscalYear   @relation("TcsFY", fields: [fiscalYearId], references: [id])
+
+  @@index([organizationId, fiscalYearId, section])
+  @@index([organizationId, partyId, fiscalYearId])
+  @@index([receiptId])
+  @@map("tcs_collections")
 }
 
 model Payment {
@@ -1299,13 +1344,59 @@ model Payment {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  party        Party        @relation(fields: [partyId], references: [id])
-  bill         Bill?        @relation(fields: [billId], references: [id])
-  bankAccount  BankAccount? @relation(fields: [bankAccountId], references: [id])
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  party          Party           @relation(fields: [partyId], references: [id])
+  bill           Bill?           @relation(fields: [billId], references: [id])
+  bankAccount    BankAccount?    @relation(fields: [bankAccountId], references: [id])
+  tdsDeductions  TdsDeduction[]
 
   @@unique([organizationId, paymentNumber])
   @@map("payments")
+}
+
+/**
+ * Per-payment TDS deduction record. Set by payments POST when the
+ * caller flags a section. The audit log captures the same data, but
+ * this table is queryable: drives Form 16A quarterly statements,
+ * 26AS reconciliation, monthly challan generation, and the TDS
+ * register report.
+ */
+model TdsDeduction {
+  id             String   @id @default(cuid())
+  organizationId String
+  paymentId      String
+  partyId        String
+  voucherId      String   // the JV that booked the deduction
+  fiscalYearId   String
+
+  /** TDS section code (e.g. "194C", "194J", "194Q"). */
+  section        String
+  /** "INDIVIDUAL_HUF" | "COMPANY_OTHER" — affects rate for some sections. */
+  deducteeType   String
+  /** Effective rate as percent (1 means 1%, not 0.01). */
+  ratePercent    Decimal  @db.Decimal(5, 2)
+  /** Base on which TDS was applied (typically the payment amount net of GST). */
+  baseAmount     Decimal  @db.Decimal(18, 4)
+  /** Actual TDS deducted. */
+  taxAmount      Decimal  @db.Decimal(18, 4)
+  /** PAN missing → 20% penal rate flag. */
+  noPan          Boolean  @default(false)
+  /** "DEDUCTED" | "BELOW_SINGLE_THRESHOLD" | "BELOW_ANNUAL_THRESHOLD" | "ZERO_RATE". */
+  rationale      String
+
+  deductedAt     DateTime
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  payment      Payment      @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  party        Party        @relation(fields: [partyId], references: [id])
+  voucher      Voucher      @relation("TdsVoucher", fields: [voucherId], references: [id])
+  fiscalYear   FiscalYear   @relation("TdsFY", fields: [fiscalYearId], references: [id])
+
+  @@index([organizationId, fiscalYearId, section])
+  @@index([organizationId, partyId, fiscalYearId])
+  @@index([paymentId])
+  @@map("tds_deductions")
 }
 
 model InvoicePayment {

@@ -163,6 +163,7 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
       // line and increase the bank movement.
       const amount = D(validatedData.amount);
       let tcsAmount = D(0);
+      let tcsRate = D(0);
       let tcsLedgerId: string | null = null;
       let tcsRationale: string | null = null;
       if (validatedData.tcsSection) {
@@ -187,6 +188,7 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
           noPan: validatedData.noPan,
         });
         tcsAmount = D(tcsResult.amount);
+        tcsRate = D(tcsResult.rate);
         tcsRationale = tcsResult.appliedReason;
         if (tcsResult.amount.greaterThan(D(0))) {
           const tcsLedger = await getTcsPayableLedger(tx, orgId);
@@ -295,6 +297,28 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
           bankAccount: true,
         },
       });
+
+      // Persist the TCS collection row (queryable source for Form
+      // 27D + 26AS reconciliation).
+      if (validatedData.tcsSection && tcsAmount.greaterThan(D(0))) {
+        await tx.tcsCollection.create({
+          data: {
+            organizationId: orgId,
+            receiptId: receipt.id,
+            partyId: party.id,
+            voucherId: voucher.id,
+            fiscalYearId: fy.id,
+            section: validatedData.tcsSection,
+            deducteeType: validatedData.deducteeType ?? "COMPANY_OTHER",
+            ratePercent: tcsRate,
+            baseAmount: amount,
+            taxAmount: tcsAmount,
+            noPan: validatedData.noPan ?? false,
+            rationale: tcsRationale ?? "DEDUCTED",
+            collectedAt: validatedData.date,
+          },
+        });
+      }
 
       if (invoice) {
         await tx.invoicePayment.create({
