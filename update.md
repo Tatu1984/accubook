@@ -261,8 +261,9 @@ Three sub-PRs. Tick boxes as they ship.
   - **GST returns UI** — `/taxation/gst` now wired to compute + portal-JSON download for GSTR-1/3B/9.
   - **Banking import UI** at `/banking/import` — upload statement → reconcile → match results.
   - **Marketing landing page** at `/` — reactbits-style hero/features/CTA, sign-in button → /login on same domain.
-- **Last updated:** 2026-05-04 by Claude (commit `ae638b2`)
+- **Last updated:** 2026-05-04 by Claude (commit `b2f3174`)
 - **What's done since last session:**
+  - **Audit MEDIUM follow-ups (3 commits).** `3d28496` — bills POST now writes audit log (action=POST when promoted-to-GL at create, =CREATE otherwise; payload captures rcm/tdsSection/voucherId); routeEntityForApproval `amountLimit` gate uses explicit null/undefined check so `0` is treated as a real threshold (was JS-falsy-coerced). `b2f3174` — README + DEVELOPER_GUIDE refreshed: README architecture-notes now mentions bills→GL on approval + the approvals workflow + email scaffold; DEVELOPER_GUIDE adds the new endpoints (post-month, pay-month, PATCH /organizations, DELETE /approvals) and the new page inventory (Approvals / Billing / Manufacturing / Banking modules; india-tax / setup migrate / gstr2b).
   - **Production-readiness audit + Tier 1+2 fixes (4 commits).** Four parallel audit agents (security / data integrity / ops / code quality) found 12+ blocker/high issues. Fixed in three batches:
     - `43dff53` Approvals cross-tenant fix — migration 9 adds `Approval.organizationId` (backfilled from routed entity); routing helper sets it on every create; PATCH/promote-entity filter by it; POST/DELETE permission-gated; `createWorkflowSchema` validates approverId belongs to the org. Also drive-by fixed `userId: ""` FK-violation fallback in promote-entity.
     - `4159284` Data integrity — bills `amountDue` now reduced by TDS (AP subledger no longer drifts from vendor ledger); 194Q YTD aggregate sums `subtotal` not `totalAmount` (CBDT Circular 13/2021); recurring runner derives FY from `ranAt` not `nextRunDate` (back-dated catch-ups can't mint invoice numbers in closed FYs); bills DELETE refuses if `voucherId` is set (won't orphan a posted voucher).
@@ -359,6 +360,8 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
+| 2026-05-04 | **Docs refresh** — README architecture notes + DEVELOPER_GUIDE endpoint/page inventory. | `b2f3174` |
+| 2026-05-04 | **Audit log in bills POST + amountLimit `0` falsy fix.** | `3d28496` |
 | 2026-05-04 | **Tier 2 audit fixes — Resend timeout, TDS list nullable-payment, .env.example, .strict() schemas, permission gates.** | `ae638b2` |
 | 2026-05-04 | **Tier 1 UX — sidebar links 6 orphaned pages; preferences placeholder; notifications wired to real API (was Dec-2024 mock).** | `658932d` |
 | 2026-05-04 | **Tier 1 data integrity — bills amountDue net of TDS; 194Q YTD net of GST; recurring runner FY from ranAt; bills DELETE checks voucherId.** | `4159284` |
