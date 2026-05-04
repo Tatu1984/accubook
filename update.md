@@ -261,8 +261,9 @@ Three sub-PRs. Tick boxes as they ship.
   - **GST returns UI** — `/taxation/gst` now wired to compute + portal-JSON download for GSTR-1/3B/9.
   - **Banking import UI** at `/banking/import` — upload statement → reconcile → match results.
   - **Marketing landing page** at `/` — reactbits-style hero/features/CTA, sign-in button → /login on same domain.
-- **Last updated:** 2026-05-04 by Claude (commit `9915d80`)
+- **Last updated:** 2026-05-04 by Claude (commit pending — settings page + PATCH endpoint)
 - **What's done since last session:**
+  - **PATCH /organizations/[orgId] + `/settings/india-tax` page.** First properly-implemented org settings PATCH (the placeholder /settings/organization page was hardcoded `defaultValue` inputs that never persisted). Strict-mode zod allow-list of editable fields (no smuggling). New `/settings/india-tax` page lets users set GSTIN, supplier state, and toggle composition scheme + pick the rate (1% / 5% / 6%). Audit log entry per save. Heads-up banner when turning composition OFF mid-year.
   - **UI — CMP-08 tab on `/taxation/gst`.** Fourth tab next to GSTR-1/3B/9. Period bar (FY + quarter), 4-KPI summary (turnover / composition tax / RCM-inward / total), 8-cell layout matching the GSTN portal form. Refuses with structured error if org isn't on composition.
   - **UI — `/billing/recurring`.** Recurring-invoice management page. List view with party / frequency / next-run (with DUE badge when overdue) / runCount / last-invoice / status. KPIs for due-now / active / inactive. "Run now" button hits the runner; result card shows spawned + errored counts with details. "New template" modal collects party + frequency + start/end dates + due-days + single line-item, posts to `POST /recurring-invoices`. Build now 73 pages.
   - **Recurring billing scaffold.** New `RecurringInvoice` model with frequency / startDate / endDate / nextRunDate / dueDays / items JSON template / meta / runCount / lastInvoiceId (migration `7_add_recurring_invoices` applied). Pure helper `addFrequency` (DAILY / WEEKLY / MONTHLY / QUARTERLY / YEARLY) handles month-end clamp correctly (Jan 31 + 1mo → Feb 28/29). Plus `isDue`, `missedRunDates`, `isFrequency`. New `POST /recurring-invoices` to create a template; new `POST /recurring-invoices/run` to spawn one invoice per due template (mirrors invoice POST's GST split + composition handling + race-safe FY-scoped numbering, advances `nextRunDate` and bumps `runCount`, auto-deactivates when past `endDate`); new `GET /recurring-invoices?active=true&dueOnly=true` to list. Cron-friendly. +23 tests (327 total).
@@ -348,6 +349,7 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
+| 2026-05-04 | **PATCH /organizations/[orgId] + `/settings/india-tax` page.** First real org settings PATCH (strict-mode zod + audit log). Page toggles GSTIN / state / composition scheme + rate. | _pending_ |
 | 2026-05-04 | **UI — CMP-08 tab on `/taxation/gst`.** Fourth tab; surfaces the composition quarterly cells in 4 KPIs + 8-line cell card. | `9915d80` |
 | 2026-05-04 | **UI — `/billing/recurring`.** Template list + Run-now action + Create modal. KPIs (due / active / inactive) + DUE badge per row when overdue. | `d1e56b9` |
 | 2026-05-04 | **Recurring billing scaffold.** `RecurringInvoice` model + migration 7. Pure helpers `addFrequency` / `isDue` / `missedRunDates` (handles month-end clamp). New `POST /recurring-invoices` (create template) and `POST /recurring-invoices/run` (cron-friendly tick that spawns one invoice per due template, mirrors GST split + composition + FY numbering). +23 tests (327 total). | `a4b3922` |
