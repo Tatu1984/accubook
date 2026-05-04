@@ -420,6 +420,7 @@ model Voucher {
   tdsDeductions TdsDeduction[] @relation("TdsVoucher")
   tcsCollections TcsCollection[] @relation("TcsVoucher")
   bill          Bill?          @relation("BillVoucher")
+  payments      Payment[]      @relation("PaymentVoucher")
 
   @@unique([organizationId, voucherTypeId, voucherNumber, fiscalYearId])
   @@index([organizationId, date])
@@ -1420,6 +1421,7 @@ model Payment {
   party          Party           @relation(fields: [partyId], references: [id])
   bill           Bill?           @relation(fields: [billId], references: [id])
   bankAccount    BankAccount?    @relation(fields: [bankAccountId], references: [id])
+  voucher        Voucher?        @relation("PaymentVoucher", fields: [voucherId], references: [id])
   tdsDeductions  TdsDeduction[]
 
   @@unique([organizationId, paymentNumber])
