@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
+import { maybePromoteEntity } from "@/backend/services/approvals/promote-entity";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -244,24 +245,31 @@ export const PATCH = withOrgAuth(async (request, { userId }) => {
         return notFound("Approval not found or you don't have permission");
       }
 
-      const updatedApproval = await prisma.approval.update({
-        where: { id: validatedData.approvalId },
-        data: {
-          status: validatedData.action === "APPROVE" ? "APPROVED" : "REJECTED",
-          approvedAt: new Date(),
-          comments: validatedData.comments,
-        },
-        include: {
-          requester: {
-            select: {
-              name: true,
-              email: true,
+      const { updatedApproval, promotion } = await prisma.$transaction(async (tx) => {
+        const u = await tx.approval.update({
+          where: { id: validatedData.approvalId },
+          data: {
+            status: validatedData.action === "APPROVE" ? "APPROVED" : "REJECTED",
+            approvedAt: new Date(),
+            comments: validatedData.comments,
+          },
+          include: {
+            requester: {
+              select: {
+                name: true,
+                email: true,
+              },
             },
           },
-        },
+        });
+        // Auto-promote / demote the underlying entity once all
+        // approvals have decided. Catches both the "all APPROVED →
+        // post the voucher" and "any REJECTED → kick it back" paths.
+        const p = await maybePromoteEntity(tx, u.entityType, u.entityId);
+        return { updatedApproval: u, promotion: p };
       });
 
-      return NextResponse.json(updatedApproval);
+      return NextResponse.json({ ...updatedApproval, promotion });
     }
 
     return badRequest("Invalid request");

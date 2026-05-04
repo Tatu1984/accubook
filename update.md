@@ -261,8 +261,9 @@ Three sub-PRs. Tick boxes as they ship.
   - **GST returns UI** — `/taxation/gst` now wired to compute + portal-JSON download for GSTR-1/3B/9.
   - **Banking import UI** at `/banking/import` — upload statement → reconcile → match results.
   - **Marketing landing page** at `/` — reactbits-style hero/features/CTA, sign-in button → /login on same domain.
-- **Last updated:** 2026-05-04 by Claude (commit `99e07f6`)
+- **Last updated:** 2026-05-04 by Claude (commit pending — approval auto-promote)
 - **What's done since last session:**
+  - **Approval → entity auto-promote/demote.** New `maybePromoteEntity(tx, entityType, entityId)` helper. PATCH /approvals now wraps the Approval update + the promotion in a single $transaction: if any approval is REJECTED → demote (Voucher → REJECTED, Bill → DRAFT); if ALL approvals are APPROVED → promote (Voucher → APPROVED + isPosted + applyLedgerEntries; Bill → APPROVED). Idempotent (only acts when entity is currently PENDING_APPROVAL). Closes the loop: pending voucher → workflow routes → approver clicks Approve → voucher auto-posts to GL.
   - **Voucher + Bill CREATE → auto-route through approval workflow.** New `routeEntityForApproval(tx, opts)` helper. When a voucher is created with `requiresApproval` (or a bill with status=PENDING_APPROVAL), looks up the active ApprovalWorkflow for that entityType, evaluates each step against the entity's amount (steps with `amountLimit` skipped when amount < limit — so "up to ₹10k auto-approve, ₹10k+ needs CFO" works), and creates `Approval` rows. USER and ROLE approver types fully supported (ROLE creates one row per holder; any one can approve). MANAGER skipped with TODO. Routing failures non-fatal — entity stays in pending state for manual review. Wired into both `vouchers POST` and `bills POST`.
   - **UI — `/approvals` inbox.** Surfaces the existing approvals backend (no UI before). Two tabs: Pending (current user's queue, with Approve / Reject actions per row) and History (past approvals where you were either approver or requester). Action dialog collects optional comments before posting back to the existing `PATCH /approvals` route. Empty state ("Inbox zero") when nothing's queued. Build now 75 pages.
   - **PATCH /organizations/[orgId] + `/settings/india-tax` page.** First properly-implemented org settings PATCH (the placeholder /settings/organization page was hardcoded `defaultValue` inputs that never persisted). Strict-mode zod allow-list of editable fields (no smuggling). New `/settings/india-tax` page lets users set GSTIN, supplier state, and toggle composition scheme + pick the rate (1% / 5% / 6%). Audit log entry per save. Heads-up banner when turning composition OFF mid-year.
@@ -351,6 +352,7 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
+| 2026-05-04 | **Approval → entity auto-promote/demote.** PATCH /approvals now closes the loop: all APPROVED → voucher posts to GL or bill is approved; any REJECTED → voucher REJECTED / bill back to DRAFT. Single $transaction with the Approval update. | _pending_ |
 | 2026-05-04 | **Voucher + Bill → approval workflow routing.** New `routeEntityForApproval`. PENDING_APPROVAL voucher/bill auto-creates Approval rows from workflow steps with amount-limit gating. USER + ROLE approver types fully supported. | `99e07f6` |
 | 2026-05-04 | **UI — `/approvals` inbox.** Pending + History tabs over the existing approvals backend. Approve / Reject dialog with optional comments. | `79b327a` |
 | 2026-05-04 | **PATCH /organizations/[orgId] + `/settings/india-tax` page.** First real org settings PATCH (strict-mode zod + audit log). Page toggles GSTIN / state / composition scheme + rate. | `63a1e2a` |
