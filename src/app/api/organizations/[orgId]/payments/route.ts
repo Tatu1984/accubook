@@ -12,14 +12,21 @@ import {
   getFiscalYearForDate,
   getOrCreateBankLedger,
   getOrCreatePartyLedger,
+  getTdsPayableLedger,
   getVoucherTypeByCode,
   nextNumber,
   recomputeBillStatus,
 } from "@/backend/utils/posting";
 import { writeAudit } from "@/backend/utils/audit";
+import { computeTds, type TdsSectionCode, type DeducteeType } from "@/backend/services/tax/tds";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const TDS_SECTIONS = [
+  "194C", "194C_TRANSPORT", "194J", "194I_LAND", "194I_PM",
+  "194H", "194Q", "194O", "206C_1H", "206C_1F",
+] as const;
 
 const createPaymentSchema = z.object({
   partyId: z.string().min(1, "Party is required"),
@@ -32,6 +39,13 @@ const createPaymentSchema = z.object({
   chequeDate: z.string().optional().transform((val) => (val ? new Date(val) : undefined)),
   transactionRef: z.string().optional(),
   notes: z.string().optional(),
+  // Optional TDS deduction at payment time. When `tdsSection` is set, we
+  // compute TDS via computeTds() against the party's YTD aggregate for
+  // this section, then post a 3-line voucher (Dr Vendor / Cr Bank net /
+  // Cr TDS Payable) instead of the usual 2-line one.
+  tdsSection: z.enum(TDS_SECTIONS).optional(),
+  deducteeType: z.enum(["INDIVIDUAL_HUF", "COMPANY_OTHER"]).optional(),
+  noPan: z.boolean().optional(),
 });
 
 export const GET = withOrgAuth(async (request, { orgId }) => {
@@ -142,10 +156,47 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
       );
       const paymentNumber = formatNumber("PAY", await nextNumber(tx, orgId, "PAYMENT"));
 
-      // 4. Create the voucher with two entries:
-      //      Dr <Party Ledger> (reducing AP)
-      //      Cr <Bank/Cash Ledger> (reducing bank)
+      // 4. TDS pre-flight (if requested).
+      //    Compute the deduction amount BEFORE building the voucher so we
+      //    know whether to add a 3rd Cr line and reduce the bank movement.
       const amount = D(validatedData.amount);
+      let tdsAmount = D(0);
+      let tdsLedgerId: string | null = null;
+      let tdsRationale: string | null = null;
+      if (validatedData.tdsSection) {
+        const deducteeType: DeducteeType = validatedData.deducteeType ?? "COMPANY_OTHER";
+        // YTD aggregate of past payments to this party in the current FY,
+        // for the threshold check. We sum payments dated in the FY so far
+        // (excluding this one — caller should not double-count).
+        const ytd = await tx.payment.aggregate({
+          where: {
+            organizationId: orgId,
+            partyId: party.id,
+            date: { gte: fy.id ? undefined : undefined, lte: validatedData.date },
+            status: "COMPLETED",
+          },
+          _sum: { amount: true },
+        });
+        const ytdAggregate = D(ytd._sum.amount ?? 0);
+        const tdsResult = computeTds({
+          section: validatedData.tdsSection as TdsSectionCode,
+          deducteeType,
+          amount,
+          ytdAggregate,
+          noPan: validatedData.noPan,
+        });
+        tdsAmount = D(tdsResult.amount);
+        tdsRationale = tdsResult.appliedReason;
+        if (tdsResult.amount.greaterThan(D(0))) {
+          const tdsLedger = await getTdsPayableLedger(tx, orgId);
+          tdsLedgerId = tdsLedger.id;
+        }
+      }
+      const bankNetAmount = amount.minus(tdsAmount);
+
+      // 5. Create the voucher.
+      //    Without TDS:  Dr Vendor (amount)  / Cr Bank (amount)
+      //    With TDS:     Dr Vendor (amount)  / Cr Bank (amount-tds)  / Cr TDS Payable (tds)
       const voucher = await tx.voucher.create({
         data: {
           organizationId: orgId,
@@ -165,37 +216,60 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
         select: { id: true },
       });
 
-      await tx.voucherEntry.createMany({
-        data: [
-          {
-            voucherId: voucher.id,
-            ledgerId: partyLedger.id,
-            debitAmount: amount,
-            creditAmount: D(0),
-            sequence: 0,
-            billRef: bill?.id ?? null,
-          },
-          {
-            voucherId: voucher.id,
-            ledgerId: cashOrBankLedger.id,
-            debitAmount: D(0),
-            creditAmount: amount,
-            sequence: 1,
-          },
-        ],
-      });
+      const voucherEntries: Array<{
+        voucherId: string;
+        ledgerId: string;
+        debitAmount: import("@/generated/prisma").Prisma.Decimal;
+        creditAmount: import("@/generated/prisma").Prisma.Decimal;
+        sequence: number;
+        billRef?: string | null;
+      }> = [
+        {
+          voucherId: voucher.id,
+          ledgerId: partyLedger.id,
+          debitAmount: amount,
+          creditAmount: D(0),
+          sequence: 0,
+          billRef: bill?.id ?? null,
+        },
+        {
+          voucherId: voucher.id,
+          ledgerId: cashOrBankLedger.id,
+          debitAmount: D(0),
+          creditAmount: bankNetAmount,
+          sequence: 1,
+        },
+      ];
+      if (tdsLedgerId && tdsAmount.greaterThan(D(0))) {
+        voucherEntries.push({
+          voucherId: voucher.id,
+          ledgerId: tdsLedgerId,
+          debitAmount: D(0),
+          creditAmount: tdsAmount,
+          sequence: 2,
+        });
+      }
+      await tx.voucherEntry.createMany({ data: voucherEntries });
 
-      // 5. Apply ledger balance impact.
-      await applyLedgerEntries(tx, [
+      // 6. Apply ledger balance impact.
+      const balanceEntries = [
         { ledgerId: partyLedger.id, debitAmount: amount, creditAmount: D(0) },
-        { ledgerId: cashOrBankLedger.id, debitAmount: D(0), creditAmount: amount },
-      ]);
+        { ledgerId: cashOrBankLedger.id, debitAmount: D(0), creditAmount: bankNetAmount },
+      ];
+      if (tdsLedgerId && tdsAmount.greaterThan(D(0))) {
+        balanceEntries.push({
+          ledgerId: tdsLedgerId,
+          debitAmount: D(0),
+          creditAmount: tdsAmount,
+        });
+      }
+      await applyLedgerEntries(tx, balanceEntries);
 
-      // 6. Update BankAccount.currentBalance for the banking dashboard.
+      // 7. Update BankAccount.currentBalance — net of TDS withheld.
       if (bankAccount) {
         await tx.bankAccount.update({
           where: { id: bankAccount.id },
-          data: { currentBalance: { decrement: amount } },
+          data: { currentBalance: { decrement: bankNetAmount } },
         });
       }
 
@@ -251,6 +325,14 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
           amount: amount.toString(),
           paymentMode: validatedData.paymentMode,
           voucherId: voucher.id,
+          ...(validatedData.tdsSection
+            ? {
+                tdsSection: validatedData.tdsSection,
+                tdsAmount: tdsAmount.toString(),
+                tdsRationale,
+                bankNetAmount: bankNetAmount.toString(),
+              }
+            : {}),
         },
       });
 

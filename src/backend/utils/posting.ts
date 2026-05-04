@@ -101,6 +101,38 @@ export async function getCashLedger(tx: Tx, organizationId: string): Promise<Led
   });
 }
 
+/**
+ * Find or create the "TDS Payable" ledger. Sits under the seeded
+ * "Duties & Taxes" group; if neither the ledger nor the group exists
+ * (rare for properly-onboarded orgs), throws so the caller can surface
+ * a clean setup error instead of corrupting the books.
+ */
+export async function getTdsPayableLedger(
+  tx: Tx,
+  organizationId: string
+): Promise<LedgerRef> {
+  const existing = await tx.ledger.findFirst({
+    where: { organizationId, name: "TDS Payable" },
+    select: { id: true },
+  });
+  if (existing) return existing;
+
+  const group = await tx.ledgerGroup.findFirst({
+    where: { organizationId, name: "Duties & Taxes" },
+    select: { id: true },
+  });
+  if (!group) {
+    throw new Error(
+      '"TDS Payable" ledger and "Duties & Taxes" group are both missing for this organization. Re-run org seed or create them manually.'
+    );
+  }
+
+  return tx.ledger.create({
+    data: { organizationId, groupId: group.id, name: "TDS Payable" },
+    select: { id: true },
+  });
+}
+
 /** Find the fiscal year covering `date` for the given organization. */
 export async function getFiscalYearForDate(
   tx: Tx,
