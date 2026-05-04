@@ -1,7 +1,17 @@
 import type { Prisma } from "@/generated/prisma";
 import type { Tx } from "@/backend/utils/posting";
 
-export type AuditAction = "CREATE" | "UPDATE" | "DELETE" | "POST" | "REVERSE" | "EXPORT" | "LOGIN" | "LOGOUT";
+export type AuditAction =
+  | "CREATE"
+  | "UPDATE"
+  | "DELETE"
+  | "POST"
+  | "REVERSE"
+  | "ISSUE"     // raw materials issued to a work order
+  | "COMPLETE"  // work order produced finished good
+  | "EXPORT"
+  | "LOGIN"
+  | "LOGOUT";
 
 export type AuditOptions = {
   organizationId: string;

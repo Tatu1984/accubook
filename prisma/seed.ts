@@ -321,6 +321,8 @@ async function main() {
   // Create some default ledgers
   const ledgers = [
     { name: "Cash in Hand", group: "Cash & Bank" },
+    { name: "Stock-in-Hand", group: "Stock-in-Hand" },
+    { name: "Work in Progress", group: "Stock-in-Hand" },
     { name: "GST Input", group: "Duties & Taxes" },
     { name: "GST Output", group: "Duties & Taxes" },
     { name: "TDS Payable", group: "Duties & Taxes" },
