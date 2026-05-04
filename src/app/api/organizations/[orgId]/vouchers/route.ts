@@ -6,7 +6,7 @@ import { D, sum, closeEnough } from "@/backend/utils/money";
 import { applyLedgerEntries } from "@/backend/utils/posting";
 import { writeAudit } from "@/backend/utils/audit";
 import { logger } from "@/backend/utils/logger";
-import { routeEntityForApproval } from "@/backend/services/approvals/route-entity";
+import { routeEntityForApproval, notifyNewApprovers } from "@/backend/services/approvals/route-entity";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -248,6 +248,27 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
 
       return newVoucher;
     });
+
+    // Post-tx: notify approvers if the voucher was routed for approval.
+    // Email failures are logged but don't fail the request — the voucher
+    // is already saved and visible in /approvals.
+    if (voucher.status === "PENDING_APPROVAL") {
+      try {
+        const requester = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { name: true },
+        });
+        await notifyNewApprovers(prisma, {
+          entityType: "VOUCHER",
+          entityId: voucher.id,
+          entityLabel: voucher.voucherNumber,
+          amount: totalDebit.toString(),
+          requesterName: requester?.name ?? "A colleague",
+        });
+      } catch (e) {
+        logger.error({ err: e, voucherId: voucher.id }, "Post-tx approval notify failed");
+      }
+    }
 
     return NextResponse.json(voucher, { status: 201 });
   } catch (error) {

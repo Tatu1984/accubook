@@ -29,6 +29,16 @@ const envSchema = z.object({
   // Operational toggles
   ALLOW_PROD_SEED: z.enum(["true", "false"]).optional(),
   NEXT_PUBLIC_DEMO: z.enum(["true", "false"]).optional(),
+
+  // Email — optional. When unset, the email service is a no-op
+  // (logs a warning per intended send). Resend is the default
+  // provider; can be swapped via the email service.
+  RESEND_API_KEY: z.string().optional(),
+  EMAIL_FROM: z.string().email().optional(),
+  // Public URL of the deployed app — used to build deep-links into
+  // emails (e.g. "approve at <url>/approvals"). Falls back to
+  // NEXTAUTH_URL when unset.
+  APP_URL: z.string().url().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

@@ -54,8 +54,12 @@ export async function maybePromoteEntity(
     return result;
   }
 
-  const anyRejected = approvals.some((a) => a.status === "REJECTED");
-  const allApproved = !anyRejected && approvals.every((a) => a.status === "APPROVED");
+  // CANCELLED rows (sibling-cleanup when one ROLE-holder approves first)
+  // are excluded from the decision: they're an artifact of multi-holder
+  // role steps, not a vote.
+  const decided = approvals.filter((a) => a.status !== "CANCELLED");
+  const anyRejected = decided.some((a) => a.status === "REJECTED");
+  const allApproved = decided.length > 0 && !anyRejected && decided.every((a) => a.status === "APPROVED");
 
   if (anyRejected) {
     if (entityType === "VOUCHER") {
@@ -80,6 +84,32 @@ export async function maybePromoteEntity(
         await tx.bill.update({
           where: { id: entityId },
           data: { status: "DRAFT" },
+        });
+        result.acted = true;
+        result.outcome = "DEMOTED";
+      }
+    } else if (entityType === "EXPENSE_CLAIM") {
+      const ec = await tx.expenseClaim.findUnique({
+        where: { id: entityId },
+        select: { status: true },
+      });
+      if (ec && ec.status === "PENDING") {
+        await tx.expenseClaim.update({
+          where: { id: entityId },
+          data: { status: "REJECTED" },
+        });
+        result.acted = true;
+        result.outcome = "DEMOTED";
+      }
+    } else if (entityType === "LEAVE") {
+      const l = await tx.leave.findUnique({
+        where: { id: entityId },
+        select: { status: true },
+      });
+      if (l && l.status === "PENDING") {
+        await tx.leave.update({
+          where: { id: entityId },
+          data: { status: "REJECTED" },
         });
         result.acted = true;
         result.outcome = "DEMOTED";
@@ -139,6 +169,52 @@ export async function maybePromoteEntity(
         await tx.bill.update({
           where: { id: entityId },
           data: { status: "APPROVED" },
+        });
+        result.acted = true;
+        result.outcome = "PROMOTED";
+      }
+    } else if (entityType === "EXPENSE_CLAIM") {
+      const ec = await tx.expenseClaim.findUnique({
+        where: { id: entityId },
+        select: { status: true, approvedBy: true },
+      });
+      if (ec && ec.status === "PENDING") {
+        // Stamp approvedBy with the most-recent approver so the claim
+        // history shows who signed off. We pull the latest APPROVED row.
+        const lastApprover = await tx.approval.findFirst({
+          where: { entityType, entityId, status: "APPROVED" },
+          orderBy: { approvedAt: "desc" },
+          select: { approverId: true },
+        });
+        await tx.expenseClaim.update({
+          where: { id: entityId },
+          data: {
+            status: "APPROVED",
+            approvedBy: lastApprover?.approverId ?? null,
+            approvedAt: new Date(),
+          },
+        });
+        result.acted = true;
+        result.outcome = "PROMOTED";
+      }
+    } else if (entityType === "LEAVE") {
+      const l = await tx.leave.findUnique({
+        where: { id: entityId },
+        select: { status: true },
+      });
+      if (l && l.status === "PENDING") {
+        const lastApprover = await tx.approval.findFirst({
+          where: { entityType, entityId, status: "APPROVED" },
+          orderBy: { approvedAt: "desc" },
+          select: { approverId: true },
+        });
+        await tx.leave.update({
+          where: { id: entityId },
+          data: {
+            status: "APPROVED",
+            approvedBy: lastApprover?.approverId ?? null,
+            approvedAt: new Date(),
+          },
         });
         result.acted = true;
         result.outcome = "PROMOTED";

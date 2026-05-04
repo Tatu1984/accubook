@@ -245,7 +245,7 @@ export const PATCH = withOrgAuth(async (request, { userId }) => {
         return notFound("Approval not found or you don't have permission");
       }
 
-      const { updatedApproval, promotion } = await prisma.$transaction(async (tx) => {
+      const { updatedApproval, promotion, siblingsCancelled } = await prisma.$transaction(async (tx) => {
         const u = await tx.approval.update({
           where: { id: validatedData.approvalId },
           data: {
@@ -262,14 +262,33 @@ export const PATCH = withOrgAuth(async (request, { userId }) => {
             },
           },
         });
+        // ROLE-step cleanup: when an approver acts, cancel every other
+        // PENDING Approval at the same (entityType, entityId, stepNumber).
+        // Those are the rows created for the other holders of the role —
+        // any one of them is enough; keeping the rest open clutters
+        // every other holder's inbox after the decision is made.
+        const siblings = await tx.approval.updateMany({
+          where: {
+            entityType: u.entityType,
+            entityId: u.entityId,
+            stepNumber: u.stepNumber,
+            status: "PENDING",
+            id: { not: u.id },
+          },
+          data: {
+            status: "CANCELLED",
+            approvedAt: new Date(),
+            comments: `Auto-cancelled — ${u.requester.name ?? "approver"} already decided this step.`,
+          },
+        });
         // Auto-promote / demote the underlying entity once all
         // approvals have decided. Catches both the "all APPROVED →
         // post the voucher" and "any REJECTED → kick it back" paths.
         const p = await maybePromoteEntity(tx, u.entityType, u.entityId);
-        return { updatedApproval: u, promotion: p };
+        return { updatedApproval: u, promotion: p, siblingsCancelled: siblings.count };
       });
 
-      return NextResponse.json({ ...updatedApproval, promotion });
+      return NextResponse.json({ ...updatedApproval, promotion, siblingsCancelled });
     }
 
     return badRequest("Invalid request");

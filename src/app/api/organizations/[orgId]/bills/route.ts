@@ -6,7 +6,7 @@ import { D, sum } from "@/backend/utils/money";
 import { formatNumber, nextNumber } from "@/backend/utils/posting";
 import { computeLineGst, determineSupplyType, type SupplyType } from "@/backend/utils/india-tax";
 import { logger } from "@/backend/utils/logger";
-import { routeEntityForApproval } from "@/backend/services/approvals/route-entity";
+import { routeEntityForApproval, notifyNewApprovers } from "@/backend/services/approvals/route-entity";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -238,6 +238,24 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
       }
       return created;
     });
+
+    if (bill.status === "PENDING_APPROVAL") {
+      try {
+        const requester = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { name: true },
+        });
+        await notifyNewApprovers(prisma, {
+          entityType: "BILL",
+          entityId: bill.id,
+          entityLabel: bill.billNumber,
+          amount: bill.totalAmount.toString(),
+          requesterName: requester?.name ?? "A colleague",
+        });
+      } catch (e) {
+        logger.error({ err: e, billId: bill.id }, "Post-tx approval notify failed");
+      }
+    }
 
     return NextResponse.json(bill, { status: 201 });
   } catch (error) {
