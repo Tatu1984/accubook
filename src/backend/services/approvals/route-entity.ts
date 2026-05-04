@@ -219,17 +219,21 @@ export async function routeEntityForApproval(
 }
 
 /**
- * Send "you have an approval waiting" emails to every PENDING approver
- * for the given entity. Call AFTER the routing tx commits — uses the
- * normal Prisma client (not the tx) and tolerates email failures.
+ * Notify every PENDING approver for the given entity — both in-app
+ * (Notification row, surfaces in /settings/notifications) and via
+ * email (Resend-backed; no-op when unconfigured).
  *
- * Caller provides the entity label + amount + requester name so the
- * email body has useful context. Pass through the `prisma` client at
- * the call site to avoid coupling to the tx.
+ * Call AFTER the routing tx commits. Uses the normal Prisma client
+ * (not the tx) and tolerates per-approver failures so a single bad
+ * email or insert doesn't poison the rest.
+ *
+ * Caller provides entity context (label, amount, requester) so the
+ * notification has useful body text.
  */
 export async function notifyNewApprovers(
   prisma: PrismaClient,
   ctx: {
+    organizationId: string;
     entityType: string;
     entityId: string;
     entityLabel: string;
@@ -239,6 +243,7 @@ export async function notifyNewApprovers(
 ): Promise<string[]> {
   const rows = await prisma.approval.findMany({
     where: {
+      organizationId: ctx.organizationId,
       entityType: ctx.entityType,
       entityId: ctx.entityId,
       status: "PENDING",
@@ -254,20 +259,47 @@ export async function notifyNewApprovers(
   for (const row of rows) {
     if (seen.has(row.approverId)) continue;
     seen.add(row.approverId);
-    if (!row.approver?.email) continue;
+
+    // 1. In-app notification — always fires, even when no email is configured.
     try {
-      await sendApprovalRequestEmail({
-        approverEmail: row.approver.email,
-        approverName: row.approver.name ?? undefined,
-        requesterName: ctx.requesterName,
-        entityType: ctx.entityType,
-        entityLabel: ctx.entityLabel,
-        amount: ctx.amount,
+      await prisma.notification.create({
+        data: {
+          organizationId: ctx.organizationId,
+          userId: row.approverId,
+          type: "APPROVAL_REQUEST",
+          title: `Approval needed: ${ctx.entityType} ${ctx.entityLabel}`,
+          message:
+            `${ctx.requesterName} submitted ${ctx.entityType.toLowerCase()} ${ctx.entityLabel}` +
+            (ctx.amount ? ` (${ctx.amount})` : "") +
+            ` for your approval.`,
+          data: {
+            entityType: ctx.entityType,
+            entityId: ctx.entityId,
+            approvalId: row.id,
+            inboxPath: "/approvals",
+          },
+        },
       });
-      notified.push(row.approverId);
     } catch (e) {
-      logger.error({ err: e, approverId: row.approverId }, "Approval email failed");
+      logger.error({ err: e, approverId: row.approverId }, "Approval notification insert failed");
     }
+
+    // 2. Email — best-effort; no-ops when Resend creds aren't set.
+    if (row.approver?.email) {
+      try {
+        await sendApprovalRequestEmail({
+          approverEmail: row.approver.email,
+          approverName: row.approver.name ?? undefined,
+          requesterName: ctx.requesterName,
+          entityType: ctx.entityType,
+          entityLabel: ctx.entityLabel,
+          amount: ctx.amount,
+        });
+      } catch (e) {
+        logger.error({ err: e, approverId: row.approverId }, "Approval email failed");
+      }
+    }
+    notified.push(row.approverId);
   }
   return notified;
 }

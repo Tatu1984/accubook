@@ -323,6 +323,7 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
           select: { name: true },
         });
         await notifyNewApprovers(prisma, {
+          organizationId: orgId,
           entityType: "BILL",
           entityId: bill.id,
           entityLabel: bill.billNumber,
