@@ -261,7 +261,7 @@ Three sub-PRs. Tick boxes as they ship.
   - **GST returns UI** — `/taxation/gst` now wired to compute + portal-JSON download for GSTR-1/3B/9.
   - **Banking import UI** at `/banking/import` — upload statement → reconcile → match results.
   - **Marketing landing page** at `/` — reactbits-style hero/features/CTA, sign-in button → /login on same domain.
-- **Last updated:** 2026-05-04 by Claude (commit pending — GSTR-9 portal)
+- **Last updated:** 2026-05-04 by Claude (commit `2199272`)
 - **What's done since last session:**
   - **WS2 — GSTR-9 portal JSON converter.** Mirrors the GSTR-1/3B portal pattern: `gstr9ToPortalJson(result, { gstin, precedingFyTurnover? })` emits the GSTN portal upload format with sections 4 (A-N), 5 (A-N), 6 (A-O ITC), 7 (A-J reversal), 9 (tax payable / paid-via-ITC / paid-in-cash). Cells we don't yet compute (4D SEZ, 4E deemed exports, 6.A-L ITC sub-categorization, 7.A-G specific reversal reasons) are emitted as zeros — portal accepts and the user can edit before filing. Download endpoint at `/gst-returns/gstr9/portal?fy=2025-26&download=true&precedingFyTurnover=...` serves as `GSTR9_<gstin>_<FY>.json`. +12 tests (283 total).
   - **WS5 — TDS/TCS persistence + Form 16A/27D aggregator.** New `TdsDeduction` and `TcsCollection` Prisma models with migration `5_add_tds_tcs_persistence` (applied to Neon). Each row captures section / deducteeType / ratePercent / baseAmount / taxAmount / noPan / rationale / FY / voucher + payment-or-receipt FK. Persisted from inside the existing payments + receipts $transactions when the caller flagged a section. Rate captured from `computeTds` output (not the input — picks up the no-PAN penal override correctly). Two new GETs: `/tds-deductions` and `/tcs-collections`, both with `?view=list` (paginated raw rows) and `?view=form16a`/`?view=form27d` (party-and-section quarterly aggregator). New pure helper `buildForm16AQuarterly` + `quarterFromDate` + `quarterDateRange`. +16 tests (271 total). tsc + build clean.
@@ -341,7 +341,7 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
-| 2026-05-04 | **WS2 — GSTR-9 portal JSON converter + download endpoint.** Same pattern as 1/3B; emits sections 4 / 5 / 6 / 7 / 9 cells we compute, zeros for unmodeled cells. Optional `precedingFyTurnover` query param feeds `gt`. +12 tests (283 total). | _pending_ |
+| 2026-05-04 | **WS2 — GSTR-9 portal JSON converter + download endpoint.** Same pattern as 1/3B; emits sections 4 / 5 / 6 / 7 / 9 cells we compute, zeros for unmodeled cells. Optional `precedingFyTurnover` query param feeds `gt`. +12 tests (283 total). | `2199272` |
 | 2026-05-04 | **WS5 — TDS/TCS persistence tables + Form 16A/27D aggregator.** New `TdsDeduction` + `TcsCollection` models (migration 5). Populated inside payments + receipts $transactions. Two GET endpoints with list-or-aggregate views. New `buildForm16AQuarterly` + 16 tests (271 total). | `b8dfd56` |
 | 2026-05-04 | **WS18 — Tally voucher import.** parseTallyXml extracts VOUCHER + ALLLEDGERENTRIES.LIST. New `importTallyVouchers`: voucher-type mapping, YYYYMMDD date parsing, FY lookup, ledger name → id resolve, signed-AMOUNT → Dr/Cr split, refuse Dr≠Cr, idempotent re-runs. +3 tests (255 total). | `3f8c4d3` |
 | 2026-05-04 | **WS7 — payroll pay-month settles Salaries Payable.** New `POST /payroll/pay-month` validates period is fully PROCESSED, posts Dr Salaries Payable / Cr Bank, decrements BankAccount, moves payslips to PAID. Refuses partial-paid periods (defensive). | `34d6503` |
