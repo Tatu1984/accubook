@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/backend/database/client";
-import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
+import { withOrgAuth, badRequest, hasPermission, forbidden } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
 import {
   applyLedgerEntries,
@@ -41,7 +41,13 @@ const postMonthSchema = z.object({
  * grossSalary using the same helpers `calculatePayroll` uses, since the
  * Payslip JSON does not persist employer contributions on its own.
  */
-export const POST = withOrgAuth(async (request, { orgId, userId }) => {
+export const POST = withOrgAuth(async (request, { orgId, userId, orgUser }) => {
+  // Permission gate — anomaly: every other GL-posting POST gates on
+  // approve-class permission; payroll was missing it. Closes audit
+  // HIGH from the v2 production-readiness review.
+  if (!hasPermission(orgUser, "payroll", "approve")) {
+    return forbidden("You don't have permission to post payroll to GL");
+  }
   try {
     const { month, year } = postMonthSchema.parse(await request.json());
 

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/backend/database/client";
-import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
+import { withOrgAuth, badRequest, notFound, hasPermission, forbidden } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
 import { D, sum } from "@/backend/utils/money";
 import {
@@ -50,7 +50,10 @@ const payMonthSchema = z.object({
  * happened earlier; demand a manual fix rather than corrupting the
  * netSalary sum.
  */
-export const POST = withOrgAuth(async (request, { orgId, userId }) => {
+export const POST = withOrgAuth(async (request, { orgId, userId, orgUser }) => {
+  if (!hasPermission(orgUser, "payroll", "approve")) {
+    return forbidden("You don't have permission to disburse payroll");
+  }
   try {
     const validated = payMonthSchema.parse(await request.json());
     const { month, year } = validated;

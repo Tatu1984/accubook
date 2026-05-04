@@ -165,6 +165,21 @@ export const PATCH = withOrgAuth<{ billId: string }>(async (request, { orgId, pa
               postedAt: null,
             },
           });
+          // Drop any TdsDeduction rows linked to this bill — the
+          // deduction never happened in legal terms once the bill is
+          // reversed; Form 16A / 26AS must NOT continue to report it.
+          // Symmetric with cancel-payment / cancel-receipt cleanup.
+          await tx.tdsDeduction.deleteMany({ where: { billId } });
+          // Clear the bill's TDS context fields too — otherwise a
+          // subsequent re-approve via the existing-voucher branch
+          // would carry stale rate/section info.
+          updateData.tdsAmount = D(0);
+          updateData.tdsSection = null;
+          updateData.tdsRationale = null;
+          // Reset amountDue back to gross (no TDS withheld in the
+          // reversed state). recomputeBillStatus will re-do the math
+          // when payments come in or when the bill re-posts.
+          updateData.amountDue = existing.totalAmount;
           action = "REVERSE";
         }
       }

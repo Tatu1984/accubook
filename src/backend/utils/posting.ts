@@ -356,7 +356,7 @@ export async function recomputeInvoiceStatus(
 export async function recomputeBillStatus(tx: Tx, billId: string): Promise<void> {
   const bill = await tx.bill.findUnique({
     where: { id: billId },
-    select: { totalAmount: true, dueDate: true, status: true },
+    select: { totalAmount: true, tdsAmount: true, dueDate: true, status: true },
   });
   if (!bill) return;
 
@@ -365,7 +365,14 @@ export async function recomputeBillStatus(tx: Tx, billId: string): Promise<void>
     select: { amount: true },
   });
   const amountPaid = sum(payments.map((p) => p.amount));
-  const amountDue = D(bill.totalAmount).minus(amountPaid);
+  // amountDue is what we still owe the vendor — net of TDS already
+  // withheld at posting (postBillToGl sets `Bill.amountDue =
+  // totalAmount − tdsAmount` at create-time). Without subtracting
+  // tdsAmount here, the first payment recompute clobbers that
+  // reduction and the bill never closes — AP drifts from the
+  // vendor ledger by exactly the TDS withheld.
+  const tdsWithheld = D(bill.tdsAmount ?? 0);
+  const amountDue = D(bill.totalAmount).minus(tdsWithheld).minus(amountPaid);
 
   let status: string = bill.status;
   if (status !== "CANCELLED" && status !== "DRAFT" && status !== "PENDING_APPROVAL") {
