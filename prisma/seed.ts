@@ -324,6 +324,7 @@ async function main() {
     { name: "GST Input", group: "Duties & Taxes" },
     { name: "GST Output", group: "Duties & Taxes" },
     { name: "TDS Payable", group: "Duties & Taxes" },
+    { name: "TCS Payable", group: "Duties & Taxes" },
     { name: "Sales - Goods", group: "Sales Accounts" },
     { name: "Sales - Services", group: "Sales Accounts" },
     { name: "Purchase Accounts", group: "Direct Expenses" },

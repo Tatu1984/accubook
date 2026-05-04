@@ -111,8 +111,28 @@ export async function getTdsPayableLedger(
   tx: Tx,
   organizationId: string
 ): Promise<LedgerRef> {
+  return findOrCreateDutiesAndTaxesLedger(tx, organizationId, "TDS Payable");
+}
+
+/**
+ * Find or create the "TCS Payable" ledger (TCS = Tax Collected at Source,
+ * 206C). Mirrors `getTdsPayableLedger`; used by receipts POST when the
+ * caller flags a 206C section.
+ */
+export async function getTcsPayableLedger(
+  tx: Tx,
+  organizationId: string
+): Promise<LedgerRef> {
+  return findOrCreateDutiesAndTaxesLedger(tx, organizationId, "TCS Payable");
+}
+
+async function findOrCreateDutiesAndTaxesLedger(
+  tx: Tx,
+  organizationId: string,
+  name: string
+): Promise<LedgerRef> {
   const existing = await tx.ledger.findFirst({
-    where: { organizationId, name: "TDS Payable" },
+    where: { organizationId, name },
     select: { id: true },
   });
   if (existing) return existing;
@@ -123,12 +143,12 @@ export async function getTdsPayableLedger(
   });
   if (!group) {
     throw new Error(
-      '"TDS Payable" ledger and "Duties & Taxes" group are both missing for this organization. Re-run org seed or create them manually.'
+      `"${name}" ledger and "Duties & Taxes" group are both missing for this organization. Re-run org seed or create them manually.`
     );
   }
 
   return tx.ledger.create({
-    data: { organizationId, groupId: group.id, name: "TDS Payable" },
+    data: { organizationId, groupId: group.id, name },
     select: { id: true },
   });
 }
@@ -138,14 +158,14 @@ export async function getFiscalYearForDate(
   tx: Tx,
   organizationId: string,
   date: Date
-): Promise<{ id: string }> {
+): Promise<{ id: string; startDate: Date; endDate: Date }> {
   const fy = await tx.fiscalYear.findFirst({
     where: {
       organizationId,
       startDate: { lte: date },
       endDate: { gte: date },
     },
-    select: { id: true },
+    select: { id: true, startDate: true, endDate: true },
   });
   if (!fy) {
     throw new Error(

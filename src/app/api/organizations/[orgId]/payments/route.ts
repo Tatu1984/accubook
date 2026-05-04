@@ -172,7 +172,7 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
           where: {
             organizationId: orgId,
             partyId: party.id,
-            date: { gte: fy.id ? undefined : undefined, lte: validatedData.date },
+            date: { gte: fy.startDate, lte: validatedData.date },
             status: "COMPLETED",
           },
           _sum: { amount: true },

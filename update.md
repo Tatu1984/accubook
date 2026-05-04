@@ -252,7 +252,7 @@ Three sub-PRs. Tick boxes as they ship.
   - **WS2 (GST returns) — GSTR-1 + GSTR-3B + GSTR-9 compute complete. GSTR-1 and GSTR-3B portal JSON complete.** GSTR-9 portal JSON + GSTR-2B reconciliation pending. UI wiring pending.
   - **WS3 (e-invoicing) — payload generator + preview endpoint complete.** NIC API submission still needs sandbox creds.
   - **WS4 (e-way bill) — payload generator + endpoint complete.** NIC EWB API submission still needs sandbox creds.
-  - **WS5 (TDS/TCS) — pure compute helper complete.** Persistence + posting integration pending.
+  - **WS5 (TDS/TCS) — TDS-into-payments + TCS-into-receipts shipped.** Compute helper, payment posting (Dr Vendor / Cr Bank net / Cr TDS Payable), receipt posting (Dr Bank gross / Cr Party / Cr TCS Payable). `TdsDeduction` / `TcsCollection` persistence tables (for Form 16A / 26AS / Form 27D reconciliation) + UI section pickers + bill-time accrual TDS still pending.
   - **WS6 (banking) — bank statement CSV import + auto-reconciliation matcher live.** Manual-match UI for low-confidence cases pending.
   - **WS7 (payroll) — PF/ESI/PT/TDS/LOP helpers tested.** Persistence + month-end run posting pending.
   - **WS10 (manufacturing) — BOM + work-order schema + APIs + multi-level BOM cost compute live.** Work-order issue/complete state transitions pending.
@@ -261,8 +261,10 @@ Three sub-PRs. Tick boxes as they ship.
   - **GST returns UI** — `/taxation/gst` now wired to compute + portal-JSON download for GSTR-1/3B/9.
   - **Banking import UI** at `/banking/import` — upload statement → reconcile → match results.
   - **Marketing landing page** at `/` — reactbits-style hero/features/CTA, sign-in button → /login on same domain.
-- **Last updated:** 2026-05-04 by Claude (commit `f7e6ade`)
+- **Last updated:** 2026-05-04 by Claude (commit pending — TCS into receipts)
 - **What's done since last session:**
+  - **WS5 — TCS at receipt time + TDS YTD bug fix.** receipts POST mirrors the TDS-on-payments pattern: optional `tcsSection` (`206C_1H` / `206C_1F`), `deducteeType`, `noPan`. With TCS, voucher is 3-line (Dr Bank gross / Cr Party amount / Cr TCS Payable); BankAccount.currentBalance increments by gross (= amount + tcs). Without TCS, behaviour unchanged. Audit captures tcsSection / tcsAmount / rationale / bankGrossAmount. New posting helper `getTcsPayableLedger` (factored alongside `getTdsPayableLedger` via shared `findOrCreateDutiesAndTaxesLedger`). Seed adds "TCS Payable" ledger. **Bonus fix:** `getFiscalYearForDate` now also returns `startDate`; payments POST switched its YTD aggregate from `gte: undefined` (whole-of-time, latent bug) to `gte: fy.startDate`, so the 194Q annual threshold is checked correctly. Receipt YTD uses the same FY-bounded query. tsc + 243 tests + 69-page build clean.
+- **Earlier this session:**
   - PR 1 (`ce7532d`+`381fe36`+`1cc57c0`): tenant isolation closed everywhere, permission model rewired, quick-wins.
   - PR 2 part 1 (`46d022b`): Decimal helpers, posting helpers, payments/receipts/bills/vouchers POST → GL posting in `$transaction`. Reports filter DRAFT.
   - PR 2 part 2 (`c5eba29`): Decimal sweep across 6 reports (~69 sites), stock movement guard + weighted-avg recompute.
@@ -333,6 +335,8 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
+| 2026-05-04 | **WS5 — TCS at receipt time + TDS YTD bug fix.** receipts POST gets optional 206C_1H/206C_1F TCS via `computeTds` (3-line voucher Dr Bank gross / Cr Party / Cr TCS Payable; bank ↑ by gross). New `getTcsPayableLedger` (shared find-or-create with `getTdsPayableLedger`). Seed adds "TCS Payable". `getFiscalYearForDate` returns `startDate` and payments POST now FY-bounds its YTD aggregate (was `gte: undefined`, all-time). 243/243 tests, 69 pages. | _pending_ |
+| 2026-05-04 | **WS5 — TDS deduction integrated into payment posting.** `tdsSection` opt-in on payments POST → 3-line voucher (Dr Vendor / Cr Bank net / Cr TDS Payable). `getTdsPayableLedger` find-or-create under "Duties & Taxes". Audit captures section/amount/rationale. | `a9d83ad` |
 | 2026-05-04 | **UI — /setup/migrate Tally importer.** XML upload, per-section stats (groups / ledgers / parties / items), error lists collapsed. Build now 69 pages. | `f7e6ade` |
 | 2026-05-04 | **chore:** zombie zero-byte scaffold stubs deleted again (linter keeps recreating them; -22 files). | `cd8f6c0` |
 | 2026-05-04 | **UI — /banking/import.** Bank account picker, format select, CSV upload, parsed/inserted/skipped stats, reconcile button, match results table with rationale. Build now 68 pages. | `2a35931` |

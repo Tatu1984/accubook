@@ -12,14 +12,21 @@ import {
   getFiscalYearForDate,
   getOrCreateBankLedger,
   getOrCreatePartyLedger,
+  getTcsPayableLedger,
   getVoucherTypeByCode,
   nextNumber,
   recomputeInvoiceStatus,
 } from "@/backend/utils/posting";
 import { writeAudit } from "@/backend/utils/audit";
+import { computeTds, type DeducteeType, type TdsSectionCode } from "@/backend/services/tax/tds";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+// Only TCS sections — TDS sections are deducted by the payer at payment
+// time, not by the seller at receipt time. Keeping the union narrow here
+// prevents a customer-receipt accidentally posting a TDS-Payable line.
+const TCS_SECTIONS = ["206C_1H", "206C_1F"] as const;
 
 const createReceiptSchema = z.object({
   partyId: z.string().min(1, "Party is required"),
@@ -32,6 +39,14 @@ const createReceiptSchema = z.object({
   chequeDate: z.string().optional().transform((val) => (val ? new Date(val) : undefined)),
   transactionRef: z.string().optional(),
   notes: z.string().optional(),
+  // Optional TCS at receipt time. When `tcsSection` is set, we compute
+  // TCS via computeTds() against the buyer's YTD aggregate, then post a
+  // 3-line voucher (Dr Bank gross / Cr Party amount / Cr TCS Payable)
+  // instead of the usual 2-line one. `amount` remains the invoice value
+  // applied to AR; the buyer actually remits amount + tcs.
+  tcsSection: z.enum(TCS_SECTIONS).optional(),
+  deducteeType: z.enum(["INDIVIDUAL_HUF", "COMPANY_OTHER"]).optional(),
+  noPan: z.boolean().optional(),
 });
 
 export const GET = withOrgAuth(async (request, { orgId }) => {
@@ -143,10 +158,46 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
       );
       const receiptNumber = formatNumber("RCT", await nextNumber(tx, orgId, "RECEIPT"));
 
-      // Voucher entries:
-      //   Dr <Bank/Cash Ledger>  (asset goes up)
-      //   Cr <Party Ledger>      (AR goes down)
+      // TCS pre-flight (if requested). Compute the collection amount
+      // BEFORE building the voucher so we know whether to add a 3rd Cr
+      // line and increase the bank movement.
       const amount = D(validatedData.amount);
+      let tcsAmount = D(0);
+      let tcsLedgerId: string | null = null;
+      let tcsRationale: string | null = null;
+      if (validatedData.tcsSection) {
+        const deducteeType: DeducteeType = validatedData.deducteeType ?? "COMPANY_OTHER";
+        // YTD aggregate of past receipts from this buyer in the current
+        // FY for the threshold check (206C(1H) is per-FY).
+        const ytd = await tx.receipt.aggregate({
+          where: {
+            organizationId: orgId,
+            partyId: party.id,
+            date: { gte: fy.startDate, lte: validatedData.date },
+            status: "COMPLETED",
+          },
+          _sum: { amount: true },
+        });
+        const ytdAggregate = D(ytd._sum.amount ?? 0);
+        const tcsResult = computeTds({
+          section: validatedData.tcsSection as TdsSectionCode,
+          deducteeType,
+          amount,
+          ytdAggregate,
+          noPan: validatedData.noPan,
+        });
+        tcsAmount = D(tcsResult.amount);
+        tcsRationale = tcsResult.appliedReason;
+        if (tcsResult.amount.greaterThan(D(0))) {
+          const tcsLedger = await getTcsPayableLedger(tx, orgId);
+          tcsLedgerId = tcsLedger.id;
+        }
+      }
+      const bankGrossAmount = amount.plus(tcsAmount);
+
+      // Voucher entries:
+      //   Without TCS:  Dr Bank/Cash (amount)              / Cr Party (amount)
+      //   With TCS:     Dr Bank/Cash (amount + tcs)        / Cr Party (amount) / Cr TCS Payable (tcs)
       const voucher = await tx.voucher.create({
         data: {
           organizationId: orgId,
@@ -156,8 +207,8 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
           date: validatedData.date,
           referenceNo: validatedData.transactionRef,
           narration: validatedData.notes,
-          totalDebit: amount,
-          totalCredit: amount,
+          totalDebit: bankGrossAmount,
+          totalCredit: bankGrossAmount,
           status: "APPROVED",
           isPosted: true,
           postedAt: new Date(),
@@ -166,35 +217,58 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
         select: { id: true },
       });
 
-      await tx.voucherEntry.createMany({
-        data: [
-          {
-            voucherId: voucher.id,
-            ledgerId: cashOrBankLedger.id,
-            debitAmount: amount,
-            creditAmount: D(0),
-            sequence: 0,
-          },
-          {
-            voucherId: voucher.id,
-            ledgerId: partyLedger.id,
-            debitAmount: D(0),
-            creditAmount: amount,
-            sequence: 1,
-            billRef: invoice?.id ?? null,
-          },
-        ],
-      });
+      const voucherEntries: Array<{
+        voucherId: string;
+        ledgerId: string;
+        debitAmount: import("@/generated/prisma").Prisma.Decimal;
+        creditAmount: import("@/generated/prisma").Prisma.Decimal;
+        sequence: number;
+        billRef?: string | null;
+      }> = [
+        {
+          voucherId: voucher.id,
+          ledgerId: cashOrBankLedger.id,
+          debitAmount: bankGrossAmount,
+          creditAmount: D(0),
+          sequence: 0,
+        },
+        {
+          voucherId: voucher.id,
+          ledgerId: partyLedger.id,
+          debitAmount: D(0),
+          creditAmount: amount,
+          sequence: 1,
+          billRef: invoice?.id ?? null,
+        },
+      ];
+      if (tcsLedgerId && tcsAmount.greaterThan(D(0))) {
+        voucherEntries.push({
+          voucherId: voucher.id,
+          ledgerId: tcsLedgerId,
+          debitAmount: D(0),
+          creditAmount: tcsAmount,
+          sequence: 2,
+        });
+      }
+      await tx.voucherEntry.createMany({ data: voucherEntries });
 
-      await applyLedgerEntries(tx, [
-        { ledgerId: cashOrBankLedger.id, debitAmount: amount, creditAmount: D(0) },
+      const balanceEntries = [
+        { ledgerId: cashOrBankLedger.id, debitAmount: bankGrossAmount, creditAmount: D(0) },
         { ledgerId: partyLedger.id, debitAmount: D(0), creditAmount: amount },
-      ]);
+      ];
+      if (tcsLedgerId && tcsAmount.greaterThan(D(0))) {
+        balanceEntries.push({
+          ledgerId: tcsLedgerId,
+          debitAmount: D(0),
+          creditAmount: tcsAmount,
+        });
+      }
+      await applyLedgerEntries(tx, balanceEntries);
 
       if (bankAccount) {
         await tx.bankAccount.update({
           where: { id: bankAccount.id },
-          data: { currentBalance: { increment: amount } },
+          data: { currentBalance: { increment: bankGrossAmount } },
         });
       }
 
@@ -247,6 +321,14 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
           amount: amount.toString(),
           paymentMode: validatedData.paymentMode,
           voucherId: voucher.id,
+          ...(validatedData.tcsSection
+            ? {
+                tcsSection: validatedData.tcsSection,
+                tcsAmount: tcsAmount.toString(),
+                tcsRationale,
+                bankGrossAmount: bankGrossAmount.toString(),
+              }
+            : {}),
         },
       });
 
