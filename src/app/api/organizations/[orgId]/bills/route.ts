@@ -6,6 +6,7 @@ import { D, sum } from "@/backend/utils/money";
 import { formatNumber, nextNumber } from "@/backend/utils/posting";
 import { computeLineGst, determineSupplyType, type SupplyType } from "@/backend/utils/india-tax";
 import { logger } from "@/backend/utils/logger";
+import { routeEntityForApproval } from "@/backend/services/approvals/route-entity";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -119,7 +120,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
   }
 });
 
-export const POST = withOrgAuth(async (request, { orgId }) => {
+export const POST = withOrgAuth(async (request, { orgId, userId }) => {
   try {
     const body = await request.json();
     const validatedData = createBillSchema.parse(body);
@@ -189,39 +190,53 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
 
     const bill = await prisma.$transaction(async (tx) => {
       const billNumber = formatNumber("BILL", await nextNumber(tx, orgId, "BILL"));
-      return tx.bill.create({
-      data: {
-        organizationId: orgId,
-        billNumber,
-        partyId: validatedData.partyId,
-        purchaseOrderId: validatedData.purchaseOrderId,
-        vendorBillNo: validatedData.vendorBillNo,
-        date: validatedData.date,
-        dueDate: validatedData.dueDate,
-        status: validatedData.status,
-        notes: validatedData.notes,
-        ...(validatedData.attachments && { attachments: validatedData.attachments }),
-        subtotal,
-        discountAmount: totalDiscount,
-        taxAmount: totalTax,
-        totalAmount,
-        amountDue: totalAmount,
-        // GST audit trail.
-        placeOfSupply: party.billingState ?? null,
-        supplyType,
-        items: {
-          create: itemsData,
-        },
-      },
-      include: {
-        party: true,
-        items: {
-          include: {
-            item: true,
+      const created = await tx.bill.create({
+        data: {
+          organizationId: orgId,
+          billNumber,
+          partyId: validatedData.partyId,
+          purchaseOrderId: validatedData.purchaseOrderId,
+          vendorBillNo: validatedData.vendorBillNo,
+          date: validatedData.date,
+          dueDate: validatedData.dueDate,
+          status: validatedData.status,
+          notes: validatedData.notes,
+          ...(validatedData.attachments && { attachments: validatedData.attachments }),
+          subtotal,
+          discountAmount: totalDiscount,
+          taxAmount: totalTax,
+          totalAmount,
+          amountDue: totalAmount,
+          // GST audit trail.
+          placeOfSupply: party.billingState ?? null,
+          supplyType,
+          items: {
+            create: itemsData,
           },
         },
-      },
-    });
+        include: {
+          party: true,
+          items: { include: { item: true } },
+        },
+      });
+
+      // If the bill was created in PENDING_APPROVAL, route it through
+      // any active workflow for entityType=BILL. Approvers see it in
+      // /approvals.
+      if (validatedData.status === "PENDING_APPROVAL") {
+        try {
+          await routeEntityForApproval(tx, {
+            organizationId: orgId,
+            entityType: "BILL",
+            entityId: created.id,
+            requesterId: userId,
+            amount: totalAmount,
+          });
+        } catch (e) {
+          logger.error({ err: e, billId: created.id }, "Approval routing failed (bill still PENDING_APPROVAL)");
+        }
+      }
+      return created;
     });
 
     return NextResponse.json(bill, { status: 201 });

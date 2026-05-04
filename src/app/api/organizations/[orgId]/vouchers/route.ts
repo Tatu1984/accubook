@@ -6,6 +6,7 @@ import { D, sum, closeEnough } from "@/backend/utils/money";
 import { applyLedgerEntries } from "@/backend/utils/posting";
 import { writeAudit } from "@/backend/utils/audit";
 import { logger } from "@/backend/utils/logger";
+import { routeEntityForApproval } from "@/backend/services/approvals/route-entity";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -211,6 +212,21 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
             creditAmount: e.creditAmount,
           }))
         );
+      } else {
+        // Route through the approval workflow if one exists for VOUCHER.
+        // Failures here are non-fatal — the voucher still lives in
+        // PENDING_APPROVAL; an admin can manually approve.
+        try {
+          await routeEntityForApproval(tx, {
+            organizationId: orgId,
+            entityType: "VOUCHER",
+            entityId: newVoucher.id,
+            requesterId: userId,
+            amount: totalDebit,
+          });
+        } catch (e) {
+          logger.error({ err: e, voucherId: newVoucher.id }, "Approval routing failed (voucher still PENDING_APPROVAL)");
+        }
       }
 
       await writeAudit(tx, {
