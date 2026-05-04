@@ -83,6 +83,7 @@ export default function GSTPage() {
           <TabsTrigger value="gstr1">GSTR-1</TabsTrigger>
           <TabsTrigger value="gstr3b">GSTR-3B</TabsTrigger>
           <TabsTrigger value="gstr9">GSTR-9 (Annual)</TabsTrigger>
+          <TabsTrigger value="cmp08">CMP-08 (Composition)</TabsTrigger>
         </TabsList>
 
         <TabsContent value="gstr1" className="mt-6">
@@ -94,7 +95,212 @@ export default function GSTPage() {
         <TabsContent value="gstr9" className="mt-6">
           <Gstr9Tab orgId={organizationId} />
         </TabsContent>
+        <TabsContent value="cmp08" className="mt-6">
+          <Cmp08Tab orgId={organizationId} />
+        </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+// ============================================================
+// CMP-08 (Composition)
+// ============================================================
+
+type Cmp08Resp = {
+  fiscalYear: string;
+  quarter: 1 | 2 | 3 | 4;
+  period: { from: string; to: string };
+  rate: string;
+  outwardTurnover: string;
+  inwardReverseCharge: { taxableValue: string; igst: string; cgst: string; sgst: string };
+  compositionTax: { cgst: string; sgst: string; total: string };
+  totalTaxPayable: string;
+};
+
+function Cmp08Tab({ orgId }: { orgId: string }) {
+  const now = new Date();
+  const m = now.getUTCMonth();
+  const y = now.getUTCFullYear();
+  const fyStart = m >= 3 ? y : y - 1;
+  const initialFy = `${fyStart}-${String((fyStart + 1) % 100).padStart(2, "0")}`;
+  const initialQ: 1 | 2 | 3 | 4 =
+    m >= 3 && m <= 5 ? 1 : m >= 6 && m <= 8 ? 2 : m >= 9 && m <= 11 ? 3 : 4;
+
+  const [fy, setFy] = React.useState(initialFy);
+  const [quarter, setQuarter] = React.useState<1 | 2 | 3 | 4>(initialQ);
+  const [data, setData] = React.useState<Cmp08Resp | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  async function run() {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await fetch(
+        `/api/organizations/${orgId}/gst-returns/cmp08?fy=${fy}&quarter=${quarter}`,
+        { cache: "no-store" }
+      );
+      const body = await r.json();
+      if (!r.ok) throw new Error(body.error ?? "Failed");
+      setData(body);
+    } catch (e) {
+      setError((e as Error).message);
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  React.useEffect(() => {
+    run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Period</CardTitle>
+          <CardDescription>
+            CMP-08 is the quarterly tax-payment statement for composition-scheme suppliers.
+            Filed by the 18th of the month following each quarter end. Requires
+            <code className="mx-1 text-xs">compositionScheme=true</code> on the organization.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <Label htmlFor="cmp08-fy" className="text-xs">FY</Label>
+              <Input
+                id="cmp08-fy"
+                value={fy}
+                onChange={(e) => setFy(e.target.value)}
+                className="w-32 font-mono"
+                placeholder="2025-26"
+              />
+            </div>
+            <div>
+              <Label htmlFor="cmp08-q" className="text-xs">Quarter</Label>
+              <select
+                id="cmp08-q"
+                value={quarter}
+                onChange={(e) => setQuarter(Number(e.target.value) as 1 | 2 | 3 | 4)}
+                className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm"
+              >
+                <option value={1}>Q1 (Apr–Jun)</option>
+                <option value={2}>Q2 (Jul–Sep)</option>
+                <option value={3}>Q3 (Oct–Dec)</option>
+                <option value={4}>Q4 (Jan–Mar)</option>
+              </select>
+            </div>
+            <Button onClick={run} disabled={loading}>
+              {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Compute
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {error && (
+        <Card className="border-amber-200 dark:border-amber-900/50">
+          <CardContent className="pt-6">
+            <div className="flex items-start gap-2 text-sm text-amber-800 dark:text-amber-300">
+              <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+              <span>{error}</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {data && (
+        <>
+          <div className="grid gap-3 md:grid-cols-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Outward turnover</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="font-mono text-2xl font-bold">{fmtINR(data.outwardTurnover)}</div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Q{data.quarter} {data.fiscalYear}
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Composition tax</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="font-mono text-2xl font-bold">{fmtINR(data.compositionTax.total)}</div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  @ {data.rate}% (CGST {fmtINR(data.compositionTax.cgst)} + SGST {fmtINR(data.compositionTax.sgst)})
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">RCM-inward GST</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="font-mono text-2xl font-bold">
+                  {fmtINR(
+                    Number(data.inwardReverseCharge.igst) +
+                      Number(data.inwardReverseCharge.cgst) +
+                      Number(data.inwardReverseCharge.sgst)
+                  )}
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  on {fmtINR(data.inwardReverseCharge.taxableValue)} taxable
+                </p>
+              </CardContent>
+            </Card>
+            <Card className="border-emerald-200 dark:border-emerald-900/50">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Total payable</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="font-mono text-2xl font-bold">{fmtINR(data.totalTaxPayable)}</div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Composition + RCM
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">CMP-08 cells</CardTitle>
+              <CardDescription>
+                These map directly to the GSTN portal&apos;s CMP-08 form.
+                Period <span className="font-mono">{data.period.from}</span> to{" "}
+                <span className="font-mono">{data.period.to}</span>.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="text-xs">
+              <dl className="grid gap-2 md:grid-cols-2">
+                <Cmp08Cell label="3.1 Outward (taxable)" value={fmtINR(data.outwardTurnover)} />
+                <Cmp08Cell label="3.2 RCM-inward (taxable)" value={fmtINR(data.inwardReverseCharge.taxableValue)} />
+                <Cmp08Cell label="3.3 Composition CGST" value={fmtINR(data.compositionTax.cgst)} />
+                <Cmp08Cell label="3.3 Composition SGST" value={fmtINR(data.compositionTax.sgst)} />
+                <Cmp08Cell label="3.2 RCM IGST" value={fmtINR(data.inwardReverseCharge.igst)} />
+                <Cmp08Cell label="3.2 RCM CGST" value={fmtINR(data.inwardReverseCharge.cgst)} />
+                <Cmp08Cell label="3.2 RCM SGST" value={fmtINR(data.inwardReverseCharge.sgst)} />
+                <Cmp08Cell label="3.4 Total tax payable" value={fmtINR(data.totalTaxPayable)} />
+              </dl>
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Cmp08Cell({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between border-b border-dashed pb-1.5">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="font-mono font-medium">{value}</dd>
     </div>
   );
 }
