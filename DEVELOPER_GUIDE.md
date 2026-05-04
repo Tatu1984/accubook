@@ -290,8 +290,17 @@ All organization-scoped routes follow: `/api/organizations/[orgId]/[resource]`
 | `/api/organizations/[orgId]/quotations` | GET, POST | Quotation |
 | `/api/organizations/[orgId]/invoices` | GET, POST | Invoice |
 | `/api/organizations/[orgId]/bills` | GET, POST | Bill |
+| `/api/organizations/[orgId]/bills/[billId]` | PATCH, DELETE | Bill (PATCH: status transitions w/ voucher reversal; DELETE refuses if voucherId set) |
 | `/api/organizations/[orgId]/receipts` | GET, POST | Receipt |
+| `/api/organizations/[orgId]/receipts/[receiptId]` | PATCH | Receipt (PATCH: status=CANCELLED|BOUNCED reverses voucher + drops TcsCollection) |
 | `/api/organizations/[orgId]/payments` | GET, POST | Payment |
+| `/api/organizations/[orgId]/payments/[paymentId]` | PATCH | Payment (PATCH: status=CANCELLED reverses voucher + drops TdsDeduction) |
+| `/api/organizations/[orgId]/recurring-invoices` | GET, POST | RecurringInvoice template |
+| `/api/organizations/[orgId]/recurring-invoices/run` | POST | spawn invoices for due templates (cron-friendly per-org) |
+| `/api/organizations/[orgId]/notifications/check-overdue` | POST | per-org overdue sweep (admin-driven) |
+| `/api/cron/check-overdue` | POST + Bearer `CRON_SECRET` | cross-org overdue sweep (external scheduler) |
+| `/api/organizations/[orgId]/tds-deductions` | GET | `?view=list \| form16a \| monthly-challan` |
+| `/api/organizations/[orgId]/tcs-collections` | GET | `?view=list \| form27d` |
 
 #### HR & Payroll
 | Endpoint | Methods | Model |
