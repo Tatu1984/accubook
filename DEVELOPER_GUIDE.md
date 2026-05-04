@@ -300,6 +300,8 @@ All organization-scoped routes follow: `/api/organizations/[orgId]/[resource]`
 | `/api/organizations/[orgId]/attendance` | GET, POST | Attendance |
 | `/api/organizations/[orgId]/leaves` | GET, POST, PATCH | Leave |
 | `/api/organizations/[orgId]/payroll` | GET, POST | Payslip |
+| `/api/organizations/[orgId]/payroll/post-month` | POST | (books salary JV) |
+| `/api/organizations/[orgId]/payroll/pay-month` | POST | (settles Salaries Payable) |
 | `/api/organizations/[orgId]/expense-claims` | GET, POST, PATCH | ExpenseClaim |
 
 #### Configuration
@@ -311,7 +313,8 @@ All organization-scoped routes follow: `/api/organizations/[orgId]/[resource]`
 | `/api/organizations/[orgId]/tax-config` | GET, POST | TaxConfig |
 | `/api/organizations/[orgId]/fiscal-years` | GET, POST | FiscalYear |
 | `/api/organizations/[orgId]/budgets` | GET, POST | Budget |
-| `/api/organizations/[orgId]/approvals` | GET, POST, PATCH | Approval |
+| `/api/organizations/[orgId]` | GET, PATCH | Organization (incl. composition scheme) |
+| `/api/organizations/[orgId]/approvals` | GET, POST, PATCH, DELETE | Approval (workflow + inbox; auto-routes voucher/bill/expense/leave; auto-promotes entity to GL on full approval) |
 
 #### Banking
 | Endpoint | Methods | Model |
@@ -413,22 +416,44 @@ All organization-scoped routes follow: `/api/organizations/[orgId]/[resource]`
 ### Taxation Module
 | Page | Path | Purpose |
 |------|------|---------|
-| GST | `/taxation/gst` | GST management |
-| TDS/TCS | `/taxation/tds-tcs` | TDS/TCS management |
+| GST | `/taxation/gst` | Compute GSTR-1/3B/9 + CMP-08; download portal JSON |
+| GSTR-2B | `/taxation/gstr2b` | Reconcile GSTN GSTR-2B against purchase register |
+| TDS/TCS | `/taxation/tds-tcs` | Quarterly Form 16A / 27D + register |
 | Tax Reports | `/taxation/reports` | Tax reports |
+
+### Approvals
+| Page | Path | Purpose |
+|------|------|---------|
+| Approvals Inbox | `/approvals` | Pending decisions + history |
+
+### Billing
+| Page | Path | Purpose |
+|------|------|---------|
+| Recurring Invoices | `/billing/recurring` | Subscription billing templates + manual run |
+
+### Manufacturing
+| Page | Path | Purpose |
+|------|------|---------|
+| Work Orders | `/manufacturing/work-orders` | Issue + Complete state transitions |
+
+### Banking
+| Page | Path | Purpose |
+|------|------|---------|
+| Statement Import | `/banking/import` | CSV import + auto-reconcile |
 
 ### Settings Module
 | Page | Path | Purpose |
 |------|------|---------|
-| Organization | `/settings/organization` | Org settings |
+| Organization | `/settings/organization` | Org settings (placeholder; some fields not yet wired) |
+| India Tax | `/settings/india-tax` | GSTIN, supplier state, composition scheme toggle |
 | Branches | `/settings/branches` | Branch management |
 | Users | `/settings/users` | User management |
 | Taxes | `/settings/taxes` | Tax configuration |
 | Approvals | `/settings/approvals` | Workflow setup |
-| Notifications | `/settings/notifications` | Notification prefs |
+| Notifications | `/settings/notifications` | In-app notifications inbox |
 | GST Returns | `/settings/gst-returns` | GST filing status |
 | Audit Logs | `/settings/audit-logs` | Audit trail |
-| Preferences | `/settings/preferences` | User preferences |
+| Tally Migration | `/setup/migrate` | Import masters + vouchers from Tally XML |
 
 ---
 
