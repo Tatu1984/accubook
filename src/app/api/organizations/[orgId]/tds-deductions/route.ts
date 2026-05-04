@@ -7,6 +7,10 @@ import {
   quarterDateRange,
   type DeductionRow,
 } from "@/backend/services/tax/form-16a";
+import {
+  buildMonthlyChallan,
+  type ChallanRow,
+} from "@/backend/services/tax/monthly-challan";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,13 +24,15 @@ export const dynamic = "force-dynamic";
  *   - 26AS reconciliation against the deductee.
  *
  * Query params:
- *   ?view=list          → returns paginated raw deduction rows
- *   ?view=form16a       → returns the Form 16A aggregator output
+ *   ?view=list             → paginated raw deduction rows (default)
+ *   ?view=form16a          → quarterly Form 16A aggregator output
+ *   ?view=monthly-challan  → monthly section-wise totals + ITNS-281 due date
  *
- *   Filters (all optional, all views):
+ *   Filters (all optional unless noted):
  *     ?fiscalYearId=...   restrict to one FY
  *     ?fy=2025-26         alternative — resolves the FY by name
- *     ?quarter=1..4       restrict to FY quarter (requires fy/fiscalYearId)
+ *     ?quarter=1..4       restrict to FY quarter (form16a requires this)
+ *     ?month=1..12        calendar month (monthly-challan requires this)
  *     ?partyId=...        restrict to one party
  *     ?section=194C       restrict to one section
  *
@@ -124,6 +130,68 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       const out = buildForm16AQuarterly(mapped, {
         fiscalYear: fyForRange.name,
         quarter,
+      });
+      return NextResponse.json(out);
+    }
+
+    if (view === "monthly-challan") {
+      // Section 192-206C requires monthly TDS deposit. This view sums
+      // deductions by section for one (fy, month) so the user knows
+      // exactly what to pay on each ITNS-281 challan. Quarterly views
+      // (Form 16A) come later for the cert; this is the monthly
+      // deposit pre-step.
+      if (!fyForRange) {
+        return NextResponse.json(
+          { error: "monthly-challan view requires fy or fiscalYearId" },
+          { status: 400 }
+        );
+      }
+      const monthRaw = searchParams.get("month");
+      const monthNum = monthRaw ? parseInt(monthRaw, 10) : NaN;
+      if (!Number.isInteger(monthNum) || monthNum < 1 || monthNum > 12) {
+        return NextResponse.json(
+          { error: "monthly-challan view requires `month` (1-12)" },
+          { status: 400 }
+        );
+      }
+      // Calendar year that contains this month within the FY:
+      // Apr–Dec → FY's start year, Jan–Mar → next year.
+      const fyStartYear = parseInt(fyForRange.name.slice(0, 4), 10);
+      const calendarYear = monthNum >= 4 ? fyStartYear : fyStartYear + 1;
+      const startDate = new Date(Date.UTC(calendarYear, monthNum - 1, 1));
+      const endDate = new Date(
+        Date.UTC(calendarYear, monthNum, 0, 23, 59, 59, 999)
+      );
+      // Re-scope `where` to the month range, dropping any quarter
+      // filter the caller may have set (which would conflict).
+      const monthlyWhere: Record<string, unknown> = {
+        organizationId: orgId,
+      };
+      if (fiscalYearId) monthlyWhere.fiscalYearId = fiscalYearId;
+      if (partyId) monthlyWhere.partyId = partyId;
+      if (section) monthlyWhere.section = section;
+      monthlyWhere.deductedAt = { gte: startDate, lte: endDate };
+
+      const rows = await prisma.tdsDeduction.findMany({
+        where: monthlyWhere,
+        include: {
+          party: { select: { id: true, name: true, panNo: true } },
+        },
+        orderBy: { deductedAt: "asc" },
+      });
+      const mapped: ChallanRow[] = rows.map((r) => ({
+        partyId: r.partyId,
+        partyName: r.party.name,
+        partyPan: r.party.panNo,
+        section: r.section,
+        baseAmount: r.baseAmount,
+        taxAmount: r.taxAmount,
+        deductedAt: r.deductedAt,
+      }));
+      const out = buildMonthlyChallan(mapped, {
+        fiscalYear: fyForRange.name,
+        month: monthNum as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12,
+        calendarYear,
       });
       return NextResponse.json(out);
     }
