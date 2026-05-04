@@ -14,6 +14,14 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/** Indian FY label ("2025-26") for the FY containing `d`. April-start. */
+function fyLabelOf(d: Date): string {
+  const m = d.getUTCMonth() + 1;
+  const y = d.getUTCFullYear();
+  const start = m >= 4 ? y : y - 1;
+  return `${start}-${String((start + 1) % 100).padStart(2, "0")}`;
+}
+
 type RecurringItem = {
   itemId: string;
   quantity: number;
@@ -191,13 +199,15 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
         const totalTax = sum(itemsCalc.map((i) => i.taxAmount));
         const grandTotal = subtotal.plus(totalTax);
 
-        // FY label same as invoices/route.ts.
+        // The invoice DATE is the run's nextRunDate (when the
+        // subscription cycle is due), but the invoice NUMBER must
+        // belong to the FY in which the run actually executes —
+        // otherwise a back-dated catch-up could mint INV/2024-25/N
+        // after the FY closed, colliding with the manual-invoice
+        // counter that's already moved to 2025-26 and corrupting
+        // GST-registered period-locked numbering.
         const invoiceDate = row.nextRunDate;
-        const fyStartMonth = 4;
-        const m = invoiceDate.getUTCMonth() + 1;
-        const yr = invoiceDate.getUTCFullYear();
-        const currentFY = m >= fyStartMonth ? yr : yr - 1;
-        const fyLabel = `${currentFY}-${(currentFY + 1).toString().slice(-2)}`;
+        const fyLabel = fyLabelOf(ranAt);
 
         const dueDate = new Date(invoiceDate);
         dueDate.setUTCDate(dueDate.getUTCDate() + row.dueDays);

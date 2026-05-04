@@ -168,6 +168,12 @@ export async function postBillToGl(
   let tdsRate = D(0);
   let tdsRationale: string | null = null;
   if (opts.tds) {
+    // Section 194Q (and 206C-1H on the sales side) measure the threshold
+    // on the purchase value NET of GST, per CBDT Circular 13/2021 Q.5.
+    // We aggregate `subtotal` (= sum of taxable amounts), not
+    // `totalAmount` (which includes GST). Aggregating gross would
+    // cross the ₹50L threshold earlier than legally required and
+    // over-deduct on bills near the boundary.
     const ytd = await tx.bill.aggregate({
       where: {
         organizationId: opts.organizationId,
@@ -176,9 +182,9 @@ export async function postBillToGl(
         tdsSection: opts.tds.section,
         status: { notIn: ["DRAFT", "CANCELLED"] },
       },
-      _sum: { totalAmount: true },
+      _sum: { subtotal: true },
     });
-    const ytdAggregate = D(ytd._sum.totalAmount ?? 0);
+    const ytdAggregate = D(ytd._sum.subtotal ?? 0);
     const tdsResult = computeTds({
       section: opts.tds.section,
       deducteeType: opts.tds.deducteeType ?? "COMPANY_OTHER",
@@ -343,6 +349,11 @@ export async function postBillToGl(
   );
 
   // Link the bill to its booking voucher and stamp TDS context.
+  // amountDue must be net of TDS withheld — that's what the vendor is
+  // owed, matching `crVendor` in the posting voucher. Without this the
+  // AP subledger drifts from the vendor ledger by exactly the TDS sum.
+  const grossTotal = D(bill.totalAmount);
+  const newAmountDue = grossTotal.minus(tdsAmount);
   await tx.bill.update({
     where: { id: bill.id },
     data: {
@@ -350,6 +361,7 @@ export async function postBillToGl(
       tdsAmount,
       tdsSection: opts.tds?.section ?? null,
       tdsRationale,
+      amountDue: newAmountDue,
     },
   });
 

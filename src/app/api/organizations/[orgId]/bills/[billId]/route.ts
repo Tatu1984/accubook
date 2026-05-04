@@ -25,6 +25,7 @@ export const DELETE = withOrgAuth<{ billId: string }>(async (_request, { orgId, 
       select: {
         id: true,
         status: true,
+        voucherId: true,
         _count: { select: { payments: true } },
       },
     });
@@ -33,6 +34,17 @@ export const DELETE = withOrgAuth<{ billId: string }>(async (_request, { orgId, 
     if (bill._count.payments > 0) {
       return badRequest(
         "Cannot delete a bill that has payments recorded against it. Cancel the payments first."
+      );
+    }
+
+    // After bill→GL posting (commit 2ce7a43), a posted bill carries a
+    // voucherId. Even if status was somehow forced back to DRAFT, the
+    // voucher row + ledger balances exist. Refuse to delete and orphan
+    // the voucher; caller must reverse the voucher first (TODO: add a
+    // reverse-bill PATCH path).
+    if (bill.voucherId) {
+      return badRequest(
+        "Cannot delete a bill that has been posted to GL. Reverse the posting voucher first."
       );
     }
 
