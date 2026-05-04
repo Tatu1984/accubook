@@ -113,4 +113,89 @@ describe("parseTallyXml", () => {
     const parsed = parseTallyXml(multiMsg);
     expect(parsed.groups.map((g) => g["@_NAME"]).sort()).toEqual(["A", "B", "C"]);
   });
+
+  it("extracts vouchers with type, number, date, and ledger entries", () => {
+    const xmlWithVouchers = `<?xml version="1.0"?>
+<ENVELOPE><BODY><DATA>
+  <TALLYMESSAGE>
+    <VOUCHER VCHTYPE="Sales">
+      <DATE>20250415</DATE>
+      <VOUCHERTYPENAME>Sales</VOUCHERTYPENAME>
+      <VOUCHERNUMBER>SI/0042</VOUCHERNUMBER>
+      <NARRATION>Sale of laptop to Acme</NARRATION>
+      <PARTYLEDGERNAME>Acme Customer</PARTYLEDGERNAME>
+      <ALLLEDGERENTRIES.LIST>
+        <LEDGERNAME>Acme Customer</LEDGERNAME>
+        <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+        <AMOUNT>11800.00</AMOUNT>
+      </ALLLEDGERENTRIES.LIST>
+      <ALLLEDGERENTRIES.LIST>
+        <LEDGERNAME>Sales - Goods</LEDGERNAME>
+        <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+        <AMOUNT>-10000.00</AMOUNT>
+      </ALLLEDGERENTRIES.LIST>
+      <ALLLEDGERENTRIES.LIST>
+        <LEDGERNAME>GST Output</LEDGERNAME>
+        <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+        <AMOUNT>-1800.00</AMOUNT>
+      </ALLLEDGERENTRIES.LIST>
+    </VOUCHER>
+    <VOUCHER VCHTYPE="Receipt">
+      <DATE>20250420</DATE>
+      <VOUCHERTYPENAME>Receipt</VOUCHERTYPENAME>
+      <VOUCHERNUMBER>RCT/0007</VOUCHERNUMBER>
+      <ALLLEDGERENTRIES.LIST>
+        <LEDGERNAME>HDFC Bank</LEDGERNAME>
+        <AMOUNT>11800.00</AMOUNT>
+      </ALLLEDGERENTRIES.LIST>
+      <ALLLEDGERENTRIES.LIST>
+        <LEDGERNAME>Acme Customer</LEDGERNAME>
+        <AMOUNT>-11800.00</AMOUNT>
+      </ALLLEDGERENTRIES.LIST>
+    </VOUCHER>
+  </TALLYMESSAGE>
+</DATA></BODY></ENVELOPE>`;
+    const parsed = parseTallyXml(xmlWithVouchers);
+    expect(parsed.vouchers).toHaveLength(2);
+    const sales = parsed.vouchers.find((v) => v.VOUCHERTYPENAME === "Sales")!;
+    expect(sales.VOUCHERNUMBER).toBe("SI/0042");
+    expect(sales.DATE).toBe("20250415");
+    expect(sales.NARRATION).toBe("Sale of laptop to Acme");
+    expect(sales["@_VCHTYPE"]).toBe("Sales");
+
+    const entries = sales["ALLLEDGERENTRIES.LIST"];
+    expect(Array.isArray(entries)).toBe(true);
+    expect((entries as Array<{ LEDGERNAME?: string }>).map((e) => e.LEDGERNAME)).toEqual([
+      "Acme Customer",
+      "Sales - Goods",
+      "GST Output",
+    ]);
+  });
+
+  it("handles a single ALLLEDGERENTRIES.LIST as a non-array", () => {
+    // Tally emits a single child as an object, not a single-element array.
+    const xml = `<?xml version="1.0"?>
+<ENVELOPE><BODY><DATA><TALLYMESSAGE>
+  <VOUCHER>
+    <VOUCHERTYPENAME>Journal</VOUCHERTYPENAME>
+    <VOUCHERNUMBER>JV/01</VOUCHERNUMBER>
+    <DATE>20250101</DATE>
+    <ALLLEDGERENTRIES.LIST>
+      <LEDGERNAME>Suspense</LEDGERNAME>
+      <AMOUNT>500</AMOUNT>
+    </ALLLEDGERENTRIES.LIST>
+  </VOUCHER>
+</TALLYMESSAGE></DATA></BODY></ENVELOPE>`;
+    const parsed = parseTallyXml(xml);
+    expect(parsed.vouchers).toHaveLength(1);
+    // Parsed as a single object rather than array — that's expected.
+    const entries = parsed.vouchers[0]["ALLLEDGERENTRIES.LIST"];
+    expect(entries).toBeDefined();
+    expect(Array.isArray(entries)).toBe(false);
+  });
+
+  it("preserves an empty vouchers array when none are present", () => {
+    const parsed = parseTallyXml(SAMPLE_XML);
+    expect(parsed.vouchers).toEqual([]);
+  });
 });

@@ -56,15 +56,19 @@ export const POST = withOrgAuth(async (request, { orgId, orgUser, userId }) => {
     if (
       parsed.groups.length === 0 &&
       parsed.ledgers.length === 0 &&
-      parsed.stockItems.length === 0
+      parsed.stockItems.length === 0 &&
+      parsed.vouchers.length === 0
     ) {
       return badRequest(
-        "No GROUP / LEDGER / STOCKITEM elements found. Confirm the file is a Tally All-Masters export."
+        "No GROUP / LEDGER / STOCKITEM / VOUCHER elements found. Confirm the file is a Tally export."
       );
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      const summary = await importTallyData(tx, parsed, { organizationId: orgId });
+      const summary = await importTallyData(tx, parsed, {
+        organizationId: orgId,
+        userId,
+      });
       await writeAudit(tx, {
         organizationId: orgId,
         userId,
@@ -76,17 +80,19 @@ export const POST = withOrgAuth(async (request, { orgId, orgUser, userId }) => {
             ledgers: summary.ledgers.created,
             parties: summary.parties.created,
             items: summary.items.created,
+            vouchers: summary.vouchers.created,
           },
           skipped: {
             groups: summary.groups.skipped,
             ledgers: summary.ledgers.skipped,
             parties: summary.parties.skipped,
             items: summary.items.skipped,
+            vouchers: summary.vouchers.skipped,
           },
         },
       });
       return summary;
-    });
+    }, { timeout: 30_000, maxWait: 5_000 });
 
     return NextResponse.json({ ok: true, summary: result });
   } catch (error) {

@@ -38,6 +38,7 @@ export type TallyImportResult = {
   ledgers: { created: number; skipped: number; errors: string[] };
   parties: { created: number; skipped: number; errors: string[] };
   items: { created: number; skipped: number; errors: string[] };
+  vouchers: { created: number; skipped: number; errors: string[] };
 };
 
 type RawGroup = {
@@ -77,10 +78,33 @@ type RawStockItem = {
   OPENINGVALUE?: string | number;
 };
 
+type RawLedgerEntry = {
+  LEDGERNAME?: string;
+  ISDEEMEDPOSITIVE?: string;
+  AMOUNT?: string | number;
+};
+
+type RawVoucher = {
+  "@_VCHTYPE"?: string;
+  VOUCHERTYPENAME?: string;
+  VOUCHERNUMBER?: string;
+  DATE?: string;
+  NARRATION?: string;
+  REFERENCE?: string;
+  PARTYLEDGERNAME?: string;
+  "ALLLEDGERENTRIES.LIST"?: RawLedgerEntry | RawLedgerEntry[];
+  /**
+   * Older Tally exports use LEDGERENTRIES.LIST instead of
+   * ALLLEDGERENTRIES.LIST. We probe both.
+   */
+  "LEDGERENTRIES.LIST"?: RawLedgerEntry | RawLedgerEntry[];
+};
+
 type ParsedTallyData = {
   groups: RawGroup[];
   ledgers: RawLedger[];
   stockItems: RawStockItem[];
+  vouchers: RawVoucher[];
 };
 
 /**
@@ -103,6 +127,7 @@ export function parseTallyXml(xml: string): ParsedTallyData {
   const groups: RawGroup[] = [];
   const ledgers: RawLedger[] = [];
   const stockItems: RawStockItem[] = [];
+  const vouchers: RawVoucher[] = [];
 
   for (const msg of messages) {
     if (!msg || typeof msg !== "object") continue;
@@ -110,9 +135,10 @@ export function parseTallyXml(xml: string): ParsedTallyData {
     if (m.GROUP) groups.push(...toArray<RawGroup>(m.GROUP));
     if (m.LEDGER) ledgers.push(...toArray<RawLedger>(m.LEDGER));
     if (m.STOCKITEM) stockItems.push(...toArray<RawStockItem>(m.STOCKITEM));
+    if (m.VOUCHER) vouchers.push(...toArray<RawVoucher>(m.VOUCHER));
   }
 
-  return { groups, ledgers, stockItems };
+  return { groups, ledgers, stockItems, vouchers };
 }
 
 function toArray<T>(v: unknown): T[] {
@@ -158,7 +184,48 @@ const PARTY_GROUPS = new Set(["Sundry Debtors", "Sundry Creditors"]);
 
 export type TallyImportOptions = {
   organizationId: string;
+  /**
+   * Required when importing vouchers — every Voucher row needs a
+   * createdById. The Tally XML doesn't carry a user attribution, so we
+   * stamp the importing user. Pass through from the API route's
+   * `userId`.
+   */
+  userId?: string;
 };
+
+/**
+ * Maps Tally VOUCHERTYPENAME → our VoucherType.code. Tally has more
+ * voucher subtypes than we currently model (Stock Journal, Memo,
+ * Reversing Journal); we ignore those by skipping the voucher with a
+ * structured error.
+ */
+const VOUCHER_TYPE_MAP: Record<string, string> = {
+  SALES: "SALES",
+  PURCHASE: "PURCHASE",
+  PAYMENT: "PAYMENT",
+  RECEIPT: "RECEIPT",
+  JOURNAL: "JOURNAL",
+  CONTRA: "CONTRA",
+  "CREDIT NOTE": "CREDIT_NOTE",
+  "DEBIT NOTE": "DEBIT_NOTE",
+};
+
+/** Parse Tally's YYYYMMDD into a Date at UTC midnight. */
+function parseTallyDate(s: string | undefined): Date | null {
+  if (!s) return null;
+  const trimmed = s.trim();
+  // Either YYYYMMDD or YYYY-MM-DD; Tally usually emits the first.
+  const compact = /^(\d{4})(\d{2})(\d{2})$/.exec(trimmed);
+  const dashed = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  const m = compact ?? dashed;
+  if (!m) return null;
+  const [, y, mo, d] = m;
+  const yi = parseInt(y, 10);
+  const moi = parseInt(mo, 10);
+  const di = parseInt(d, 10);
+  if (moi < 1 || moi > 12 || di < 1 || di > 31) return null;
+  return new Date(Date.UTC(yi, moi - 1, di));
+}
 
 /**
  * Apply parsed Tally data to the database under the given organization.
@@ -176,6 +243,7 @@ export async function importTallyData(
     ledgers: { created: 0, skipped: 0, errors: [] },
     parties: { created: 0, skipped: 0, errors: [] },
     items: { created: 0, skipped: 0, errors: [] },
+    vouchers: { created: 0, skipped: 0, errors: [] },
   };
 
   // --- 1. LEDGER GROUPS ---
@@ -379,7 +447,275 @@ export async function importTallyData(
     }
   }
 
+  // --- 4. VOUCHERS ---
+  // Vouchers are processed last so all referenced ledgers (whether
+  // created in this run or pre-existing) are resolvable. Skips with
+  // structured errors when ledger / voucher type / fiscal year is
+  // missing — does not abort the rest of the import.
+  if (data.vouchers.length > 0) {
+    if (!opts.userId) {
+      result.vouchers.errors.push(
+        "Voucher import requires opts.userId — vouchers skipped."
+      );
+    } else {
+      await importTallyVouchers(tx, data.vouchers, {
+        organizationId,
+        userId: opts.userId,
+        result: result.vouchers,
+      });
+    }
+  }
+
   return result;
+}
+
+type VoucherImportContext = {
+  organizationId: string;
+  userId: string;
+  result: TallyImportResult["vouchers"];
+};
+
+/**
+ * Stage 4 of importTallyData. Pulled into its own function so the
+ * masters loop stays readable.
+ *
+ * Per voucher:
+ *   1. Resolve VoucherType by Tally name → our voucher type code.
+ *   2. Parse YYYYMMDD date.
+ *   3. Resolve fiscal year covering the date.
+ *   4. Skip if a Voucher with the same (orgId, voucherTypeId,
+ *      voucherNumber, fiscalYearId) already exists (idempotent re-run).
+ *   5. Look up every named ledger; if any are missing, skip the
+ *      voucher with a structured error.
+ *   6. Build VoucherEntry rows: positive AMOUNT → debit, negative →
+ *      credit (absolute value). Tally's ISDEEMEDPOSITIVE field is
+ *      informational; the sign of AMOUNT is authoritative.
+ *   7. Refuse to import if Dr ≠ Cr (data integrity guard).
+ *   8. Create Voucher + VoucherEntry rows; apply ledger balance impact.
+ */
+export async function importTallyVouchers(
+  tx: Tx,
+  vouchers: RawVoucher[],
+  ctx: VoucherImportContext
+): Promise<void> {
+  const { organizationId, userId, result } = ctx;
+
+  // Pre-load voucher types and ledgers for the org. Both are bounded
+  // (low hundreds at most) so an in-memory map is faster than per-row
+  // lookups.
+  const voucherTypes = await tx.voucherType.findMany({
+    select: { id: true, code: true },
+  });
+  const vtByCode = new Map(voucherTypes.map((v) => [v.code, v.id]));
+
+  const ledgers = await tx.ledger.findMany({
+    where: { organizationId },
+    select: { id: true, name: true },
+  });
+  const ledgerIdByName = new Map(ledgers.map((l) => [l.name, l.id]));
+
+  // Fiscal years: load all for the org, sort by startDate desc; find
+  // the covering one per voucher.
+  const fiscalYears = await tx.fiscalYear.findMany({
+    where: { organizationId },
+    select: { id: true, startDate: true, endDate: true },
+  });
+
+  const findFy = (date: Date) =>
+    fiscalYears.find((fy) => fy.startDate <= date && date <= fy.endDate) ?? null;
+
+  for (const v of vouchers) {
+    const tallyTypeName = (v.VOUCHERTYPENAME ?? v["@_VCHTYPE"] ?? "").toString().trim();
+    const number = (v.VOUCHERNUMBER ?? "").toString().trim();
+    const dateStr = (v.DATE ?? "").toString();
+
+    if (!tallyTypeName || !number) {
+      result.skipped++;
+      result.errors.push(
+        `Voucher (${tallyTypeName || "unknown type"}) "${number || "no number"}": missing VOUCHERTYPENAME / VOUCHERNUMBER`
+      );
+      continue;
+    }
+
+    const code = VOUCHER_TYPE_MAP[tallyTypeName.toUpperCase()];
+    if (!code) {
+      result.skipped++;
+      result.errors.push(
+        `Voucher "${number}": unsupported voucher type "${tallyTypeName}"`
+      );
+      continue;
+    }
+    const voucherTypeId = vtByCode.get(code);
+    if (!voucherTypeId) {
+      result.skipped++;
+      result.errors.push(
+        `Voucher "${number}": voucher type "${code}" not configured for this org`
+      );
+      continue;
+    }
+
+    const date = parseTallyDate(dateStr);
+    if (!date) {
+      result.skipped++;
+      result.errors.push(`Voucher "${number}": unparsable DATE "${dateStr}"`);
+      continue;
+    }
+
+    const fy = findFy(date);
+    if (!fy) {
+      result.skipped++;
+      result.errors.push(
+        `Voucher "${number}" dated ${date.toISOString().slice(0, 10)}: no fiscal year covers this date`
+      );
+      continue;
+    }
+
+    // Idempotency check.
+    const existing = await tx.voucher.findFirst({
+      where: {
+        organizationId,
+        voucherTypeId,
+        voucherNumber: number,
+        fiscalYearId: fy.id,
+      },
+      select: { id: true },
+    });
+    if (existing) {
+      result.skipped++;
+      continue;
+    }
+
+    // Read ledger entries from either ALLLEDGERENTRIES.LIST (modern) or
+    // LEDGERENTRIES.LIST (older Tally).
+    const rawEntries = toArray<RawLedgerEntry>(
+      v["ALLLEDGERENTRIES.LIST"] ?? v["LEDGERENTRIES.LIST"] ?? []
+    );
+    if (rawEntries.length === 0) {
+      result.skipped++;
+      result.errors.push(`Voucher "${number}": no ledger entries`);
+      continue;
+    }
+
+    // Resolve ledger names; collect any missing.
+    type ResolvedEntry = {
+      ledgerId: string;
+      debit: import("@/generated/prisma").Prisma.Decimal;
+      credit: import("@/generated/prisma").Prisma.Decimal;
+    };
+    const entries: ResolvedEntry[] = [];
+    const missing: string[] = [];
+    for (const e of rawEntries) {
+      const ledgerName = (e.LEDGERNAME ?? "").toString().trim();
+      if (!ledgerName) {
+        missing.push("(blank)");
+        continue;
+      }
+      const ledgerId = ledgerIdByName.get(ledgerName);
+      if (!ledgerId) {
+        missing.push(ledgerName);
+        continue;
+      }
+      const amountRaw = e.AMOUNT === undefined || e.AMOUNT === null ? 0 : e.AMOUNT;
+      const amount = D(amountRaw);
+      if (amount.isZero()) continue; // skip nil lines silently
+      const isDebit = amount.isPositive();
+      const abs = amount.abs();
+      entries.push({
+        ledgerId,
+        debit: isDebit ? abs : D(0),
+        credit: isDebit ? D(0) : abs,
+      });
+    }
+
+    if (missing.length > 0) {
+      result.skipped++;
+      result.errors.push(
+        `Voucher "${number}": ledger(s) not found in target org — ${missing.join(", ")}. Import masters first.`
+      );
+      continue;
+    }
+    if (entries.length === 0) {
+      result.skipped++;
+      result.errors.push(`Voucher "${number}": all entries had zero amount`);
+      continue;
+    }
+
+    const totalDr = entries.reduce((s, e) => s.plus(e.debit), D(0));
+    const totalCr = entries.reduce((s, e) => s.plus(e.credit), D(0));
+    if (!totalDr.equals(totalCr)) {
+      result.skipped++;
+      result.errors.push(
+        `Voucher "${number}": Dr (${totalDr.toString()}) != Cr (${totalCr.toString()}) — refusing to import unbalanced voucher`
+      );
+      continue;
+    }
+
+    try {
+      const created = await tx.voucher.create({
+        data: {
+          organizationId,
+          fiscalYearId: fy.id,
+          voucherTypeId,
+          voucherNumber: number,
+          date,
+          narration: (v.NARRATION ?? "").toString().trim() || null,
+          referenceNo: (v.REFERENCE ?? "").toString().trim() || null,
+          totalDebit: totalDr,
+          totalCredit: totalCr,
+          status: "APPROVED",
+          isPosted: true,
+          postedAt: date,
+          createdById: userId,
+          metadata: { kind: "TALLY_IMPORT", tallyTypeName },
+        },
+        select: { id: true },
+      });
+
+      await tx.voucherEntry.createMany({
+        data: entries.map((e, i) => ({
+          voucherId: created.id,
+          ledgerId: e.ledgerId,
+          debitAmount: e.debit,
+          creditAmount: e.credit,
+          sequence: i,
+        })),
+      });
+
+      // Apply ledger balance impact. Inlining a minimal version here
+      // (instead of importing applyLedgerEntries) keeps this service
+      // free of the posting helper's coupling — tests mock just the
+      // tx.
+      await applyLedgerBalances(tx, entries);
+
+      result.created++;
+    } catch (e) {
+      result.errors.push(`Voucher "${number}": ${(e as Error).message}`);
+    }
+  }
+}
+
+async function applyLedgerBalances(
+  tx: Tx,
+  entries: { ledgerId: string; debit: import("@/generated/prisma").Prisma.Decimal; credit: import("@/generated/prisma").Prisma.Decimal }[]
+): Promise<void> {
+  if (entries.length === 0) return;
+  const ledgerIds = [...new Set(entries.map((e) => e.ledgerId))];
+  const rows = await tx.ledger.findMany({
+    where: { id: { in: ledgerIds } },
+    select: { id: true, group: { select: { nature: true } } },
+  });
+  const natureById = new Map(rows.map((l) => [l.id, l.group.nature]));
+  for (const e of entries) {
+    const nature = natureById.get(e.ledgerId);
+    if (!nature) continue;
+    const debitNatured = nature === "ASSETS" || nature === "EXPENSES";
+    const delta = debitNatured ? e.debit.minus(e.credit) : e.credit.minus(e.debit);
+    if (delta.isZero()) continue;
+    await tx.ledger.update({
+      where: { id: e.ledgerId },
+      data: { currentBalance: { increment: delta } },
+    });
+  }
 }
 
 function extractAddress(addr: RawLedger["ADDRESS"]): string | null {
