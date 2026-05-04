@@ -150,7 +150,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
     const [org, party] = await Promise.all([
       prisma.organization.findUnique({
         where: { id: orgId },
-        select: { state: true, country: true },
+        select: { state: true, country: true, compositionScheme: true },
       }),
       prisma.party.findFirst({
         where: { id: validatedData.partyId, organizationId: orgId },
@@ -169,6 +169,18 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
       ? "EXPORT"
       : determineSupplyType(org?.state, party.billingState);
     const computeSupplyType: SupplyType = supplyType === "EXPORT" ? "INTERSTATE" : supplyType;
+    /**
+     * Composition Scheme: the supplier cannot collect GST from the
+     * customer; the invoice is a "bill of supply" with zero GST cells.
+     * The flat composition rate is paid out of the supplier's own pocket
+     * via CMP-08 each quarter.
+     *
+     * We zero out per-line GST when this flag is on. The audit trail
+     * (Invoice.placeOfSupply / supplyType) is still captured so the
+     * CMP-08 aggregator can roll up turnover and the supplier can
+     * exit composition cleanly later.
+     */
+    const isComposition = !!org?.compositionScheme;
 
     // Pull tax rates referenced by line items in one query.
     const taxIds = [...new Set(validatedData.items.map((i) => i.taxId).filter(Boolean) as string[])];
@@ -193,8 +205,15 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
       // split correctly from the combined rate per place of supply.
       const taxConfig = item.taxId ? taxById.get(item.taxId) : undefined;
       const combinedRate = taxConfig ? D(taxConfig.rate) : D(0);
-      const split = computeLineGst(taxableAmount, combinedRate, computeSupplyType);
-      const rates = computeSupplyType === "INTRASTATE"
+      // Composition: zero out GST cells on the customer-facing invoice.
+      // The flat composition rate is settled by the supplier via CMP-08;
+      // it does NOT appear on the line.
+      const split = isComposition
+        ? { cgstAmount: D(0), sgstAmount: D(0), igstAmount: D(0), totalTaxAmount: D(0) }
+        : computeLineGst(taxableAmount, combinedRate, computeSupplyType);
+      const rates = isComposition
+        ? { cgst: D(0), sgst: D(0), igst: D(0) }
+        : computeSupplyType === "INTRASTATE"
         ? { cgst: combinedRate.dividedBy(2), sgst: combinedRate.dividedBy(2), igst: D(0) }
         : { cgst: D(0), sgst: D(0), igst: combinedRate };
 

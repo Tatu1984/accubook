@@ -261,8 +261,9 @@ Three sub-PRs. Tick boxes as they ship.
   - **GST returns UI** — `/taxation/gst` now wired to compute + portal-JSON download for GSTR-1/3B/9.
   - **Banking import UI** at `/banking/import` — upload statement → reconcile → match results.
   - **Marketing landing page** at `/` — reactbits-style hero/features/CTA, sign-in button → /login on same domain.
-- **Last updated:** 2026-05-04 by Claude (commit `9e5a216`)
+- **Last updated:** 2026-05-04 by Claude (commit pending — composition scheme)
 - **What's done since last session:**
+  - **WS1 — Composition Scheme support.** New `Organization.compositionScheme` flag + `compositionRate` (Decimal 5,2). Migration `6_add_composition_scheme` applied to Neon. Invoice POST detects the flag and zeros out per-line GST cells (CGST/SGST/IGST) on customer-facing lines while still capturing place-of-supply / supplyType for audit. New `computeCmp08(orgId, fy, quarter, rate)` aggregator: outward turnover × composition rate (split half/half CGST/SGST), plus regular GST on RCM-inward bills (composition supplier still owes RCM). New `GET /gst-returns/cmp08?fy=...&quarter=...` endpoint, refuses if org isn't on composition. +5 tests (304 total).
   - **UI — three new pages reach previously-curl-only endpoints.** (a) `/taxation/gstr2b`: file picker for GSTN GSTR-2B JSON, posts to `/gst-returns/gstr2b/reconcile`, renders 4-KPI summary + tabbed table per status (Matched / Mismatched / Missing-in-Books / Missing-in-2B) with reasons + ITC-eligibility badges. (b) `/hr/payroll/run`: month/year picker, two-step card layout (Post to GL → Pay net salary) with bank account dropdown, success display with line-by-line JV breakdown. (c) `/manufacturing/work-orders`: WO list with status badges + KPIs + Issue/Complete action buttons, modal for Issue (renders structured shortage list on 400) and Complete (collects completedQty + scrapQty, displays FG unit cost on success).
   - **WS5 UI — `/taxation/tds-tcs` wired to real endpoints.** Replaces the placeholder ₹0 page. Period bar (FY input + quarter dropdown, defaults to current FY+Q). Four tabs: TDS Deductions list, TCS Collections list, Form 16A (TDS quarterly cert), Form 27D (TCS quarterly cert). Both list views show per-row date, party, PAN (with NO-PAN flag in amber), section, rate, base, tax, rationale. Both cert views render party-card-per-row with section sub-table + party totals. Powered by `/tds-deductions` and `/tcs-collections` with `?view=list` and `?view=form16a/form27d`.
   - **WS2 — GSTR-2B reconciliation.** New `parseGstr2bJson` extracts the GSTN portal's GSTR-2B file (rtnprd / docdata.b2b[].ctin / inv[] / items[]); robust to single-element-as-object quirk and the missing-`data`-wrapper variant. New `matchGstr2bToBills` (pure aggregator) classifies every supplier-reported invoice into MATCHED / MISMATCHED / MISSING_IN_BOOKS, plus surfaces every B2B bill in books that's MISSING_IN_2B. Case-insensitive on both GSTIN and vendor invoice number. ₹1 per-cell tolerance (rounding noise on the supplier side). New `POST /gst-returns/gstr2b/reconcile` accepts multipart upload or `application/json`, derives the period from rtnprd, loads bills for that calendar month (excludes DRAFT/CANCELLED), returns the full reconciliation result. Read-only — no persistence yet (Gstr2bImport / Gstr2bRow tables are a follow-up). +16 tests (299 total).
@@ -283,7 +284,7 @@ Three sub-PRs. Tick boxes as they ship.
   - PR 2 part 3a (`1f2a0e1`): NumberCounter model + race-safe numbering across all 5 entity types (voucher/invoice/bill/payment/receipt).
   - PR 2 part 3 b/c/d (`4ad25ca`): voucher PATCH with reversal, soft delete sweep on bills + tax-config, audit log helper + hookups in payments/receipts/vouchers POST + vouchers PATCH.
 - **What's next** — India end-to-end build.
-  - **WS1 (invoicing core) — done:**
+  - **WS1 (invoicing core) — done (incl. composition scheme):**
     * `india-tax.ts` helper + tests (`dcf10b3`).
     * Schema columns + persistence of CGST/SGST/IGST/CESS breakdown on InvoiceItem and BillItem; placeOfSupply, supplyType, reverseCharge on Invoice and Bill (`f948ce6`).
   - **WS1 — still pending (lower priority):**
@@ -344,6 +345,7 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
+| 2026-05-04 | **WS1 — Composition Scheme.** Org-level `compositionScheme` + `compositionRate` (migration 6). Invoice POST zeros per-line GST when on. New `computeCmp08` quarterly aggregator + `/gst-returns/cmp08` endpoint. +5 tests (304 total). | _pending_ |
 | 2026-05-04 | **UI — three new pages.** `/taxation/gstr2b` (upload + 4-bucket reconcile view), `/hr/payroll/run` (post-month + pay-month two-step), `/manufacturing/work-orders` (list + Issue/Complete modal flow). Build now 72 pages. | `9e5a216` |
 | 2026-05-04 | **UI — `/taxation/tds-tcs` wired to real endpoints.** Period bar (FY + quarter), four tabs (TDS list / TCS list / Form 16A / Form 27D) backed by the persistence work shipped earlier today. | `7cb1f8c` |
 | 2026-05-04 | **WS2 — GSTR-2B reconciliation.** New `parseGstr2bJson` + `matchGstr2bToBills` (pure helpers). `POST /gst-returns/gstr2b/reconcile` accepts the GSTN 2B JSON, classifies every B2B invoice as MATCHED / MISMATCHED / MISSING_IN_BOOKS / MISSING_IN_2B with reasons. ₹1 per-cell tolerance. +16 tests (299 total). | `e04760c` |

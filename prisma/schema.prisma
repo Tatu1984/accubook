@@ -117,6 +117,17 @@ model Organization {
   fiscalYearStart  Int      @default(4) // Month number (4 = April for India)
   dateFormat       String   @default("DD/MM/YYYY")
   timezone         String   @default("Asia/Kolkata")
+  // India Composition Scheme (Section 10 of CGST Act). When ON:
+  //  - outward GST is at a flat composition rate (1% trader/mfg,
+  //    5% restaurant, 6% service); supplier files CMP-08 quarterly
+  //    + GSTR-4 annually (NOT GSTR-1/3B).
+  //  - the invoice MUST NOT charge GST to the customer. The flat
+  //    rate is paid out of the supplier's own pocket from total turnover.
+  //  - inward ITC is NOT claimable (bills don't add to ITC pool).
+  // The flag stays false for the default "regular" GST flow.
+  compositionScheme Boolean @default(false)
+  /** Effective composition rate as percent, e.g. "1", "5", "6". Required when compositionScheme=true. */
+  compositionRate  Decimal? @db.Decimal(5, 2)
   isActive         Boolean  @default(true)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
