@@ -261,7 +261,7 @@ Three sub-PRs. Tick boxes as they ship.
   - **GST returns UI** — `/taxation/gst` now wired to compute + portal-JSON download for GSTR-1/3B/9.
   - **Banking import UI** at `/banking/import` — upload statement → reconcile → match results.
   - **Marketing landing page** at `/` — reactbits-style hero/features/CTA, sign-in button → /login on same domain.
-- **Last updated:** 2026-05-04 by Claude (commit pending — approvals inbox UI)
+- **Last updated:** 2026-05-04 by Claude (commit `79b327a`)
 - **What's done since last session:**
   - **UI — `/approvals` inbox.** Surfaces the existing approvals backend (no UI before). Two tabs: Pending (current user's queue, with Approve / Reject actions per row) and History (past approvals where you were either approver or requester). Action dialog collects optional comments before posting back to the existing `PATCH /approvals` route. Empty state ("Inbox zero") when nothing's queued. Build now 75 pages.
   - **PATCH /organizations/[orgId] + `/settings/india-tax` page.** First properly-implemented org settings PATCH (the placeholder /settings/organization page was hardcoded `defaultValue` inputs that never persisted). Strict-mode zod allow-list of editable fields (no smuggling). New `/settings/india-tax` page lets users set GSTIN, supplier state, and toggle composition scheme + pick the rate (1% / 5% / 6%). Audit log entry per save. Heads-up banner when turning composition OFF mid-year.
@@ -350,7 +350,7 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
-| 2026-05-04 | **UI — `/approvals` inbox.** Pending + History tabs over the existing approvals backend. Approve / Reject dialog with optional comments. | _pending_ |
+| 2026-05-04 | **UI — `/approvals` inbox.** Pending + History tabs over the existing approvals backend. Approve / Reject dialog with optional comments. | `79b327a` |
 | 2026-05-04 | **PATCH /organizations/[orgId] + `/settings/india-tax` page.** First real org settings PATCH (strict-mode zod + audit log). Page toggles GSTIN / state / composition scheme + rate. | `63a1e2a` |
 | 2026-05-04 | **UI — CMP-08 tab on `/taxation/gst`.** Fourth tab; surfaces the composition quarterly cells in 4 KPIs + 8-line cell card. | `9915d80` |
 | 2026-05-04 | **UI — `/billing/recurring`.** Template list + Run-now action + Create modal. KPIs (due / active / inactive) + DUE badge per row when overdue. | `d1e56b9` |
