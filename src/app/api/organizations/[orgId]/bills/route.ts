@@ -8,6 +8,7 @@ import { computeLineGst, determineSupplyType, type SupplyType } from "@/backend/
 import { logger } from "@/backend/utils/logger";
 import { routeEntityForApproval, notifyNewApprovers } from "@/backend/services/approvals/route-entity";
 import { postBillToGl } from "@/backend/services/billing/post-bill";
+import { writeAudit } from "@/backend/utils/audit";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -258,9 +259,10 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
       // If the bill was created already APPROVED (no workflow gating),
       // post it to GL right now. The same posting flow runs from
       // maybePromoteEntity for workflow-gated bills.
+      let postingResult: { voucherId: string; voucherNumber: string; tdsAmount?: string } | null = null;
       if (validatedData.status === "APPROVED") {
         try {
-          await postBillToGl(tx, {
+          postingResult = await postBillToGl(tx, {
             billId: created.id,
             organizationId: orgId,
             userId,
@@ -279,6 +281,38 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
           throw e;
         }
       }
+
+      // Audit trail. Captures the original create + the posting outcome
+      // (when status=APPROVED) in one row so the entire creation event
+      // is queryable from the audit log.
+      await writeAudit(tx, {
+        organizationId: orgId,
+        userId,
+        action: postingResult ? "POST" : "CREATE",
+        entityType: "Bill",
+        entityId: created.id,
+        newData: {
+          billNumber: created.billNumber,
+          partyId: validatedData.partyId,
+          status: validatedData.status,
+          totalAmount: totalAmount.toString(),
+          reverseCharge: validatedData.reverseCharge,
+          ...(validatedData.tdsSection
+            ? {
+                tdsSection: validatedData.tdsSection,
+                deducteeType: validatedData.deducteeType ?? null,
+                noPan: validatedData.noPan ?? false,
+              }
+            : {}),
+          ...(postingResult
+            ? {
+                voucherId: postingResult.voucherId,
+                voucherNumber: postingResult.voucherNumber,
+                tdsAmount: postingResult.tdsAmount ?? null,
+              }
+            : {}),
+        },
+      });
       return created;
     });
 

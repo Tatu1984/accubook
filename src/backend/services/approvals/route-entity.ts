@@ -85,8 +85,10 @@ export async function routeEntityForApproval(
   const amount = opts.amount !== undefined ? D(opts.amount) : null;
 
   for (const step of workflow.steps) {
-    // Amount-limit gate.
-    if (step.amountLimit && amount && amount.lessThan(D(step.amountLimit))) {
+    // Amount-limit gate. Use explicit null/undefined check so a step
+    // with `amountLimit: 0` (= "applies for any non-zero amount")
+    // isn't silently treated as "no gate" via JS falsy coercion.
+    if (step.amountLimit !== null && step.amountLimit !== undefined && amount && amount.lessThan(D(step.amountLimit))) {
       result.skipped.push({
         stepNumber: step.stepNumber,
         reason: `amount ${amount.toString()} below step limit ${step.amountLimit.toString()}`,
