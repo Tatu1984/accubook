@@ -421,6 +421,7 @@ model Voucher {
   tcsCollections TcsCollection[] @relation("TcsVoucher")
   bill          Bill?          @relation("BillVoucher")
   payments      Payment[]      @relation("PaymentVoucher")
+  receipts      Receipt[]      @relation("ReceiptVoucher")
 
   @@unique([organizationId, voucherTypeId, voucherNumber, fiscalYearId])
   @@index([organizationId, date])
@@ -1356,6 +1357,7 @@ model Receipt {
   party           Party            @relation(fields: [partyId], references: [id])
   invoice         Invoice?         @relation(fields: [invoiceId], references: [id])
   bankAccount     BankAccount?     @relation(fields: [bankAccountId], references: [id])
+  voucher         Voucher?         @relation("ReceiptVoucher", fields: [voucherId], references: [id])
   tcsCollections  TcsCollection[]
 
   @@unique([organizationId, receiptNumber])
