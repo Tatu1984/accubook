@@ -7,14 +7,14 @@ import {
   CheckCheck,
   Trash2,
   Clock,
-  AlertCircle,
   Info,
   FileText,
   IndianRupee,
   Package,
-  Users,
   Settings,
+  Loader2,
 } from "lucide-react";
+import { useOrganization } from "@/frontend/hooks/use-organization";
 import { Button } from "@/frontend/components/ui/button";
 import {
   Card,
@@ -38,72 +38,10 @@ interface Notification {
   data?: Record<string, unknown>;
 }
 
-const notifications: Notification[] = [
-  {
-    id: "1",
-    type: "APPROVAL_REQUEST",
-    title: "Expense Claim Pending Approval",
-    message: "Rahul Sharma has submitted an expense claim for Rs. 12,500 for client visit travel expenses.",
-    isRead: false,
-    createdAt: "2024-12-09T10:30:00",
-  },
-  {
-    id: "2",
-    type: "PAYMENT_DUE",
-    title: "Invoice Payment Overdue",
-    message: "Invoice INV/2024-25/003 for Global Industries is 4 days overdue. Amount: Rs. 2,76,120",
-    isRead: false,
-    createdAt: "2024-12-09T09:15:00",
-  },
-  {
-    id: "3",
-    type: "STOCK_LOW",
-    title: "Low Stock Alert",
-    message: "Product 'Laptop Stand XL' is running low. Current stock: 5 units. Reorder level: 10 units.",
-    isRead: false,
-    createdAt: "2024-12-09T08:00:00",
-  },
-  {
-    id: "4",
-    type: "APPROVAL_REQUEST",
-    title: "Purchase Order Approval Required",
-    message: "New purchase order PO-000156 requires your approval. Total amount: Rs. 1,85,000",
-    isRead: true,
-    createdAt: "2024-12-08T16:45:00",
-  },
-  {
-    id: "5",
-    type: "SYSTEM",
-    title: "GST Return Due Soon",
-    message: "GSTR-3B for November 2024 is due on December 20, 2024. Please file before the deadline.",
-    isRead: true,
-    createdAt: "2024-12-08T12:00:00",
-  },
-  {
-    id: "6",
-    type: "INFO",
-    title: "New Feature Available",
-    message: "Bank reconciliation auto-matching is now available. Check it out in Banking > Reconciliation.",
-    isRead: true,
-    createdAt: "2024-12-07T10:00:00",
-  },
-  {
-    id: "7",
-    type: "PAYMENT_DUE",
-    title: "Bill Payment Due",
-    message: "Bill BILL/2024-25/089 from Supplier Corp is due in 3 days. Amount: Rs. 45,000",
-    isRead: true,
-    createdAt: "2024-12-06T14:30:00",
-  },
-  {
-    id: "8",
-    type: "APPROVAL_REQUEST",
-    title: "Leave Request",
-    message: "Priya Patel has requested casual leave for December 15-16, 2024.",
-    isRead: true,
-    createdAt: "2024-12-05T11:20:00",
-  },
-];
+// Notifications now load from /api/organizations/[orgId]/notifications.
+// The previous hardcoded mock array (Dec-2024 placeholder names) was a
+// production-readiness BLOCKER — customers were seeing fake demo data on
+// first login.
 
 const typeConfig = {
   APPROVAL_REQUEST: {
@@ -222,8 +160,31 @@ function NotificationItem({
 }
 
 export default function NotificationsPage() {
-  const [localNotifications, setLocalNotifications] = React.useState(notifications);
+  const { organizationId, isLoading: orgLoading } = useOrganization();
+  const [localNotifications, setLocalNotifications] = React.useState<Notification[]>([]);
+  const [loading, setLoading] = React.useState(false);
   const [selectedTab, setSelectedTab] = React.useState("all");
+
+  const refresh = React.useCallback(async () => {
+    if (!organizationId) return;
+    setLoading(true);
+    try {
+      const r = await fetch(
+        `/api/organizations/${organizationId}/notifications?limit=100`,
+        { cache: "no-store" }
+      );
+      const body = await r.json();
+      if (r.ok) {
+        setLocalNotifications((body.data ?? []) as Notification[]);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [organizationId]);
+
+  React.useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const unreadCount = localNotifications.filter((n) => !n.isRead).length;
 
@@ -233,23 +194,60 @@ export default function NotificationsPage() {
     return localNotifications.filter((n) => n.type === selectedTab);
   }, [localNotifications, selectedTab]);
 
-  const handleMarkRead = (id: string) => {
+  const handleMarkRead = async (id: string) => {
+    if (!organizationId) return;
     setLocalNotifications((prev) =>
       prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
     );
+    await fetch(`/api/organizations/${organizationId}/notifications`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ notificationId: id }),
+    });
   };
 
-  const handleMarkAllRead = () => {
+  const handleMarkAllRead = async () => {
+    if (!organizationId) return;
     setLocalNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+    await fetch(`/api/organizations/${organizationId}/notifications`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "markAllRead" }),
+    });
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
+    if (!organizationId) return;
     setLocalNotifications((prev) => prev.filter((n) => n.id !== id));
+    await fetch(
+      `/api/organizations/${organizationId}/notifications?notificationId=${id}`,
+      { method: "DELETE" }
+    );
   };
 
-  const handleClearRead = () => {
+  const handleClearRead = async () => {
+    if (!organizationId) return;
     setLocalNotifications((prev) => prev.filter((n) => !n.isRead));
+    await fetch(
+      `/api/organizations/${organizationId}/notifications?deleteAll=true`,
+      { method: "DELETE" }
+    );
   };
+
+  if (orgLoading || (loading && localNotifications.length === 0)) {
+    return (
+      <div className="flex h-96 items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    );
+  }
+  if (!organizationId) {
+    return (
+      <div className="flex h-96 items-center justify-center">
+        <p className="text-muted-foreground">Please select an organization</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

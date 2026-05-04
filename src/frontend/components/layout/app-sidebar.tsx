@@ -34,6 +34,12 @@ import {
   CheckSquare,
   Percent,
   Plus,
+  Hammer,
+  Repeat,
+  Upload,
+  Inbox,
+  ScrollText,
+  PlayCircle,
 } from "lucide-react";
 
 import {
@@ -109,6 +115,7 @@ const navigation = [
       { title: "Quotations", href: "/sales/quotations", icon: FileText },
       { title: "Sales Orders", href: "/sales/orders", icon: ClipboardList },
       { title: "Invoices", href: "/sales/invoices", icon: Receipt },
+      { title: "Recurring Invoices", href: "/billing/recurring", icon: Repeat },
       { title: "Credit Notes", href: "/sales/credit-notes", icon: FileText },
       { title: "Receipts", href: "/sales/receipts", icon: CreditCard },
     ],
@@ -129,8 +136,16 @@ const navigation = [
     children: [
       { title: "Bank Accounts", href: "/banking/accounts", icon: Landmark },
       { title: "Transactions", href: "/banking/transactions", icon: CreditCard },
+      { title: "Statement Import", href: "/banking/import", icon: Upload },
       { title: "Reconciliation", href: "/banking/reconciliation", icon: Scale },
       { title: "Cash Management", href: "/banking/cash", icon: PiggyBank },
+    ],
+  },
+  {
+    title: "Manufacturing",
+    icon: Hammer,
+    children: [
+      { title: "Work Orders", href: "/manufacturing/work-orders", icon: Hammer },
     ],
   },
   {
@@ -139,6 +154,7 @@ const navigation = [
     children: [
       { title: "Tax Configuration", href: "/settings/taxes", icon: Percent },
       { title: "GST Returns", href: "/taxation/gst", icon: FileText },
+      { title: "GSTR-2B Reconcile", href: "/taxation/gstr2b", icon: Scale },
       { title: "TDS/TCS", href: "/taxation/tds-tcs", icon: Calculator },
       { title: "Tax Reports", href: "/taxation/reports", icon: BarChart3 },
     ],
@@ -152,6 +168,7 @@ const navigation = [
       { title: "Attendance", href: "/hr/attendance", icon: ClipboardList },
       { title: "Leave Management", href: "/hr/leaves", icon: FileText },
       { title: "Payroll", href: "/hr/payroll", icon: Wallet },
+      { title: "Run Payroll", href: "/hr/payroll/run", icon: PlayCircle },
       { title: "Expense Claims", href: "/hr/expense-claims", icon: Receipt },
     ],
   },
@@ -164,18 +181,26 @@ const navigation = [
       { title: "Balance Sheet", href: "/reports/balance-sheet", icon: Scale },
       { title: "Cash Flow", href: "/reports/cash-flow", icon: PiggyBank },
       { title: "Trial Balance", href: "/reports/trial-balance", icon: BookOpen },
+      { title: "Registers", href: "/reports/registers", icon: ScrollText },
       { title: "Custom Reports", href: "/reports/custom", icon: FileText },
     ],
+  },
+  {
+    title: "Approvals",
+    icon: Inbox,
+    href: "/approvals",
   },
 ];
 
 const settingsNav = [
   { title: "Organization", href: "/settings/organization", icon: Building2 },
+  { title: "India Tax", href: "/settings/india-tax", icon: Percent },
   { title: "Branches", href: "/settings/branches", icon: Building },
   { title: "Users & Roles", href: "/settings/users", icon: Users },
   { title: "Tax Configuration", href: "/settings/taxes", icon: Percent },
   { title: "Approval Workflows", href: "/settings/approvals", icon: CheckSquare },
-  { title: "Preferences", href: "/settings/preferences", icon: Settings },
+  { title: "Tally Migration", href: "/setup/migrate", icon: Upload },
+  { title: "Audit Logs", href: "/settings/audit-logs", icon: ScrollText },
 ];
 
 export function AppSidebar() {
