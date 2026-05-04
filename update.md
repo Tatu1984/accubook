@@ -261,8 +261,9 @@ Three sub-PRs. Tick boxes as they ship.
   - **GST returns UI** — `/taxation/gst` now wired to compute + portal-JSON download for GSTR-1/3B/9.
   - **Banking import UI** at `/banking/import` — upload statement → reconcile → match results.
   - **Marketing landing page** at `/` — reactbits-style hero/features/CTA, sign-in button → /login on same domain.
-- **Last updated:** 2026-05-04 by Claude (commit `ae7f2e8`)
+- **Last updated:** 2026-05-04 by Claude (commit `6e4efc1`)
 - **What's done since last session:**
+  - **Voucher numbering race + TDS_SECTIONS single-source** (`6e4efc1`). Vouchers POST was the last caller of the `findFirst orderBy + 1` pattern (race-prone under concurrent posts; previously labelled ACCEPTABLE in the audit but actually a 500-on-loser bug). Switched to the race-safe `generateVoucherNumber` helper. TDS_SECTIONS const arrays in payments/bills/receipts collapsed to three exports from `tds.ts` — `TDS_DEDUCTION_SECTIONS` / `TCS_COLLECTION_SECTIONS` / `TDS_SECTIONS_ALL` — each `as const satisfies readonly TdsSectionCode[]` so type and runtime values stay locked together at compile time. Bills now narrows to deduction-only sections (was using the union, which would have accepted a 206C TCS code on a vendor bill).
   - **Daily overdue notification emitter** (`ae7f2e8`). New `checkOverdue(prisma, orgId)` service: sweeps overdue invoices + bills, emits Notification rows to active org users (type=PAYMENT_DUE; data carries entityId+daysOverdue+inboxPath). 24h dedup via Postgres JSONB path query on `data.entityId`. New `POST /notifications/check-overdue` endpoint for external cron (Vercel Cron / GitHub Actions). Returns scan/created/skipped counters. New `src/shared/utils/dates.util.ts` (daysBetween) extracted as a leaf utility. +7 tests (353 total).
   - **Cancel-receipt flow** (`4143c5a`). AR-side mirror of c04ec29. PATCH `/receipts/[receiptId]` with status=CANCELLED or BOUNCED. Reverses voucher, decrements BankAccount.currentBalance by `amount + tcs`, drops TcsCollection row, removes InvoicePayment junction, recomputes Invoice.amountPaid/Due/status. Schema: added Receipt↔Voucher relation.
   - **Cancel-payment flow** (`c04ec29`). PATCH `/payments/[paymentId]` for status=CANCELLED. Reverses the voucher (Dr↔Cr swap), restores BankAccount.currentBalance by `amount − tds`, deletes the TdsDeduction row (deduction never happened in legal terms), drops the InvoicePayment junction, prepends [CANCELLED] + reason to notes, recomputes Bill.amountPaid/Due/status. Permission-gated on `payments:approve`. Schema: added Payment↔Voucher relation (FK already existed).
@@ -366,6 +367,7 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
+| 2026-05-04 | **Voucher numbering race fix + TDS_SECTIONS single-source.** Vouchers POST switched to the race-safe NumberCounter pattern (last caller of the old findFirst+1). TDS section arrays consolidated into three exports from tds.ts. | `6e4efc1` |
 | 2026-05-04 | **Daily overdue notification emitter.** `checkOverdue` service + `POST /notifications/check-overdue` endpoint (cron-friendly). 24h dedup. +7 tests (353 total). | `ae7f2e8` |
 | 2026-05-04 | **Cancel-receipt flow** (mirror of c04ec29). PATCH `/receipts/[receiptId]` with status=CANCELLED|BOUNCED. | `4143c5a` |
 | 2026-05-04 | **Cancel-payment flow.** PATCH `/payments/[paymentId]` reverses voucher + restores bank + drops TDS row + recomputes bill status. Permission-gated. | `c04ec29` |
