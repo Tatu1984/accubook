@@ -170,24 +170,33 @@ async function main() {
     process.exit(1);
   }
 
-  // Create admin user
-  const passwordHash = await hash("admin123", 12);
+  // Create the super-admin user. Single canonical login for the
+  // project; rotate after the first real customer onboards (D12).
+  // Password is hashed with bcrypt cost 12 — never stored in plain.
+  const SUPER_ADMIN_EMAIL = "admin@accubook.com";
+  const SUPER_ADMIN_PASSWORD = "password123!";
+  const passwordHash = await hash(SUPER_ADMIN_PASSWORD, 12);
 
   const adminUser = await prisma.user.upsert({
-    where: { email: "admin@accubooks.com" },
-    update: {},
+    where: { email: SUPER_ADMIN_EMAIL },
+    // Re-hash on every seed run so the documented credentials always
+    // work even if the password was changed in the DB and you re-seed.
+    update: { passwordHash, isActive: true, name: "Super Admin" },
     create: {
-      email: "admin@accubooks.com",
-      name: "System Administrator",
+      email: SUPER_ADMIN_EMAIL,
+      name: "Super Admin",
       passwordHash,
       isActive: true,
     },
   });
 
-  console.log("Admin user created");
+  console.log(`Admin user ready: ${SUPER_ADMIN_EMAIL}`);
 
-  // Create demo organization
-  const organization = await prisma.organization.upsert({
+  // Create demo organization. Narrow `select` to id only because Neon's
+  // pooler caches the full-RETURNING prepared statement and rejects it
+  // after a schema migration with a confusing P2022; the narrow form
+  // dodges the cache. Re-fetch the full row separately if needed.
+  const orgResult = await prisma.organization.upsert({
     where: { id: "demo-org" },
     update: {},
     create: {
@@ -206,7 +215,9 @@ async function main() {
       baseCurrencyId: inr.id,
       fiscalYearStart: 4,
     },
+    select: { id: true },
   });
+  const organization = { id: orgResult.id };
 
   console.log("Demo organization created");
 
@@ -661,8 +672,8 @@ async function main() {
 
   console.log("\n✅ Database seeding completed!");
   console.log("\n📧 Admin Login:");
-  console.log("   Email: admin@accubooks.com");
-  console.log("   Password: admin123");
+  console.log(`   Email: ${SUPER_ADMIN_EMAIL}`);
+  console.log(`   Password: ${SUPER_ADMIN_PASSWORD}`);
 }
 
 main()

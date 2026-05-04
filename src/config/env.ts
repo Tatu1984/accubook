@@ -39,6 +39,13 @@ const envSchema = z.object({
   // emails (e.g. "approve at <url>/approvals"). Falls back to
   // NEXTAUTH_URL when unset.
   APP_URL: z.string().url().optional(),
+  // Cron service-account secret — when set, /api/cron/... endpoints
+  // accept a Bearer header (`Authorization: Bearer <CRON_SECRET>`)
+  // in addition to the regular session-based withOrgAuth flow.
+  // Lets external schedulers (Vercel Cron, GitHub Actions) drive
+  // recurring + overdue + payroll-post without a real session
+  // cookie. Must be at least 32 chars when set; rotate quarterly.
+  CRON_SECRET: z.string().min(32).optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

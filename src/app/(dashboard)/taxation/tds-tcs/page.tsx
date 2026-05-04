@@ -154,6 +154,7 @@ export default function TDSTCSPage() {
           <TabsTrigger value="tcs-list">TCS Collections</TabsTrigger>
           <TabsTrigger value="form-16a">Form 16A (TDS Cert)</TabsTrigger>
           <TabsTrigger value="form-27d">Form 27D (TCS Cert)</TabsTrigger>
+          <TabsTrigger value="monthly-challan">Monthly Challan</TabsTrigger>
         </TabsList>
 
         <TabsContent value="tds-list" className="mt-6">
@@ -179,6 +180,9 @@ export default function TDSTCSPage() {
             quarter={quarter}
             label="Form 27D — Quarterly TCS Certificate"
           />
+        </TabsContent>
+        <TabsContent value="monthly-challan" className="mt-6">
+          <MonthlyChallan orgId={organizationId} fy={fy} />
         </TabsContent>
       </Tabs>
     </div>
@@ -436,6 +440,129 @@ function CertView({
                   ))}
                 </div>
               )}
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+type MonthlyChallanResp = {
+  fiscalYear: string;
+  month: number;
+  dueDate: string;
+  sections: Array<{
+    section: string;
+    count: number;
+    base: string;
+    tax: string;
+    deductees: number;
+  }>;
+  totals: { deductions: number; deductees: number; base: string; tax: string };
+};
+
+function MonthlyChallan({ orgId, fy }: { orgId: string; fy: string }) {
+  const [month, setMonth] = React.useState(new Date().getUTCMonth() + 1);
+  const [data, setData] = React.useState<MonthlyChallanResp | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const run = React.useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await fetch(
+        `/api/organizations/${orgId}/tds-deductions?view=monthly-challan&fy=${fy}&month=${month}`,
+        { cache: "no-store" }
+      );
+      const body = await r.json();
+      if (!r.ok) throw new Error(body.error ?? "Failed");
+      setData(body);
+    } catch (e) {
+      setError((e as Error).message);
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [orgId, fy, month]);
+
+  React.useEffect(() => {
+    run();
+  }, [run]);
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">
+            Monthly TDS challan — FY {fy}, month {month}
+          </CardTitle>
+          <CardDescription>
+            Section 192-206C requires monthly TDS deposit. The totals below are
+            what to enter on your ITNS-281 challan{" "}
+            {data && (
+              <>
+                — due by <span className="font-mono">{data.dueDate}</span>
+              </>
+            )}
+            .
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <Label htmlFor="cmonth" className="text-xs">Month</Label>
+              <select
+                id="cmonth"
+                value={month}
+                onChange={(e) => setMonth(Number(e.target.value))}
+                className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm"
+              >
+                {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                  <option key={m} value={m}>
+                    {new Date(2000, m - 1).toLocaleString("default", { month: "long" })}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {loading && <EmptyState message="Loading…" />}
+          {error && <ErrorBanner message={error} />}
+          {!loading && !error && data && data.sections.length === 0 && (
+            <EmptyState message="No deductions in this month — nothing to deposit." />
+          )}
+          {!loading && !error && data && data.sections.length > 0 && (
+            <>
+              <div className="grid gap-3 md:grid-cols-3">
+                <Kpi label="Total deductions" value={String(data.totals.deductions)} />
+                <Kpi label="Distinct deductees" value={String(data.totals.deductees)} />
+                <Kpi label="Total tax to deposit" value={fmtINR(data.totals.tax)} />
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Section</TableHead>
+                    <TableHead className="text-right">Count</TableHead>
+                    <TableHead className="text-right">Deductees</TableHead>
+                    <TableHead className="text-right">Base</TableHead>
+                    <TableHead className="text-right">Tax</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.sections.map((s) => (
+                    <TableRow key={s.section}>
+                      <TableCell className="font-mono text-xs">{s.section}</TableCell>
+                      <TableCell className="text-right">{s.count}</TableCell>
+                      <TableCell className="text-right">{s.deductees}</TableCell>
+                      <TableCell className="text-right font-mono text-sm">{fmtINR(s.base)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm font-semibold">
+                        {fmtINR(s.tax)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </>
           )}
         </CardContent>

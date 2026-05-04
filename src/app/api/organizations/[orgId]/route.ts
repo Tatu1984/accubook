@@ -48,7 +48,12 @@ const patchSchema = z.object({
     }),
 }).strict();
 
-export const GET = withOrgAuth(async (_, { orgId }) => {
+export const GET = withOrgAuth(async (_, { orgId, orgUser }) => {
+  // GST/PAN/TAN are legally identifying and shouldn't leak to every
+  // org member. Gate the read on the same permission as PATCH.
+  if (!hasPermission(orgUser, "settings", "read")) {
+    return forbidden("You don't have permission to read organization settings");
+  }
   try {
     const org = await prisma.organization.findUnique({
       where: { id: orgId },

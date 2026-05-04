@@ -230,7 +230,10 @@ export const PATCH = withOrgAuth<{ billId: string }>(async (request, { orgId, pa
  *   - DRAFT, PENDING_APPROVAL, CANCELLED bills with no payments and no
  *     voucherId: hard delete OK.
  */
-export const DELETE = withOrgAuth<{ billId: string }>(async (_request, { orgId, params }) => {
+export const DELETE = withOrgAuth<{ billId: string }>(async (_request, { orgId, params, orgUser }) => {
+  if (!hasPermission(orgUser, "bills", "delete")) {
+    return forbidden("You don't have permission to delete bills");
+  }
   try {
     const { billId } = params;
 

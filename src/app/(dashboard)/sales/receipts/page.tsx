@@ -248,24 +248,29 @@ export default function ReceiptsPage() {
     }
   };
 
-  const handleDelete = async () => {
+  const handleDelete = async (status: "CANCELLED" | "BOUNCED" = "CANCELLED") => {
     if (!receiptToDelete || !organizationId) return;
-
     try {
       const response = await fetch(
         `/api/organizations/${organizationId}/receipts/${receiptToDelete.id}`,
-        { method: "DELETE" }
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status }),
+        }
       );
-
-      if (!response.ok) throw new Error("Failed to delete receipt");
-
-      toast.success("Receipt deleted successfully");
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error ?? "Failed to update receipt");
+      toast.success(
+        status === "BOUNCED"
+          ? "Receipt marked BOUNCED — voucher reversed"
+          : "Receipt cancelled — voucher reversed"
+      );
       setDeleteDialogOpen(false);
       setReceiptToDelete(null);
       fetchReceipts();
     } catch (error) {
-      console.error("Error deleting receipt:", error);
-      toast.error("Failed to delete receipt");
+      toast.error((error as Error).message || "Failed to update receipt");
     }
   };
 
@@ -425,16 +430,32 @@ export default function ReceiptsPage() {
                 Download PDF
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="text-red-600"
-                onClick={() => {
-                  setReceiptToDelete(receipt);
-                  setDeleteDialogOpen(true);
-                }}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete
-              </DropdownMenuItem>
+              {receipt.status === "COMPLETED" && (
+                <>
+                  <DropdownMenuItem
+                    className="text-amber-700"
+                    onClick={() => {
+                      setReceiptToDelete(receipt);
+                      setDeleteDialogOpen(true);
+                    }}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Mark Bounced
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="text-red-600"
+                    onClick={() => {
+                      setReceiptToDelete(receipt);
+                      // Differentiate cancel vs bounce by stashing the
+                      // intent on the dialog confirmation handler.
+                      setDeleteDialogOpen(true);
+                    }}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Cancel Receipt
+                  </DropdownMenuItem>
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         );
@@ -682,16 +703,29 @@ export default function ReceiptsPage() {
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Receipt</AlertDialogTitle>
+            <AlertDialogTitle>Reverse receipt {receiptToDelete?.receiptNumber}?</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete receipt {receiptToDelete?.receiptNumber}?
-              This action cannot be undone.
+              The voucher will be reversed (Dr↔Cr swap), the bank balance
+              will be decremented by the gross amount that landed, the TCS
+              collection (if any) will be dropped, and the linked
+              invoice&apos;s status will be recomputed. Pick CANCELLED for
+              "we entered the wrong amount" or BOUNCED for "the cheque
+              didn&apos;t clear".
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700">
-              Delete
+            <AlertDialogCancel>Keep receipt</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => handleDelete("BOUNCED")}
+              className="bg-amber-600 hover:bg-amber-700"
+            >
+              Mark Bounced
+            </AlertDialogAction>
+            <AlertDialogAction
+              onClick={() => handleDelete("CANCELLED")}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              Cancel Receipt
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

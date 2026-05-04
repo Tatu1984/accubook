@@ -2,8 +2,16 @@ import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { compare } from "bcryptjs";
 import prisma from "@/backend/database/client";
+import { env } from "@/config/env";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
+  // Pin both: relying on auto-detection (`AUTH_SECRET` env var)
+  // works on Vercel but is implicit and fragile across deploy
+  // environments. Same for trustHost — required behind Vercel's
+  // X-Forwarded-Host but we set it explicitly so dev/staging match
+  // prod behaviour.
+  secret: env.AUTH_SECRET,
+  trustHost: true,
   session: {
     strategy: "jwt",
     maxAge: 30 * 24 * 60 * 60, // 30 days

@@ -334,22 +334,35 @@ export default function PurchaseBillsPage() {
 
   const handleDelete = async () => {
     if (!billToDelete || !organizationId) return;
-
+    // For posted bills, PATCH cancel reverses the voucher cleanly.
+    // For DRAFT/PENDING_APPROVAL with no voucher, fall through to
+    // hard DELETE.
+    const isPosted = billToDelete.status === "APPROVED" ||
+      billToDelete.status === "PARTIAL" ||
+      billToDelete.status === "PAID" ||
+      billToDelete.status === "OVERDUE";
     try {
-      const response = await fetch(
-        `/api/organizations/${organizationId}/bills/${billToDelete.id}`,
-        { method: "DELETE" }
-      );
-
-      if (!response.ok) throw new Error("Failed to delete bill");
-
-      toast.success("Bill deleted successfully");
+      const response = isPosted
+        ? await fetch(
+            `/api/organizations/${organizationId}/bills/${billToDelete.id}`,
+            {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ status: "CANCELLED" }),
+            }
+          )
+        : await fetch(
+            `/api/organizations/${organizationId}/bills/${billToDelete.id}`,
+            { method: "DELETE" }
+          );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error ?? "Failed");
+      toast.success(isPosted ? "Bill cancelled — voucher reversed" : "Bill deleted");
       setDeleteDialogOpen(false);
       setBillToDelete(null);
       fetchBills();
     } catch (error) {
-      console.error("Error deleting bill:", error);
-      toast.error("Failed to delete bill");
+      toast.error((error as Error).message || "Failed");
     }
   };
 

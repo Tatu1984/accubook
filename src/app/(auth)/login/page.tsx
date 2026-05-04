@@ -139,8 +139,8 @@ function LoginForm() {
           <CardContent className="pt-4 pb-4">
             <p className="text-sm font-medium text-center mb-2">Demo Credentials</p>
             <div className="text-sm text-muted-foreground space-y-1">
-              <p><span className="font-medium">Email:</span> admin@accubooks.com</p>
-              <p><span className="font-medium">Password:</span> admin123</p>
+              <p><span className="font-medium">Email:</span> admin@accubook.com</p>
+              <p><span className="font-medium">Password:</span> password123!</p>
             </div>
           </CardContent>
         </Card>

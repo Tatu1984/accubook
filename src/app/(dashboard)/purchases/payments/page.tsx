@@ -252,21 +252,29 @@ export default function PaymentsPage() {
   const handleDelete = async () => {
     if (!paymentToDelete || !organizationId) return;
 
+    // PATCH status=CANCELLED — payments are not hard-deletable once
+    // they've posted to GL. The cancel-payment route reverses the
+    // voucher, restores BankAccount.currentBalance, drops the
+    // TdsDeduction row, and recomputes the linked bill's status.
     try {
       const response = await fetch(
         `/api/organizations/${organizationId}/payments/${paymentToDelete.id}`,
-        { method: "DELETE" }
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "CANCELLED" }),
+        }
       );
 
-      if (!response.ok) throw new Error("Failed to delete payment");
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error ?? "Failed to cancel payment");
 
-      toast.success("Payment deleted successfully");
+      toast.success("Payment cancelled — voucher reversed");
       setDeleteDialogOpen(false);
       setPaymentToDelete(null);
       fetchPayments();
     } catch (error) {
-      console.error("Error deleting payment:", error);
-      toast.error("Failed to delete payment");
+      toast.error((error as Error).message || "Failed to cancel payment");
     }
   };
 
@@ -426,16 +434,18 @@ export default function PaymentsPage() {
                 Download PDF
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="text-red-600"
-                onClick={() => {
-                  setPaymentToDelete(payment);
-                  setDeleteDialogOpen(true);
-                }}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete
-              </DropdownMenuItem>
+              {payment.status !== "CANCELLED" && (
+                <DropdownMenuItem
+                  className="text-red-600"
+                  onClick={() => {
+                    setPaymentToDelete(payment);
+                    setDeleteDialogOpen(true);
+                  }}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Cancel Payment
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         );
@@ -684,16 +694,18 @@ export default function PaymentsPage() {
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Payment</AlertDialogTitle>
+            <AlertDialogTitle>Cancel Payment</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete payment {paymentToDelete?.paymentNumber}?
-              This action cannot be undone.
+              Cancel payment {paymentToDelete?.paymentNumber}? This will reverse
+              the posting voucher (Dr↔Cr swap), restore the bank balance, drop
+              any TDS deduction, and recompute the linked bill&apos;s status.
+              The payment row stays for audit.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>Keep payment</AlertDialogCancel>
             <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700">
-              Delete
+              Cancel Payment
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
