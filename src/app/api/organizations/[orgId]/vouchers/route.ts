@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { D, sum, closeEnough } from "@/backend/utils/money";
-import { applyLedgerEntries } from "@/backend/utils/posting";
+import { applyLedgerEntries, generateVoucherNumber } from "@/backend/utils/posting";
 import { writeAudit } from "@/backend/utils/audit";
 import { logger } from "@/backend/utils/logger";
 import { routeEntityForApproval, notifyNewApprovers } from "@/backend/services/approvals/route-entity";
@@ -152,21 +152,21 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
     const requiresApproval = voucherType.requiresApproval;
 
     const voucher = await prisma.$transaction(async (tx) => {
-      // Voucher numbering: read last under same (org, type, fy), increment.
-      // Race-prone in theory; Postgres sequences will replace this.
-      const lastVoucher = await tx.voucher.findFirst({
-        where: {
-          organizationId: orgId,
-          voucherTypeId: validatedData.voucherTypeId,
-          fiscalYearId: validatedData.fiscalYearId,
-        },
-        orderBy: { createdAt: "desc" },
-        select: { voucherNumber: true },
-      });
-      const nextNumber = lastVoucher
-        ? parseInt(lastVoucher.voucherNumber.split("/").pop() || "0", 10) + 1
-        : 1;
-      const voucherNumber = `${voucherType.numberingPrefix ?? "VCH/"}${new Date().getFullYear()}/${String(nextNumber).padStart(5, "0")}`;
+      // Voucher numbering: race-safe NumberCounter pattern (same as
+      // invoices/bills/payments/receipts since 1f2a0e1). Scope is
+      // (org, voucherType, fiscalYear) so each (type, FY) has its
+      // own counter and concurrent POSTs never collide.
+      // generateVoucherNumber pads to 6 digits with the type prefix;
+      // we override the prefix to match the existing format if the
+      // voucher type carries a custom one.
+      const prefix = (voucherType.numberingPrefix ?? "VCH/").replace(/\/$/, "");
+      const voucherNumber = await generateVoucherNumber(
+        tx,
+        orgId,
+        validatedData.voucherTypeId,
+        validatedData.fiscalYearId,
+        prefix
+      );
 
       const newVoucher = await tx.voucher.create({
         data: {

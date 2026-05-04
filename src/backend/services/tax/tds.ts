@@ -37,6 +37,35 @@ export type TdsSectionCode =
   | "206C_1H"   // TCS on sale of goods (seller collects)
   | "206C_1F";  // TCS on sale of motor vehicles > ₹10 lakh
 
+/**
+ * Runtime arrays of section codes — single source of truth for the
+ * route-level zod enum schemas. TDS_SECTIONS_ALL exists for the
+ * (rare) endpoint that accepts both sides; otherwise route handlers
+ * use the narrower TDS_DEDUCTION_SECTIONS (payments + bills) or
+ * TCS_COLLECTION_SECTIONS (receipts) so a customer-receipt can't
+ * accidentally book a TDS Payable line by mis-typing a section code.
+ */
+export const TDS_DEDUCTION_SECTIONS = [
+  "194C",
+  "194C_TRANSPORT",
+  "194J",
+  "194I_LAND",
+  "194I_PM",
+  "194H",
+  "194Q",
+  "194O",
+] as const satisfies readonly TdsSectionCode[];
+
+export const TCS_COLLECTION_SECTIONS = [
+  "206C_1H",
+  "206C_1F",
+] as const satisfies readonly TdsSectionCode[];
+
+export const TDS_SECTIONS_ALL = [
+  ...TDS_DEDUCTION_SECTIONS,
+  ...TCS_COLLECTION_SECTIONS,
+] as const satisfies readonly TdsSectionCode[];
+
 export type TdsRule = {
   /** Section code as it appears on the TDS challan and Form 16A. */
   code: TdsSectionCode;

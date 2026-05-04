@@ -18,16 +18,18 @@ import {
   recomputeBillStatus,
 } from "@/backend/utils/posting";
 import { writeAudit } from "@/backend/utils/audit";
-import { computeTds, type TdsSectionCode, type DeducteeType } from "@/backend/services/tax/tds";
+import {
+  computeTds,
+  TDS_SECTIONS_ALL,
+  type TdsSectionCode,
+  type DeducteeType,
+} from "@/backend/services/tax/tds";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const TDS_SECTIONS = [
-  "194C", "194C_TRANSPORT", "194J", "194I_LAND", "194I_PM",
-  "194H", "194Q", "194O", "206C_1H", "206C_1F",
-] as const;
-
+// Payments POST historically allowed both TDS + TCS section codes.
+// Kept as TDS_SECTIONS_ALL (the union) for backward compatibility.
 const createPaymentSchema = z.object({
   partyId: z.string().min(1, "Party is required"),
   billId: z.string().optional(),
@@ -43,7 +45,7 @@ const createPaymentSchema = z.object({
   // compute TDS via computeTds() against the party's YTD aggregate for
   // this section, then post a 3-line voucher (Dr Vendor / Cr Bank net /
   // Cr TDS Payable) instead of the usual 2-line one.
-  tdsSection: z.enum(TDS_SECTIONS).optional(),
+  tdsSection: z.enum(TDS_SECTIONS_ALL).optional(),
   deducteeType: z.enum(["INDIVIDUAL_HUF", "COMPANY_OTHER"]).optional(),
   noPan: z.boolean().optional(),
 });

@@ -8,6 +8,7 @@ import { computeLineGst, determineSupplyType, type SupplyType } from "@/backend/
 import { logger } from "@/backend/utils/logger";
 import { routeEntityForApproval, notifyNewApprovers } from "@/backend/services/approvals/route-entity";
 import { postBillToGl } from "@/backend/services/billing/post-bill";
+import { TDS_DEDUCTION_SECTIONS } from "@/backend/services/tax/tds";
 import { writeAudit } from "@/backend/utils/audit";
 
 // Force Node.js runtime for this route
@@ -21,11 +22,6 @@ const attachmentSchema = z.object({
   data: z.string(),
 });
 
-const TDS_SECTIONS = [
-  "194C", "194C_TRANSPORT", "194J", "194I_LAND", "194I_PM",
-  "194H", "194Q", "194O",
-] as const;
-
 const createBillSchema = z.object({
   partyId: z.string().min(1, "Vendor is required"),
   date: z.string().transform((val) => new Date(val)),
@@ -38,7 +34,7 @@ const createBillSchema = z.object({
   /** RCM flag — when true, bill posts with Cr GST Output (RCM payable) instead of charging vendor for GST. */
   reverseCharge: z.boolean().default(false),
   /** TDS at bill time (accrual). When set, posting voucher gets a Cr TDS Payable line and a TdsDeduction row is persisted. */
-  tdsSection: z.enum(TDS_SECTIONS).optional(),
+  tdsSection: z.enum(TDS_DEDUCTION_SECTIONS).optional(),
   deducteeType: z.enum(["INDIVIDUAL_HUF", "COMPANY_OTHER"]).optional(),
   noPan: z.boolean().optional(),
   items: z.array(z.object({

@@ -18,16 +18,21 @@ import {
   recomputeInvoiceStatus,
 } from "@/backend/utils/posting";
 import { writeAudit } from "@/backend/utils/audit";
-import { computeTds, type DeducteeType, type TdsSectionCode } from "@/backend/services/tax/tds";
+import {
+  computeTds,
+  TCS_COLLECTION_SECTIONS,
+  type DeducteeType,
+  type TdsSectionCode,
+} from "@/backend/services/tax/tds";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Only TCS sections — TDS sections are deducted by the payer at payment
-// time, not by the seller at receipt time. Keeping the union narrow here
-// prevents a customer-receipt accidentally posting a TDS-Payable line.
-const TCS_SECTIONS = ["206C_1H", "206C_1F"] as const;
-
+// Receipts only accept TCS section codes (sourced from
+// `TCS_COLLECTION_SECTIONS` in tds.ts) — TDS sections are deducted
+// by the payer at payment time, not by the seller at receipt time.
+// Narrow union here prevents a customer-receipt accidentally
+// booking a TDS-Payable line via a mistyped section.
 const createReceiptSchema = z.object({
   partyId: z.string().min(1, "Party is required"),
   invoiceId: z.string().optional(),
@@ -44,7 +49,7 @@ const createReceiptSchema = z.object({
   // 3-line voucher (Dr Bank gross / Cr Party amount / Cr TCS Payable)
   // instead of the usual 2-line one. `amount` remains the invoice value
   // applied to AR; the buyer actually remits amount + tcs.
-  tcsSection: z.enum(TCS_SECTIONS).optional(),
+  tcsSection: z.enum(TCS_COLLECTION_SECTIONS).optional(),
   deducteeType: z.enum(["INDIVIDUAL_HUF", "COMPANY_OTHER"]).optional(),
   noPan: z.boolean().optional(),
 });
