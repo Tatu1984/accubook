@@ -261,8 +261,9 @@ Three sub-PRs. Tick boxes as they ship.
   - **GST returns UI** — `/taxation/gst` now wired to compute + portal-JSON download for GSTR-1/3B/9.
   - **Banking import UI** at `/banking/import` — upload statement → reconcile → match results.
   - **Marketing landing page** at `/` — reactbits-style hero/features/CTA, sign-in button → /login on same domain.
-- **Last updated:** 2026-05-04 by Claude (commit `5f4bfd9`)
+- **Last updated:** 2026-05-04 by Claude (commit `aa0d764`)
 - **What's done since last session:**
+  - **WS5 — TDS monthly challan summary** (`aa0d764`). New `buildMonthlyChallan` aggregator + `?view=monthly-challan&fy=...&month=...` on `/tds-deductions`. Groups TdsDeduction by section for one calendar month with count/base/tax/distinct-deductee per section + org-wide totals. Includes ITNS-281 deposit due date (7th of next month, or Apr 30 for March). Closes the gap between persisted deductions (b8dfd56) and the quarterly Form 16A (b8dfd56) — accountants need this to deposit cash monthly. +10 tests (346 total).
   - **Bill PATCH with voucher reversal** (`5f4bfd9`). Mirrors the voucher PATCH reversal pattern from PR2. DRAFT/PENDING_APPROVAL→APPROVED posts to GL via postBillToGl (or re-applies entries if voucher already exists). APPROVED→CANCELLED|DRAFT reverses every entry (Dr↔Cr swap) and flips Voucher.status accordingly. Refuses reverse when payments exist. Locks notes/vendorBillNo edits on posted bills. Permission-gated on `bills:approve`. Audit action distinguishes POST / REVERSE / UPDATE.
   - **In-app notifications + real org-settings save** (`fa0e1c3`). `notifyNewApprovers` now also inserts `Notification` rows so the `/settings/notifications` inbox actually fills (it was wired to a real GET endpoint but nothing was creating rows). `/settings/organization` rewritten from 395-line placeholder mock-defaultValue form to a real load+save against `PATCH /api/organizations/[orgId]` (basic info, tax IDs, contact, registered address); cross-links to `/settings/india-tax` for composition scheme.
   - **Audit MEDIUM follow-ups (3 commits).** `3d28496` — bills POST now writes audit log (action=POST when promoted-to-GL at create, =CREATE otherwise; payload captures rcm/tdsSection/voucherId); routeEntityForApproval `amountLimit` gate uses explicit null/undefined check so `0` is treated as a real threshold (was JS-falsy-coerced). `b2f3174` — README + DEVELOPER_GUIDE refreshed: README architecture-notes now mentions bills→GL on approval + the approvals workflow + email scaffold; DEVELOPER_GUIDE adds the new endpoints (post-month, pay-month, PATCH /organizations, DELETE /approvals) and the new page inventory (Approvals / Billing / Manufacturing / Banking modules; india-tax / setup migrate / gstr2b).
@@ -362,6 +363,7 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
+| 2026-05-04 | **WS5 — TDS monthly challan summary.** New `buildMonthlyChallan` + `?view=monthly-challan` on `/tds-deductions`. ITNS-281 due-date helper. +10 tests (346 total). | `aa0d764` |
 | 2026-05-04 | **Bill PATCH with voucher reversal.** | `5f4bfd9` |
 | 2026-05-04 | **In-app Notification rows + real org-settings PATCH form.** | `fa0e1c3` |
 | 2026-05-04 | **Docs refresh** — README architecture notes + DEVELOPER_GUIDE endpoint/page inventory. | `b2f3174` |
