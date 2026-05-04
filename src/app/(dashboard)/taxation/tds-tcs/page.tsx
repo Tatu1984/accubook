@@ -404,9 +404,20 @@ function CertView({
                               PAN: {p.partyPan ?? "—"}
                             </CardDescription>
                           </div>
-                          <div className="text-right">
-                            <div className="text-xs text-muted-foreground">Total tax</div>
-                            <div className="font-mono font-semibold">{fmtINR(p.totals.tax)}</div>
+                          <div className="flex items-center gap-3">
+                            <div className="text-right">
+                              <div className="text-xs text-muted-foreground">Total tax</div>
+                              <div className="font-mono font-semibold">{fmtINR(p.totals.tax)}</div>
+                            </div>
+                            <a
+                              href={`/taxation/tds-tcs/cert/${p.partyId}?fy=${fy}&q=${quarter}&kind=${kind}`}
+                              target="_blank"
+                              rel="noopener"
+                              className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs hover:bg-muted"
+                              title={`Open ${kind === "tds" ? "Form 16A" : "Form 27D"} for ${p.partyName}`}
+                            >
+                              📄 Cert
+                            </a>
                           </div>
                         </div>
                       </CardHeader>
