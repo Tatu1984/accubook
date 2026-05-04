@@ -261,8 +261,9 @@ Three sub-PRs. Tick boxes as they ship.
   - **GST returns UI** — `/taxation/gst` now wired to compute + portal-JSON download for GSTR-1/3B/9.
   - **Banking import UI** at `/banking/import` — upload statement → reconcile → match results.
   - **Marketing landing page** at `/` — reactbits-style hero/features/CTA, sign-in button → /login on same domain.
-- **Last updated:** 2026-05-04 by Claude (commit `c04ec29`)
+- **Last updated:** 2026-05-04 by Claude (commit `4143c5a`)
 - **What's done since last session:**
+  - **Cancel-receipt flow** (`4143c5a`). AR-side mirror of c04ec29. PATCH `/receipts/[receiptId]` with status=CANCELLED or BOUNCED. Reverses voucher, decrements BankAccount.currentBalance by `amount + tcs`, drops TcsCollection row, removes InvoicePayment junction, recomputes Invoice.amountPaid/Due/status. Schema: added Receipt↔Voucher relation.
   - **Cancel-payment flow** (`c04ec29`). PATCH `/payments/[paymentId]` for status=CANCELLED. Reverses the voucher (Dr↔Cr swap), restores BankAccount.currentBalance by `amount − tds`, deletes the TdsDeduction row (deduction never happened in legal terms), drops the InvoicePayment junction, prepends [CANCELLED] + reason to notes, recomputes Bill.amountPaid/Due/status. Permission-gated on `payments:approve`. Schema: added Payment↔Voucher relation (FK already existed).
   - **WS5 — TDS monthly challan summary** (`aa0d764`). New `buildMonthlyChallan` aggregator + `?view=monthly-challan&fy=...&month=...` on `/tds-deductions`. Groups TdsDeduction by section for one calendar month with count/base/tax/distinct-deductee per section + org-wide totals. Includes ITNS-281 deposit due date (7th of next month, or Apr 30 for March). Closes the gap between persisted deductions (b8dfd56) and the quarterly Form 16A (b8dfd56) — accountants need this to deposit cash monthly. +10 tests (346 total).
   - **Bill PATCH with voucher reversal** (`5f4bfd9`). Mirrors the voucher PATCH reversal pattern from PR2. DRAFT/PENDING_APPROVAL→APPROVED posts to GL via postBillToGl (or re-applies entries if voucher already exists). APPROVED→CANCELLED|DRAFT reverses every entry (Dr↔Cr swap) and flips Voucher.status accordingly. Refuses reverse when payments exist. Locks notes/vendorBillNo edits on posted bills. Permission-gated on `bills:approve`. Audit action distinguishes POST / REVERSE / UPDATE.
@@ -364,6 +365,7 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
+| 2026-05-04 | **Cancel-receipt flow** (mirror of c04ec29). PATCH `/receipts/[receiptId]` with status=CANCELLED|BOUNCED. | `4143c5a` |
 | 2026-05-04 | **Cancel-payment flow.** PATCH `/payments/[paymentId]` reverses voucher + restores bank + drops TDS row + recomputes bill status. Permission-gated. | `c04ec29` |
 | 2026-05-04 | **WS5 — TDS monthly challan summary.** New `buildMonthlyChallan` + `?view=monthly-challan` on `/tds-deductions`. ITNS-281 due-date helper. +10 tests (346 total). | `aa0d764` |
 | 2026-05-04 | **Bill PATCH with voucher reversal.** | `5f4bfd9` |
