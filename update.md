@@ -261,8 +261,9 @@ Three sub-PRs. Tick boxes as they ship.
   - **GST returns UI** — `/taxation/gst` now wired to compute + portal-JSON download for GSTR-1/3B/9.
   - **Banking import UI** at `/banking/import` — upload statement → reconcile → match results.
   - **Marketing landing page** at `/` — reactbits-style hero/features/CTA, sign-in button → /login on same domain.
-- **Last updated:** 2026-05-04 by Claude (commit `9c46d36`)
+- **Last updated:** 2026-05-04 by Claude (commit `8af5117`)
 - **What's done since last session:**
+  - **Ops closure** (`8af5117`). `/api/health` now compares on-disk `prisma/migrations/` vs `_prisma_migrations` and 503s on drift (catches "deploy ran but migrate deploy was skipped"). New `docs/RUNBOOK.md` — day-1 ops doc with on-call quickstart, deploy checklist, Neon PITR backup procedure, secret rotation table (DATABASE_URL/AUTH_SECRET/RESEND/CRON quarterly), migration playbook, cron endpoint inventory + Vercel Cron snippet, SEV1/2/3 incident guidance. DEVELOPER_GUIDE API table refreshed with the 9 endpoints shipped since `b2f3174`.
   - **Push to 95% production-ready** (`9c46d36`). Single batch closing the largest audit-v2 gaps.
     - **Super admin** seeded against Neon: `admin@accubook.com` / `password123!`. Login page demo card updated. (Seed's org upsert dodges Neon-pooler P2022 via narrow `select`.)
     - **Cancel-* UIs wired** on `/purchases/payments`, `/sales/receipts`, `/purchases/bills`. The existing "Delete" buttons were 404'ing into a non-existent DELETE handler; repurposed to call the real PATCH cancel endpoints (payments → CANCELLED; receipts → CANCELLED or BOUNCED via two-button dialog; bills → PATCH cancel for posted, fall-through DELETE for DRAFT). Closes audit BLOCKER #3.
@@ -374,6 +375,7 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
+| 2026-05-04 | **Ops closure** — `/api/health` migration-drift check, `docs/RUNBOOK.md`, DEVELOPER_GUIDE endpoint refresh. | `8af5117` |
 | 2026-05-04 | **Push to 95%** — super admin (`admin@accubook.com`/`password123!`), 3 cancel-* UIs wired, TDS monthly-challan tab, `CRON_SECRET` cron path, security mediums (GET org gate, bills DELETE gate, pino redact, NextAuth explicit secret). | `9c46d36` |
 | 2026-05-04 | **Audit v2 fixes** — `recomputeBillStatus` × `tdsAmount`; migration 10 (Payment/Receipt voucher FKs); bill reversal drops TdsDeduction; payroll permission gates. | `4acca88` |
 | 2026-05-04 | **Voucher numbering race fix + TDS_SECTIONS single-source.** Vouchers POST switched to the race-safe NumberCounter pattern (last caller of the old findFirst+1). TDS section arrays consolidated into three exports from tds.ts. | `6e4efc1` |
