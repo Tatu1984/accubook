@@ -261,8 +261,9 @@ Three sub-PRs. Tick boxes as they ship.
   - **GST returns UI** — `/taxation/gst` now wired to compute + portal-JSON download for GSTR-1/3B/9.
   - **Banking import UI** at `/banking/import` — upload statement → reconcile → match results.
   - **Marketing landing page** at `/` — reactbits-style hero/features/CTA, sign-in button → /login on same domain.
-- **Last updated:** 2026-05-04 by Claude (commit `b2f3174`)
+- **Last updated:** 2026-05-04 by Claude (commit `fa0e1c3`)
 - **What's done since last session:**
+  - **In-app notifications + real org-settings save** (`fa0e1c3`). `notifyNewApprovers` now also inserts `Notification` rows so the `/settings/notifications` inbox actually fills (it was wired to a real GET endpoint but nothing was creating rows). `/settings/organization` rewritten from 395-line placeholder mock-defaultValue form to a real load+save against `PATCH /api/organizations/[orgId]` (basic info, tax IDs, contact, registered address); cross-links to `/settings/india-tax` for composition scheme.
   - **Audit MEDIUM follow-ups (3 commits).** `3d28496` — bills POST now writes audit log (action=POST when promoted-to-GL at create, =CREATE otherwise; payload captures rcm/tdsSection/voucherId); routeEntityForApproval `amountLimit` gate uses explicit null/undefined check so `0` is treated as a real threshold (was JS-falsy-coerced). `b2f3174` — README + DEVELOPER_GUIDE refreshed: README architecture-notes now mentions bills→GL on approval + the approvals workflow + email scaffold; DEVELOPER_GUIDE adds the new endpoints (post-month, pay-month, PATCH /organizations, DELETE /approvals) and the new page inventory (Approvals / Billing / Manufacturing / Banking modules; india-tax / setup migrate / gstr2b).
   - **Production-readiness audit + Tier 1+2 fixes (4 commits).** Four parallel audit agents (security / data integrity / ops / code quality) found 12+ blocker/high issues. Fixed in three batches:
     - `43dff53` Approvals cross-tenant fix — migration 9 adds `Approval.organizationId` (backfilled from routed entity); routing helper sets it on every create; PATCH/promote-entity filter by it; POST/DELETE permission-gated; `createWorkflowSchema` validates approverId belongs to the org. Also drive-by fixed `userId: ""` FK-violation fallback in promote-entity.
@@ -360,6 +361,7 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
+| 2026-05-04 | **In-app Notification rows + real org-settings PATCH form.** | `fa0e1c3` |
 | 2026-05-04 | **Docs refresh** — README architecture notes + DEVELOPER_GUIDE endpoint/page inventory. | `b2f3174` |
 | 2026-05-04 | **Audit log in bills POST + amountLimit `0` falsy fix.** | `3d28496` |
 | 2026-05-04 | **Tier 2 audit fixes — Resend timeout, TDS list nullable-payment, .env.example, .strict() schemas, permission gates.** | `ae638b2` |
