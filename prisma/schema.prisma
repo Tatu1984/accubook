@@ -166,6 +166,7 @@ model Organization {
   workOrders        WorkOrder[]
   tdsDeductions     TdsDeduction[]
   tcsCollections    TcsCollection[]
+  recurringInvoices RecurringInvoice[]
 
   @@map("organizations")
 }
@@ -578,17 +579,18 @@ model Party {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  ledgers        Ledger[]
-  salesOrders    SalesOrder[]
-  purchaseOrders PurchaseOrder[]
-  quotations     Quotation[]
-  invoices       Invoice[]
-  bills          Bill[]
-  receipts       Receipt[]
-  payments       Payment[]
-  tdsDeductions  TdsDeduction[]
-  tcsCollections TcsCollection[]
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ledgers           Ledger[]
+  salesOrders       SalesOrder[]
+  purchaseOrders    PurchaseOrder[]
+  quotations        Quotation[]
+  invoices          Invoice[]
+  bills             Bill[]
+  receipts          Receipt[]
+  payments          Payment[]
+  tdsDeductions     TdsDeduction[]
+  tcsCollections    TcsCollection[]
+  recurringInvoices RecurringInvoice[]
 
   @@unique([organizationId, name])
   @@index([organizationId, type])
@@ -1110,19 +1112,66 @@ model Invoice {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  party        Party            @relation(fields: [partyId], references: [id])
-  salesOrder   SalesOrder?      @relation(fields: [salesOrderId], references: [id])
-  currency     Currency?        @relation(fields: [currencyId], references: [id])
-  items        InvoiceItem[]
-  taxes        InvoiceTax[]
-  payments     InvoicePayment[]
-  receipts     Receipt[]
+  organization        Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  party               Party             @relation(fields: [partyId], references: [id])
+  salesOrder          SalesOrder?       @relation(fields: [salesOrderId], references: [id])
+  currency            Currency?         @relation(fields: [currencyId], references: [id])
+  items               InvoiceItem[]
+  taxes               InvoiceTax[]
+  payments            InvoicePayment[]
+  receipts            Receipt[]
+  recurringSourceFor  RecurringInvoice? @relation("RecurringLastInvoice")
 
   @@unique([organizationId, invoiceNumber])
   @@index([organizationId, date])
   @@index([organizationId, status])
   @@map("invoices")
+}
+
+/**
+ * Recurring invoice template. The system runs a tick (manual via the
+ * /run endpoint, or by an external cron) and for every active recurring
+ * row whose nextRunDate is <= today, creates a fresh Invoice from the
+ * stored items + party + due-days, then advances nextRunDate by the
+ * frequency.
+ *
+ * `items` is JSON: an array of { itemId, quantity, unitPrice,
+ * discountPercent, taxId, description } matching the Invoice POST
+ * shape — so the runner just forwards it through. Schema-validated
+ * by zod when the recurring template is created.
+ */
+model RecurringInvoice {
+  id              String   @id @default(cuid())
+  organizationId  String
+  partyId         String
+  /** "DAILY" | "WEEKLY" | "MONTHLY" | "QUARTERLY" | "YEARLY" */
+  frequency       String
+  /** First-run date — drives nextRunDate at creation. */
+  startDate       DateTime
+  /** Optional cap. If set, runs stop after endDate even if isActive. */
+  endDate         DateTime?
+  /** Computed by the runner; advanced after each successful invoice creation. */
+  nextRunDate     DateTime
+  /** Days from invoice date → due date on each spawned invoice. */
+  dueDays         Int      @default(15)
+  /** JSON: invoice item template (see model docstring). */
+  items           Json
+  /** JSON: optional notes / terms / supplyType / billingAddress / shippingAddress. */
+  meta            Json?
+  isActive        Boolean  @default(true)
+  /** Last invoice spawned by this template; soft-link for the UI / audit. */
+  lastInvoiceId   String?  @unique
+  /** Counter — convenience so the UI can show "12 invoices spawned". */
+  runCount        Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  party        Party        @relation(fields: [partyId], references: [id])
+  lastInvoice  Invoice?     @relation("RecurringLastInvoice", fields: [lastInvoiceId], references: [id])
+
+  @@index([organizationId, isActive, nextRunDate])
+  @@map("recurring_invoices")
 }
 
 model InvoiceItem {
