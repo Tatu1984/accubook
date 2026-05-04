@@ -261,8 +261,9 @@ Three sub-PRs. Tick boxes as they ship.
   - **GST returns UI** — `/taxation/gst` now wired to compute + portal-JSON download for GSTR-1/3B/9.
   - **Banking import UI** at `/banking/import` — upload statement → reconcile → match results.
   - **Marketing landing page** at `/` — reactbits-style hero/features/CTA, sign-in button → /login on same domain.
-- **Last updated:** 2026-05-04 by Claude (commit `6e4efc1`)
+- **Last updated:** 2026-05-04 by Claude (commit `4acca88`)
 - **What's done since last session:**
+  - **Audit v2 — two BLOCKERs + two HIGHs** (`4acca88`). (1) `recomputeBillStatus` was clobbering the TDS reduction every time a payment landed — fixed to subtract `tdsAmount` (Bill never closed otherwise; AP drifted from vendor ledger). (2) Migration 10 adds the missing `Payment.voucher` / `Receipt.voucher` FK constraints to DB; the Prisma relations were schema-only, no SQL backing. (3) Bill reversal now deletes orphaned `TdsDeduction` rows + clears the bill's TDS context fields + resets amountDue (was leaving stale Form 16A entries on bills sent back to DRAFT). (4) `/payroll/post-month` + `/payroll/pay-month` now permission-gated on `payroll:approve` (every other GL-posting POST had the gate; payroll was the anomaly).
   - **Voucher numbering race + TDS_SECTIONS single-source** (`6e4efc1`). Vouchers POST was the last caller of the `findFirst orderBy + 1` pattern (race-prone under concurrent posts; previously labelled ACCEPTABLE in the audit but actually a 500-on-loser bug). Switched to the race-safe `generateVoucherNumber` helper. TDS_SECTIONS const arrays in payments/bills/receipts collapsed to three exports from `tds.ts` — `TDS_DEDUCTION_SECTIONS` / `TCS_COLLECTION_SECTIONS` / `TDS_SECTIONS_ALL` — each `as const satisfies readonly TdsSectionCode[]` so type and runtime values stay locked together at compile time. Bills now narrows to deduction-only sections (was using the union, which would have accepted a 206C TCS code on a vendor bill).
   - **Daily overdue notification emitter** (`ae7f2e8`). New `checkOverdue(prisma, orgId)` service: sweeps overdue invoices + bills, emits Notification rows to active org users (type=PAYMENT_DUE; data carries entityId+daysOverdue+inboxPath). 24h dedup via Postgres JSONB path query on `data.entityId`. New `POST /notifications/check-overdue` endpoint for external cron (Vercel Cron / GitHub Actions). Returns scan/created/skipped counters. New `src/shared/utils/dates.util.ts` (daysBetween) extracted as a leaf utility. +7 tests (353 total).
   - **Cancel-receipt flow** (`4143c5a`). AR-side mirror of c04ec29. PATCH `/receipts/[receiptId]` with status=CANCELLED or BOUNCED. Reverses voucher, decrements BankAccount.currentBalance by `amount + tcs`, drops TcsCollection row, removes InvoicePayment junction, recomputes Invoice.amountPaid/Due/status. Schema: added Receipt↔Voucher relation.
@@ -367,6 +368,7 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
+| 2026-05-04 | **Audit v2 fixes** — `recomputeBillStatus` × `tdsAmount`; migration 10 (Payment/Receipt voucher FKs); bill reversal drops TdsDeduction; payroll permission gates. | `4acca88` |
 | 2026-05-04 | **Voucher numbering race fix + TDS_SECTIONS single-source.** Vouchers POST switched to the race-safe NumberCounter pattern (last caller of the old findFirst+1). TDS section arrays consolidated into three exports from tds.ts. | `6e4efc1` |
 | 2026-05-04 | **Daily overdue notification emitter.** `checkOverdue` service + `POST /notifications/check-overdue` endpoint (cron-friendly). 24h dedup. +7 tests (353 total). | `ae7f2e8` |
 | 2026-05-04 | **Cancel-receipt flow** (mirror of c04ec29). PATCH `/receipts/[receiptId]` with status=CANCELLED|BOUNCED. | `4143c5a` |
