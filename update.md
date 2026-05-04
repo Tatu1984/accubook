@@ -261,7 +261,7 @@ Three sub-PRs. Tick boxes as they ship.
   - **GST returns UI** — `/taxation/gst` now wired to compute + portal-JSON download for GSTR-1/3B/9.
   - **Banking import UI** at `/banking/import` — upload statement → reconcile → match results.
   - **Marketing landing page** at `/` — reactbits-style hero/features/CTA, sign-in button → /login on same domain.
-- **Last updated:** 2026-05-04 by Claude (commit pending — TCS into receipts)
+- **Last updated:** 2026-05-04 by Claude (commit `789a18d`)
 - **What's done since last session:**
   - **WS5 — TCS at receipt time + TDS YTD bug fix.** receipts POST mirrors the TDS-on-payments pattern: optional `tcsSection` (`206C_1H` / `206C_1F`), `deducteeType`, `noPan`. With TCS, voucher is 3-line (Dr Bank gross / Cr Party amount / Cr TCS Payable); BankAccount.currentBalance increments by gross (= amount + tcs). Without TCS, behaviour unchanged. Audit captures tcsSection / tcsAmount / rationale / bankGrossAmount. New posting helper `getTcsPayableLedger` (factored alongside `getTdsPayableLedger` via shared `findOrCreateDutiesAndTaxesLedger`). Seed adds "TCS Payable" ledger. **Bonus fix:** `getFiscalYearForDate` now also returns `startDate`; payments POST switched its YTD aggregate from `gte: undefined` (whole-of-time, latent bug) to `gte: fy.startDate`, so the 194Q annual threshold is checked correctly. Receipt YTD uses the same FY-bounded query. tsc + 243 tests + 69-page build clean.
 - **Earlier this session:**
@@ -335,7 +335,7 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
-| 2026-05-04 | **WS5 — TCS at receipt time + TDS YTD bug fix.** receipts POST gets optional 206C_1H/206C_1F TCS via `computeTds` (3-line voucher Dr Bank gross / Cr Party / Cr TCS Payable; bank ↑ by gross). New `getTcsPayableLedger` (shared find-or-create with `getTdsPayableLedger`). Seed adds "TCS Payable". `getFiscalYearForDate` returns `startDate` and payments POST now FY-bounds its YTD aggregate (was `gte: undefined`, all-time). 243/243 tests, 69 pages. | _pending_ |
+| 2026-05-04 | **WS5 — TCS at receipt time + TDS YTD bug fix.** receipts POST gets optional 206C_1H/206C_1F TCS via `computeTds` (3-line voucher Dr Bank gross / Cr Party / Cr TCS Payable; bank ↑ by gross). New `getTcsPayableLedger` (shared find-or-create with `getTdsPayableLedger`). Seed adds "TCS Payable". `getFiscalYearForDate` returns `startDate` and payments POST now FY-bounds its YTD aggregate (was `gte: undefined`, all-time). 243/243 tests, 69 pages. | `789a18d` |
 | 2026-05-04 | **WS5 — TDS deduction integrated into payment posting.** `tdsSection` opt-in on payments POST → 3-line voucher (Dr Vendor / Cr Bank net / Cr TDS Payable). `getTdsPayableLedger` find-or-create under "Duties & Taxes". Audit captures section/amount/rationale. | `a9d83ad` |
 | 2026-05-04 | **UI — /setup/migrate Tally importer.** XML upload, per-section stats (groups / ledgers / parties / items), error lists collapsed. Build now 69 pages. | `f7e6ade` |
 | 2026-05-04 | **chore:** zombie zero-byte scaffold stubs deleted again (linter keeps recreating them; -22 files). | `cd8f6c0` |
