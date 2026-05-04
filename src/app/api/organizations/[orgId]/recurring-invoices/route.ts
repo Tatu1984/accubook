@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/backend/database/client";
-import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
+import { withOrgAuth, badRequest, notFound, hasPermission, forbidden } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
 import { FREQUENCIES, type Frequency } from "@/backend/services/billing/recurring";
 
@@ -67,7 +67,10 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
  * runner advances `nextRunDate` by one frequency interval. `endDate`
  * caps the run window if set.
  */
-export const POST = withOrgAuth(async (request, { orgId }) => {
+export const POST = withOrgAuth(async (request, { orgId, orgUser }) => {
+  if (!hasPermission(orgUser, "invoices", "create")) {
+    return forbidden("You don't have permission to create recurring invoice templates");
+  }
   try {
     const data = createSchema.parse(await request.json());
 

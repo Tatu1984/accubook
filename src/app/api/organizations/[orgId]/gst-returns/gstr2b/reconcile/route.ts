@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
-import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
+import { withOrgAuth, badRequest, hasPermission, forbidden } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
 import { D, sum } from "@/backend/utils/money";
 import {
@@ -24,7 +24,12 @@ export const dynamic = "force-dynamic";
  * in the response. Persistence (Gstr2bImport / Gstr2bRow tables) is a
  * follow-up; accountants can re-upload the same JSON to revisit.
  */
-export const POST = withOrgAuth(async (request, { orgId }) => {
+export const POST = withOrgAuth(async (request, { orgId, orgUser }) => {
+  // Permission gate — and incidental rate-limit (a 50 MB JSON upload
+  // is non-trivial to parse + match against the purchase register).
+  if (!hasPermission(orgUser, "tax", "read")) {
+    return forbidden("You don't have permission to run GSTR-2B reconciliation");
+  }
   let json: string;
   try {
     const ctype = request.headers.get("content-type") ?? "";

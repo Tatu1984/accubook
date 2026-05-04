@@ -59,6 +59,12 @@ export async function sendEmail(message: EmailMessage): Promise<EmailSendResult>
   return sendViaResend(message, apiKey, from);
 }
 
+/** Resend should respond well under a second on the happy path. Cap at
+ * 5s so a stalled provider can't hold a request thread (and any
+ * synchronous post-tx caller). On timeout, return `{ ok: false }` —
+ * the caller logs and moves on; the entity is already saved. */
+const RESEND_TIMEOUT_MS = 5_000;
+
 async function sendViaResend(
   message: EmailMessage,
   apiKey: string,
@@ -80,6 +86,7 @@ async function sendViaResend(
         ...(message.replyTo ? { reply_to: message.replyTo } : {}),
         ...(message.tags ? { tags: message.tags } : {}),
       }),
+      signal: AbortSignal.timeout(RESEND_TIMEOUT_MS),
     });
 
     if (!resp.ok) {
@@ -94,8 +101,18 @@ async function sendViaResend(
     const data = (await resp.json()) as { id?: string };
     return { ok: true, provider: "resend", id: data.id ?? "unknown" };
   } catch (e) {
+    // AbortError when the timeout fires; surface it cleanly so callers
+    // know the difference between "Resend rejected" and "Resend stalled".
+    const err = e as Error & { name?: string };
+    if (err.name === "TimeoutError" || err.name === "AbortError") {
+      logger.error(
+        { to: message.to, subject: message.subject, timeoutMs: RESEND_TIMEOUT_MS },
+        "Resend timed out"
+      );
+      return { ok: false, error: `Resend timed out after ${RESEND_TIMEOUT_MS}ms` };
+    }
     logger.error({ err: e, to: message.to, subject: message.subject }, "sendViaResend failed");
-    return { ok: false, error: (e as Error).message };
+    return { ok: false, error: err.message };
   }
 }
 

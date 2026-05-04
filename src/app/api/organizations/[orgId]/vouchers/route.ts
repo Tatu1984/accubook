@@ -19,7 +19,7 @@ const voucherEntrySchema = z.object({
   narration: z.string().optional(),
   costCenterId: z.string().optional(),
   projectId: z.string().optional(),
-});
+}).strict();
 
 const createVoucherSchema = z.object({
   voucherTypeId: z.string().min(1, "Voucher type is required"),
@@ -29,7 +29,7 @@ const createVoucherSchema = z.object({
   referenceNo: z.string().optional(),
   branchId: z.string().optional(),
   entries: z.array(voucherEntrySchema).min(2, "At least 2 entries required"),
-});
+}).strict();
 
 export const GET = withOrgAuth(async (request, { orgId }) => {
   try {

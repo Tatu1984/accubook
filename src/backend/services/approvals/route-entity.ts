@@ -13,13 +13,17 @@ import type { PrismaClient } from "@/generated/prisma";
  * one or more approvers based on the step's approverType:
  *
  *   USER    — single Approval row, approverId = step.approverId.
+ *             Validated to be an active OrganizationUser of the
+ *             entity's org (cross-tenant defense).
  *   ROLE    — one Approval row per user holding that role in the org
  *             (any holder can approve; the inbox shows it to all of
- *             them; once one approves the rest auto-cancel — caller
- *             is responsible for that follow-up).
- *   MANAGER — Not yet implemented. We skip these steps with a TODO
- *             so the workflow doesn't silently miss approvers when
- *             the manager relationship isn't set.
+ *             them; the PATCH /approvals route auto-CANCELLs the
+ *             siblings when one approver decides).
+ *   MANAGER — resolves the requester's `Employee.userId` →
+ *             `Employee.reportingTo` → manager's `Employee.userId`.
+ *             Skipped with a logged reason if the requester has no
+ *             Employee row or no reportingTo configured (won't
+ *             silently lose approvers).
  *
  * `amountLimit` semantics: when set, this step is required only when
  * the entity's amount ≥ the limit. Steps without a limit are always

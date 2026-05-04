@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
-import { withOrgAuth } from "@/backend/utils/with-org-auth";
+import { withOrgAuth, forbidden, hasPermission } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
 import { D, sum } from "@/backend/utils/money";
 import { computeLineGst, determineSupplyType, type SupplyType } from "@/backend/utils/india-tax";
@@ -61,8 +61,11 @@ type RunSummary = {
  * the run on a schedule from inside the app — keeping it manual /
  * cron-driven so the user has explicit control.
  */
-export const POST = withOrgAuth(async (request, { orgId, userId }) => {
+export const POST = withOrgAuth(async (request, { orgId, userId, orgUser }) => {
   void userId;
+  if (!hasPermission(orgUser, "invoices", "create")) {
+    return forbidden("You don't have permission to spawn invoices from recurring templates");
+  }
   const ranAt = new Date();
 
   try {

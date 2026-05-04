@@ -137,7 +137,12 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
         where,
         include: {
           party: { select: { id: true, name: true, panNo: true } },
+          // After migration 8 (bill→GL posting), exactly one of payment
+          // or bill is set per row depending on whether TDS was deducted
+          // at payment time (cash basis) or bill time (accrual). Include
+          // both — frontend renders whichever is non-null.
           payment: { select: { id: true, paymentNumber: true, date: true } },
+          bill: { select: { id: true, billNumber: true, date: true } },
         },
         orderBy: { deductedAt: "desc" },
         skip: (page - 1) * limit,
