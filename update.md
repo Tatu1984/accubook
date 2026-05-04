@@ -261,7 +261,7 @@ Three sub-PRs. Tick boxes as they ship.
   - **GST returns UI** — `/taxation/gst` now wired to compute + portal-JSON download for GSTR-1/3B/9.
   - **Banking import UI** at `/banking/import` — upload statement → reconcile → match results.
   - **Marketing landing page** at `/` — reactbits-style hero/features/CTA, sign-in button → /login on same domain.
-- **Last updated:** 2026-05-04 by Claude (commit pending — recurring UI)
+- **Last updated:** 2026-05-04 by Claude (commit `d1e56b9`)
 - **What's done since last session:**
   - **UI — `/billing/recurring`.** Recurring-invoice management page. List view with party / frequency / next-run (with DUE badge when overdue) / runCount / last-invoice / status. KPIs for due-now / active / inactive. "Run now" button hits the runner; result card shows spawned + errored counts with details. "New template" modal collects party + frequency + start/end dates + due-days + single line-item, posts to `POST /recurring-invoices`. Build now 73 pages.
   - **Recurring billing scaffold.** New `RecurringInvoice` model with frequency / startDate / endDate / nextRunDate / dueDays / items JSON template / meta / runCount / lastInvoiceId (migration `7_add_recurring_invoices` applied). Pure helper `addFrequency` (DAILY / WEEKLY / MONTHLY / QUARTERLY / YEARLY) handles month-end clamp correctly (Jan 31 + 1mo → Feb 28/29). Plus `isDue`, `missedRunDates`, `isFrequency`. New `POST /recurring-invoices` to create a template; new `POST /recurring-invoices/run` to spawn one invoice per due template (mirrors invoice POST's GST split + composition handling + race-safe FY-scoped numbering, advances `nextRunDate` and bumps `runCount`, auto-deactivates when past `endDate`); new `GET /recurring-invoices?active=true&dueOnly=true` to list. Cron-friendly. +23 tests (327 total).
@@ -347,7 +347,7 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
-| 2026-05-04 | **UI — `/billing/recurring`.** Template list + Run-now action + Create modal. KPIs (due / active / inactive) + DUE badge per row when overdue. | _pending_ |
+| 2026-05-04 | **UI — `/billing/recurring`.** Template list + Run-now action + Create modal. KPIs (due / active / inactive) + DUE badge per row when overdue. | `d1e56b9` |
 | 2026-05-04 | **Recurring billing scaffold.** `RecurringInvoice` model + migration 7. Pure helpers `addFrequency` / `isDue` / `missedRunDates` (handles month-end clamp). New `POST /recurring-invoices` (create template) and `POST /recurring-invoices/run` (cron-friendly tick that spawns one invoice per due template, mirrors GST split + composition + FY numbering). +23 tests (327 total). | `a4b3922` |
 | 2026-05-04 | **WS1 — Composition Scheme.** Org-level `compositionScheme` + `compositionRate` (migration 6). Invoice POST zeros per-line GST when on. New `computeCmp08` quarterly aggregator + `/gst-returns/cmp08` endpoint. +5 tests (304 total). | `3b81e23` |
 | 2026-05-04 | **UI — three new pages.** `/taxation/gstr2b` (upload + 4-bucket reconcile view), `/hr/payroll/run` (post-month + pay-month two-step), `/manufacturing/work-orders` (list + Issue/Complete modal flow). Build now 72 pages. | `9e5a216` |
