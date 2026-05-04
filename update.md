@@ -261,7 +261,7 @@ Three sub-PRs. Tick boxes as they ship.
   - **GST returns UI** — `/taxation/gst` now wired to compute + portal-JSON download for GSTR-1/3B/9.
   - **Banking import UI** at `/banking/import` — upload statement → reconcile → match results.
   - **Marketing landing page** at `/` — reactbits-style hero/features/CTA, sign-in button → /login on same domain.
-- **Last updated:** 2026-05-04 by Claude (commit pending — approvals polish + email scaffold)
+- **Last updated:** 2026-05-04 by Claude (commit `67bc0d0`)
 - **What's done since last session:**
   - **Approvals polish + email scaffold.** (a) Sibling cleanup: when one ROLE-holder decides a step, the other PENDING rows are auto-CANCELLED with a "X already decided" comment so the inbox stays tidy. (b) `maybePromoteEntity` extended to ExpenseClaim (PENDING→APPROVED/REJECTED with `approvedBy` stamped from latest APPROVED Approval) and Leave (same). (c) `routeEntityForApproval` now actually implements MANAGER approver type via `Employee.reportingTo`. (d) New `src/backend/services/email/send.ts` — provider-neutral wrapper around Resend; no-ops with a logged-warning when `RESEND_API_KEY` / `EMAIL_FROM` are unset, so the rest of the app calls `sendEmail()` unconditionally. New `sendApprovalRequestEmail()` helper. (e) New `notifyNewApprovers(prisma, ctx)` runs post-tx in vouchers POST + bills POST, emails every PENDING approver with their inbox link.
   - **Approval → entity auto-promote/demote.** New `maybePromoteEntity(tx, entityType, entityId)` helper. PATCH /approvals now wraps the Approval update + the promotion in a single $transaction: if any approval is REJECTED → demote (Voucher → REJECTED, Bill → DRAFT); if ALL approvals are APPROVED → promote (Voucher → APPROVED + isPosted + applyLedgerEntries; Bill → APPROVED). Idempotent (only acts when entity is currently PENDING_APPROVAL). Closes the loop: pending voucher → workflow routes → approver clicks Approve → voucher auto-posts to GL.
@@ -353,7 +353,7 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
-| 2026-05-04 | **Approvals polish + email scaffold.** Sibling-CANCELLED on first decide; ExpenseClaim + Leave promotion; MANAGER approver type via Employee.reportingTo; Resend-based `sendEmail` with no-op fallback; vouchers/bills post-tx notify approvers. New env vars: `RESEND_API_KEY`, `EMAIL_FROM`, `APP_URL`. | _pending_ |
+| 2026-05-04 | **Approvals polish + email scaffold.** Sibling-CANCELLED on first decide; ExpenseClaim + Leave promotion; MANAGER approver type via Employee.reportingTo; Resend-based `sendEmail` with no-op fallback; vouchers/bills post-tx notify approvers. New env vars: `RESEND_API_KEY`, `EMAIL_FROM`, `APP_URL`. | `67bc0d0` |
 | 2026-05-04 | **Approval → entity auto-promote/demote.** PATCH /approvals now closes the loop: all APPROVED → voucher posts to GL or bill is approved; any REJECTED → voucher REJECTED / bill back to DRAFT. Single $transaction with the Approval update. | `a19a24d` |
 | 2026-05-04 | **Voucher + Bill → approval workflow routing.** New `routeEntityForApproval`. PENDING_APPROVAL voucher/bill auto-creates Approval rows from workflow steps with amount-limit gating. USER + ROLE approver types fully supported. | `99e07f6` |
 | 2026-05-04 | **UI — `/approvals` inbox.** Pending + History tabs over the existing approvals backend. Approve / Reject dialog with optional comments. | `79b327a` |
