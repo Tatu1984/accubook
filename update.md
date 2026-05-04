@@ -261,7 +261,7 @@ Three sub-PRs. Tick boxes as they ship.
   - **GST returns UI** — `/taxation/gst` now wired to compute + portal-JSON download for GSTR-1/3B/9.
   - **Banking import UI** at `/banking/import` — upload statement → reconcile → match results.
   - **Marketing landing page** at `/` — reactbits-style hero/features/CTA, sign-in button → /login on same domain.
-- **Last updated:** 2026-05-04 by Claude (commit pending — TDS/TCS UI)
+- **Last updated:** 2026-05-04 by Claude (commit `7cb1f8c`)
 - **What's done since last session:**
   - **WS5 UI — `/taxation/tds-tcs` wired to real endpoints.** Replaces the placeholder ₹0 page. Period bar (FY input + quarter dropdown, defaults to current FY+Q). Four tabs: TDS Deductions list, TCS Collections list, Form 16A (TDS quarterly cert), Form 27D (TCS quarterly cert). Both list views show per-row date, party, PAN (with NO-PAN flag in amber), section, rate, base, tax, rationale. Both cert views render party-card-per-row with section sub-table + party totals. Powered by `/tds-deductions` and `/tcs-collections` with `?view=list` and `?view=form16a/form27d`.
   - **WS2 — GSTR-2B reconciliation.** New `parseGstr2bJson` extracts the GSTN portal's GSTR-2B file (rtnprd / docdata.b2b[].ctin / inv[] / items[]); robust to single-element-as-object quirk and the missing-`data`-wrapper variant. New `matchGstr2bToBills` (pure aggregator) classifies every supplier-reported invoice into MATCHED / MISMATCHED / MISSING_IN_BOOKS, plus surfaces every B2B bill in books that's MISSING_IN_2B. Case-insensitive on both GSTIN and vendor invoice number. ₹1 per-cell tolerance (rounding noise on the supplier side). New `POST /gst-returns/gstr2b/reconcile` accepts multipart upload or `application/json`, derives the period from rtnprd, loads bills for that calendar month (excludes DRAFT/CANCELLED), returns the full reconciliation result. Read-only — no persistence yet (Gstr2bImport / Gstr2bRow tables are a follow-up). +16 tests (299 total).
@@ -343,7 +343,7 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
-| 2026-05-04 | **UI — `/taxation/tds-tcs` wired to real endpoints.** Period bar (FY + quarter), four tabs (TDS list / TCS list / Form 16A / Form 27D) backed by the persistence work shipped earlier today. | _pending_ |
+| 2026-05-04 | **UI — `/taxation/tds-tcs` wired to real endpoints.** Period bar (FY + quarter), four tabs (TDS list / TCS list / Form 16A / Form 27D) backed by the persistence work shipped earlier today. | `7cb1f8c` |
 | 2026-05-04 | **WS2 — GSTR-2B reconciliation.** New `parseGstr2bJson` + `matchGstr2bToBills` (pure helpers). `POST /gst-returns/gstr2b/reconcile` accepts the GSTN 2B JSON, classifies every B2B invoice as MATCHED / MISMATCHED / MISSING_IN_BOOKS / MISSING_IN_2B with reasons. ₹1 per-cell tolerance. +16 tests (299 total). | `e04760c` |
 | 2026-05-04 | **WS2 — GSTR-9 portal JSON converter + download endpoint.** Same pattern as 1/3B; emits sections 4 / 5 / 6 / 7 / 9 cells we compute, zeros for unmodeled cells. Optional `precedingFyTurnover` query param feeds `gt`. +12 tests (283 total). | `2199272` |
 | 2026-05-04 | **WS5 — TDS/TCS persistence tables + Form 16A/27D aggregator.** New `TdsDeduction` + `TcsCollection` models (migration 5). Populated inside payments + receipts $transactions. Two GET endpoints with list-or-aggregate views. New `buildForm16AQuarterly` + 16 tests (271 total). | `b8dfd56` |
