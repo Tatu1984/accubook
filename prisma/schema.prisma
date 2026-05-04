@@ -399,6 +399,7 @@ model Voucher {
   approvedBy    User?         @relation("VoucherApprovedBy", fields: [approvedById], references: [id])
   entries       VoucherEntry[]
   invoicePayments InvoicePayment[]
+  payslips      Payslip[]      @relation("PayslipVoucher")
 
   @@unique([organizationId, voucherTypeId, voucherNumber, fiscalYearId])
   @@index([organizationId, date])
@@ -1628,7 +1629,8 @@ model Payslip {
   workingDays  Int
   presentDays  Decimal  @db.Decimal(4, 1)
   lopDays      Decimal  @default(0) @db.Decimal(4, 1)
-  status       String   @default("DRAFT") // DRAFT, PROCESSED, APPROVED, PAID
+  status       String   @default("DRAFT") // DRAFT, APPROVED, PROCESSED (posted), PAID
+  voucherId    String?  // set once payslip is posted to GL
   paidAt       DateTime?
   paidVia      String?
   transactionRef String?
@@ -1636,8 +1638,10 @@ model Payslip {
   updatedAt    DateTime @updatedAt
 
   employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  voucher  Voucher? @relation("PayslipVoucher", fields: [voucherId], references: [id])
 
   @@unique([employeeId, month, year])
+  @@index([voucherId])
   @@map("payslips")
 }
 

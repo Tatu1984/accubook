@@ -79,6 +79,40 @@ export async function getOrCreateBankLedger(
   });
 }
 
+/**
+ * Generic find-or-create for a named ledger under a given group. Throws
+ * if the group is missing — callers should ensure the org seed has been
+ * applied. Used by payroll-posting which references several ledgers
+ * (Salaries Payable, PF Payable, etc.).
+ */
+export async function getOrCreateNamedLedger(
+  tx: Tx,
+  organizationId: string,
+  name: string,
+  groupName: string
+): Promise<LedgerRef> {
+  const existing = await tx.ledger.findFirst({
+    where: { organizationId, name },
+    select: { id: true },
+  });
+  if (existing) return existing;
+
+  const group = await tx.ledgerGroup.findFirst({
+    where: { organizationId, name: groupName },
+    select: { id: true },
+  });
+  if (!group) {
+    throw new Error(
+      `Ledger group "${groupName}" is not configured for this organization. Re-run org seed.`
+    );
+  }
+
+  return tx.ledger.create({
+    data: { organizationId, groupId: group.id, name },
+    select: { id: true },
+  });
+}
+
 /** Find or create the "Cash in Hand" ledger. */
 export async function getCashLedger(tx: Tx, organizationId: string): Promise<LedgerRef> {
   const existing = await tx.ledger.findFirst({
