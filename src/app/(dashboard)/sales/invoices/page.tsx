@@ -54,6 +54,7 @@ import { cn } from "@/shared/utils/common.util";
 import Link from "next/link";
 import { useOrganization } from "@/frontend/hooks/use-organization";
 import { toast } from "sonner";
+import { downloadCsv } from "@/frontend/utils/export-csv";
 
 interface Invoice {
   id: string;
@@ -179,6 +180,70 @@ export default function InvoicesPage() {
       setDeleteDialogOpen(false);
       setInvoiceToDelete(null);
     }
+  };
+
+  const handlePrint = (invoiceId: string) => {
+    window.open(`/sales/invoices/${invoiceId}?print=1`, "_blank");
+  };
+
+  const handleDuplicate = async (invoiceId: string) => {
+    if (!organizationId) return;
+    try {
+      const res = await fetch(
+        `/api/organizations/${organizationId}/invoices/${invoiceId}/duplicate`,
+        { method: "POST" }
+      );
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || "Failed to duplicate");
+      }
+      const j = await res.json();
+      toast.success(`Duplicated as ${j.invoiceNumber}`);
+      fetchInvoices();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to duplicate invoice");
+    }
+  };
+
+  const handleSendReminder = async (invoiceId: string) => {
+    if (!organizationId) return;
+    try {
+      const res = await fetch(
+        `/api/organizations/${organizationId}/invoices/${invoiceId}/send-reminder`,
+        { method: "POST" }
+      );
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || "Failed to send reminder");
+      toast.success(
+        j.partyEmail
+          ? `Reminder logged (would email ${j.partyEmail})`
+          : "Reminder logged — no party email on file"
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to send reminder");
+    }
+  };
+
+  const handleExport = () => {
+    if (filteredInvoices.length === 0) {
+      toast.info("Nothing to export");
+      return;
+    }
+    const rows = filteredInvoices.map((i) => ({
+      Date: i.date,
+      "Invoice No.": i.invoiceNumber,
+      Customer: i.party?.name ?? "",
+      "GST No": i.party?.gstNo ?? "",
+      Subtotal: i.subtotal,
+      "Tax Amount": i.taxAmount,
+      Total: i.totalAmount,
+      Paid: i.amountPaid,
+      Due: i.amountDue,
+      "Due Date": i.dueDate,
+      Status: i.status,
+    }));
+    downloadCsv(`invoices-${new Date().toISOString().slice(0, 10)}`, rows);
+    toast.success(`Exported ${rows.length} invoices`);
   };
 
   // Update invoice status
@@ -389,15 +454,15 @@ export default function InvoicesPage() {
                   View Details
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => handlePrint(invoice.id)}>
                 <Printer className="mr-2 h-4 w-4" />
                 Print
               </DropdownMenuItem>
-              <DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => handlePrint(invoice.id)}>
                 <Download className="mr-2 h-4 w-4" />
                 Download PDF
               </DropdownMenuItem>
-              <DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => handleDuplicate(invoice.id)}>
                 <Copy className="mr-2 h-4 w-4" />
                 Duplicate
               </DropdownMenuItem>
@@ -422,7 +487,7 @@ export default function InvoicesPage() {
                 invoice.status === "PARTIAL" ||
                 invoice.status === "OVERDUE") && (
                 <>
-                  <DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => handleSendReminder(invoice.id)}>
                     <Mail className="mr-2 h-4 w-4" />
                     Send Reminder
                   </DropdownMenuItem>
@@ -479,7 +544,7 @@ export default function InvoicesPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline">
+          <Button variant="outline" onClick={handleExport}>
             <Download className="mr-2 h-4 w-4" />
             Export
           </Button>

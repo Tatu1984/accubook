@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import {
   Plus,
   ChevronRight,
@@ -13,7 +14,19 @@ import {
   Folder,
   Loader2,
   Building2,
+  Eye,
+  Receipt,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/frontend/components/ui/alert-dialog";
 import { Button } from "@/frontend/components/ui/button";
 import {
   Card,
@@ -52,6 +65,15 @@ import { ScrollArea } from "@/frontend/components/ui/scroll-area";
 import { cn } from "@/shared/utils/common.util";
 import { useOrganization } from "@/frontend/hooks/use-organization";
 import { toast } from "sonner";
+import { downloadCsv } from "@/frontend/utils/export-csv";
+
+interface CoaActions {
+  onAddSubGroup: (parentId: string, parentNature: string) => void;
+  onAddLedger: (groupId: string) => void;
+  onEditGroup: (group: LedgerGroup) => void;
+  onDeleteGroup: (group: LedgerGroup) => void;
+  onDeleteLedger: (ledger: Ledger) => void;
+}
 
 interface LedgerGroup {
   id: string;
@@ -94,10 +116,12 @@ function TreeItem({
   group,
   level = 0,
   ledgersByGroup,
+  actions,
 }: {
   group: LedgerGroup;
   level?: number;
   ledgersByGroup: Record<string, Ledger[]>;
+  actions: CoaActions;
 }) {
   const [isExpanded, setIsExpanded] = React.useState(level < 2);
   const groupLedgers = ledgersByGroup[group.id] || [];
@@ -169,20 +193,29 @@ function TreeItem({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => actions.onAddSubGroup(group.id, group.nature)}
+            >
               <Plus className="mr-2 h-4 w-4" />
               Add Sub-Group
             </DropdownMenuItem>
-            <DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => actions.onAddLedger(group.id)}>
               <Plus className="mr-2 h-4 w-4" />
               Add Ledger
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => actions.onEditGroup(group)}
+              disabled={group.isSystem}
+            >
               <Pencil className="mr-2 h-4 w-4" />
-              Edit
+              {group.isSystem ? "Edit (system)" : "Edit"}
             </DropdownMenuItem>
-            <DropdownMenuItem className="text-red-600">
+            <DropdownMenuItem
+              className="text-red-600"
+              onSelect={() => actions.onDeleteGroup(group)}
+              disabled={group.isSystem}
+            >
               <Trash2 className="mr-2 h-4 w-4" />
               Delete
             </DropdownMenuItem>
@@ -198,6 +231,7 @@ function TreeItem({
               group={child}
               level={level + 1}
               ledgersByGroup={ledgersByGroup}
+              actions={actions}
             />
           ))}
           {groupLedgers.map((ledger) => (
@@ -224,14 +258,29 @@ function TreeItem({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem>View Details</DropdownMenuItem>
-                  <DropdownMenuItem>
-                    <Pencil className="mr-2 h-4 w-4" />
-                    Edit
+                  <DropdownMenuItem asChild>
+                    <Link href={`/accounting/ledgers?ledgerId=${ledger.id}`}>
+                      <Eye className="mr-2 h-4 w-4" />
+                      View Details
+                    </Link>
                   </DropdownMenuItem>
-                  <DropdownMenuItem>View Transactions</DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href={`/accounting/ledgers?edit=${ledger.id}`}>
+                      <Pencil className="mr-2 h-4 w-4" />
+                      Edit
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href={`/accounting/vouchers?ledgerId=${ledger.id}`}>
+                      <Receipt className="mr-2 h-4 w-4" />
+                      View Transactions
+                    </Link>
+                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem className="text-red-600">
+                  <DropdownMenuItem
+                    className="text-red-600"
+                    onSelect={() => actions.onDeleteLedger(ledger)}
+                  >
                     <Trash2 className="mr-2 h-4 w-4" />
                     Delete
                   </DropdownMenuItem>
@@ -245,6 +294,8 @@ function TreeItem({
   );
 }
 
+type GroupFormMode = "create" | "edit";
+
 export default function ChartOfAccountsPage() {
   const { organizationId, isLoading: orgLoading } = useOrganization();
   const [groups, setGroups] = React.useState<LedgerGroup[]>([]);
@@ -252,6 +303,10 @@ export default function ChartOfAccountsPage() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [groupMode, setGroupMode] = React.useState<GroupFormMode>("create");
+  const [editingGroupId, setEditingGroupId] = React.useState<string | null>(null);
+  const [deleteGroupTarget, setDeleteGroupTarget] = React.useState<LedgerGroup | null>(null);
+  const [deleteLedgerTarget, setDeleteLedgerTarget] = React.useState<Ledger | null>(null);
 
   const [formData, setFormData] = React.useState({
     name: "",
@@ -300,31 +355,148 @@ export default function ChartOfAccountsPage() {
 
     setIsSubmitting(true);
     try {
-      const response = await fetch(`/api/organizations/${organizationId}/ledger-groups`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: formData.name,
-          nature: formData.nature,
-          parentId: formData.parentId || undefined,
-        }),
-      });
+      let response: Response;
+      if (groupMode === "edit" && editingGroupId) {
+        response = await fetch(
+          `/api/organizations/${organizationId}/ledger-groups/${editingGroupId}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: formData.name,
+              nature: formData.nature,
+              parentId: formData.parentId || null,
+            }),
+          }
+        );
+      } else {
+        response = await fetch(`/api/organizations/${organizationId}/ledger-groups`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: formData.name,
+            nature: formData.nature,
+            parentId: formData.parentId || undefined,
+          }),
+        });
+      }
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || "Failed to create group");
+        throw new Error(error.error || "Failed to save group");
       }
 
-      toast.success("Ledger group created successfully");
+      toast.success(
+        groupMode === "edit"
+          ? "Ledger group updated"
+          : "Ledger group created successfully"
+      );
       setIsDialogOpen(false);
       setFormData({ name: "", nature: "", parentId: "" });
+      setGroupMode("create");
+      setEditingGroupId(null);
       fetchGroups();
     } catch (error) {
-      console.error("Error creating group:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to create group");
+      console.error("Error saving group:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to save group");
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const openCreateGroup = (parentId?: string, nature?: string) => {
+    setGroupMode("create");
+    setEditingGroupId(null);
+    setFormData({
+      name: "",
+      nature: nature ?? "",
+      parentId: parentId ?? "",
+    });
+    setIsDialogOpen(true);
+  };
+
+  const openEditGroup = (group: LedgerGroup) => {
+    setGroupMode("edit");
+    setEditingGroupId(group.id);
+    setFormData({
+      name: group.name,
+      nature: group.nature,
+      parentId: group.parentId ?? "",
+    });
+    setIsDialogOpen(true);
+  };
+
+  const performDeleteGroup = async () => {
+    if (!organizationId || !deleteGroupTarget) return;
+    try {
+      const res = await fetch(
+        `/api/organizations/${organizationId}/ledger-groups/${deleteGroupTarget.id}`,
+        { method: "DELETE" }
+      );
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || "Failed to delete");
+      toast.success(`Group "${deleteGroupTarget.name}" deleted`);
+      fetchGroups();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete group");
+    } finally {
+      setDeleteGroupTarget(null);
+    }
+  };
+
+  const performDeleteLedger = async () => {
+    if (!organizationId || !deleteLedgerTarget) return;
+    try {
+      const res = await fetch(
+        `/api/organizations/${organizationId}/ledgers/${deleteLedgerTarget.id}`,
+        { method: "DELETE" }
+      );
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || "Failed to delete");
+      toast.success(`Ledger "${deleteLedgerTarget.name}" deleted`);
+      fetchLedgers();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete ledger");
+    } finally {
+      setDeleteLedgerTarget(null);
+    }
+  };
+
+  const treeActions: CoaActions = {
+    onAddSubGroup: (parentId, nature) => openCreateGroup(parentId, nature),
+    onAddLedger: (groupId) => {
+      window.location.href = `/accounting/ledgers?groupId=${groupId}`;
+    },
+    onEditGroup: (group) => openEditGroup(group),
+    onDeleteGroup: (group) => setDeleteGroupTarget(group),
+    onDeleteLedger: (ledger) => setDeleteLedgerTarget(ledger),
+  };
+
+  const handleExport = () => {
+    if (groups.length === 0 && ledgers.length === 0) {
+      toast.info("Nothing to export");
+      return;
+    }
+    const rows = [
+      ...groups.map((g) => ({
+        Type: "Group",
+        Name: g.name,
+        Nature: g.nature,
+        Parent: g.parentId ?? "",
+        Code: "",
+        Balance: "",
+      })),
+      ...ledgers.map((l) => ({
+        Type: "Ledger",
+        Name: l.name,
+        Nature: l.group?.nature ?? "",
+        Parent: l.groupId,
+        Code: l.code ?? "",
+        Balance: String(l.currentBalance ?? l.openingBalance ?? 0),
+      })),
+    ];
+    downloadCsv(`chart-of-accounts-${new Date().toISOString().slice(0, 10)}`, rows);
+    toast.success(`Exported ${rows.length} rows`);
   };
 
   // Build hierarchy from flat list
@@ -406,22 +578,36 @@ export default function ChartOfAccountsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline">
+          <Button variant="outline" onClick={handleExport}>
             <FileText className="mr-2 h-4 w-4" />
             Export
           </Button>
-          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+          <Dialog
+            open={isDialogOpen}
+            onOpenChange={(o) => {
+              setIsDialogOpen(o);
+              if (!o) {
+                setGroupMode("create");
+                setEditingGroupId(null);
+                setFormData({ name: "", nature: "", parentId: "" });
+              }
+            }}
+          >
             <DialogTrigger asChild>
-              <Button>
+              <Button onClick={() => openCreateGroup()}>
                 <Plus className="mr-2 h-4 w-4" />
                 Add Group
               </Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Create Ledger Group</DialogTitle>
+                <DialogTitle>
+                  {groupMode === "edit" ? "Edit Ledger Group" : "Create Ledger Group"}
+                </DialogTitle>
                 <DialogDescription>
-                  Add a new ledger group to organize your accounts
+                  {groupMode === "edit"
+                    ? "Update name, nature, or parent."
+                    : "Add a new ledger group to organize your accounts"}
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-4">
@@ -484,7 +670,7 @@ export default function ChartOfAccountsPage() {
                 </Button>
                 <Button onClick={handleCreateGroup} disabled={isSubmitting}>
                   {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Create Group
+                  {groupMode === "edit" ? "Save Changes" : "Create Group"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -575,6 +761,7 @@ export default function ChartOfAccountsPage() {
                     key={group.id}
                     group={group}
                     ledgersByGroup={ledgersByGroup}
+                    actions={treeActions}
                   />
                 ))}
               </div>
@@ -582,6 +769,54 @@ export default function ChartOfAccountsPage() {
           )}
         </CardContent>
       </Card>
+
+      <AlertDialog
+        open={!!deleteGroupTarget}
+        onOpenChange={(o) => !o && setDeleteGroupTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete ledger group?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteGroupTarget &&
+                `"${deleteGroupTarget.name}" will be permanently deleted. This fails if any ledgers or sub-groups still belong to it.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={performDeleteGroup}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!deleteLedgerTarget}
+        onOpenChange={(o) => !o && setDeleteLedgerTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete ledger?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteLedgerTarget &&
+                `"${deleteLedgerTarget.name}" will be permanently deleted. This fails if any vouchers reference this ledger.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={performDeleteLedger}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

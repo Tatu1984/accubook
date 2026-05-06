@@ -51,6 +51,7 @@ import { cn } from "@/shared/utils/common.util";
 import Link from "next/link";
 import { useOrganization } from "@/frontend/hooks/use-organization";
 import { toast } from "sonner";
+import { downloadCsv } from "@/frontend/utils/export-csv";
 
 // Types matching API response
 interface VoucherEntry {
@@ -242,6 +243,26 @@ export default function VouchersPage() {
     if (selectedType === "all") return vouchers;
     return vouchers.filter((v) => v.voucherType?.code === selectedType);
   }, [vouchers, selectedType]);
+
+  const handleExport = () => {
+    if (filteredVouchers.length === 0) {
+      toast.info("Nothing to export");
+      return;
+    }
+    const rows = filteredVouchers.map((v) => ({
+      Date: v.date,
+      "Voucher No.": v.voucherNumber,
+      Type: v.voucherType?.name ?? "",
+      Reference: v.referenceNo ?? "",
+      Narration: v.narration ?? "",
+      Debit: v.totalDebit,
+      Credit: v.totalCredit,
+      Status: v.status,
+      "Created By": v.createdBy?.name ?? "",
+    }));
+    downloadCsv(`vouchers-${new Date().toISOString().slice(0, 10)}`, rows);
+    toast.success(`Exported ${rows.length} vouchers`);
+  };
 
   // Summary stats
   const stats = React.useMemo(() => {
@@ -463,7 +484,7 @@ export default function VouchersPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline">
+          <Button variant="outline" onClick={handleExport}>
             <Download className="mr-2 h-4 w-4" />
             Export
           </Button>

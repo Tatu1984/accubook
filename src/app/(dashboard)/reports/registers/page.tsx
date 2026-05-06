@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useSearchParams } from "next/navigation";
 import { Loader2, FileText, AlertCircle } from "lucide-react";
 import { Button } from "@/frontend/components/ui/button";
 import {
@@ -43,7 +44,25 @@ function defaultPeriod() {
 }
 
 export default function RegistersPage() {
+  return (
+    <React.Suspense
+      fallback={
+        <div className="flex h-96 items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin" />
+        </div>
+      }
+    >
+      <RegistersInner />
+    </React.Suspense>
+  );
+}
+
+function RegistersInner() {
   const { organizationId, isLoading: orgLoading } = useOrganization();
+  const search = useSearchParams();
+  const initialTab =
+    search.get("tab") ?? (search.get("partyId") ? "party" : "sales");
+  const initialPartyId = search.get("partyId") ?? undefined;
 
   if (orgLoading) {
     return (
@@ -69,7 +88,7 @@ export default function RegistersPage() {
         </p>
       </div>
 
-      <Tabs defaultValue="sales">
+      <Tabs defaultValue={initialTab}>
         <TabsList>
           <TabsTrigger value="sales">Sales Register</TabsTrigger>
           <TabsTrigger value="purchase">Purchase Register</TabsTrigger>
@@ -83,7 +102,7 @@ export default function RegistersPage() {
           <PurchaseRegister orgId={organizationId} />
         </TabsContent>
         <TabsContent value="party" className="mt-6">
-          <PartyStatement orgId={organizationId} />
+          <PartyStatement orgId={organizationId} initialPartyId={initialPartyId} />
         </TabsContent>
       </Tabs>
     </div>
@@ -437,11 +456,17 @@ type StatementResp = {
 };
 type Party = { id: string; name: string; type: string };
 
-function PartyStatement({ orgId }: { orgId: string }) {
+function PartyStatement({
+  orgId,
+  initialPartyId,
+}: {
+  orgId: string;
+  initialPartyId?: string;
+}) {
   const initial = defaultPeriod();
   const [from, setFrom] = React.useState(initial.from);
   const [to, setTo] = React.useState(initial.to);
-  const [partyId, setPartyId] = React.useState<string>("");
+  const [partyId, setPartyId] = React.useState<string>(initialPartyId ?? "");
   const [parties, setParties] = React.useState<Party[]>([]);
   const [data, setData] = React.useState<StatementResp | null>(null);
   const [loading, setLoading] = React.useState(false);

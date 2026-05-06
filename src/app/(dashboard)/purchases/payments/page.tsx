@@ -70,6 +70,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
 import { cn } from "@/shared/utils/common.util";
 import { useOrganization } from "@/frontend/hooks/use-organization";
 import { toast } from "sonner";
+import { downloadCsv } from "@/frontend/utils/export-csv";
 
 interface Payment {
   id: string;
@@ -471,7 +472,27 @@ export default function PaymentsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline">
+          <Button
+            variant="outline"
+            onClick={() => {
+              if (filteredPayments.length === 0) {
+                toast.info("Nothing to export");
+                return;
+              }
+              const rows = filteredPayments.map((p) => ({
+                Date: p.date,
+                "Payment No.": p.paymentNumber,
+                Vendor: p.party?.name ?? "",
+                Bill: p.bill?.billNumber ?? "",
+                Amount: p.amount,
+                Mode: p.paymentMode,
+                "Bank Account": p.bankAccount?.name ?? "",
+                Status: p.status,
+              }));
+              downloadCsv(`payments-${new Date().toISOString().slice(0, 10)}`, rows);
+              toast.success(`Exported ${rows.length} payments`);
+            }}
+          >
             <Download className="mr-2 h-4 w-4" />
             Export
           </Button>

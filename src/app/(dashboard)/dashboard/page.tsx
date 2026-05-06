@@ -122,7 +122,10 @@ export default function DashboardPage() {
   const [paymentDialogOpen, setPaymentDialogOpen] = React.useState(false);
 
   const fetchDashboardData = React.useCallback(async () => {
-    if (!organizationId) return;
+    if (!organizationId) {
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
     setError(null);

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { Button } from "@/frontend/components/ui/button";
 import { Input } from "@/frontend/components/ui/input";
 import {
@@ -113,6 +114,7 @@ export default function PartiesPage() {
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [partyToDelete, setPartyToDelete] = React.useState<string | null>(null);
+  const [editingPartyId, setEditingPartyId] = React.useState<string | null>(null);
 
   // Form state
   const [formData, setFormData] = React.useState({
@@ -177,41 +179,62 @@ export default function PartiesPage() {
     setSaving(true);
 
     try {
-      const response = await fetch(
-        `/api/organizations/${organizationId}/parties`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: formData.name,
-            type: formData.type,
-            email: formData.email || undefined,
-            phone: formData.phone || undefined,
-            gstNo: formData.gstNo || undefined,
-            panNo: formData.panNo || undefined,
-            creditLimit: formData.creditLimit ? parseFloat(formData.creditLimit) : undefined,
-            creditDays: formData.creditDays ? parseInt(formData.creditDays) : undefined,
-            billingAddress: formData.billingAddress || undefined,
-            billingCity: formData.city || undefined,
-            billingState: formData.state || undefined,
-          }),
-        }
-      );
+      const url = editingPartyId
+        ? `/api/organizations/${organizationId}/parties/${editingPartyId}`
+        : `/api/organizations/${organizationId}/parties`;
+      const response = await fetch(url, {
+        method: editingPartyId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: formData.name,
+          type: formData.type,
+          email: formData.email || undefined,
+          phone: formData.phone || undefined,
+          gstNo: formData.gstNo || undefined,
+          panNo: formData.panNo || undefined,
+          creditLimit: formData.creditLimit ? parseFloat(formData.creditLimit) : undefined,
+          creditDays: formData.creditDays ? parseInt(formData.creditDays) : undefined,
+          billingAddress: formData.billingAddress || undefined,
+          billingCity: formData.city || undefined,
+          billingState: formData.state || undefined,
+        }),
+      });
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || "Failed to create party");
+        throw new Error(error.error || "Failed to save party");
       }
 
-      toast.success("Party created successfully");
+      toast.success(editingPartyId ? "Party updated" : "Party created successfully");
       setIsDialogOpen(false);
+      setEditingPartyId(null);
       resetForm();
       fetchParties();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to create party");
+      toast.error(error instanceof Error ? error.message : "Failed to save party");
     } finally {
       setSaving(false);
     }
+  };
+
+  const openEditParty = (p: Party) => {
+    setEditingPartyId(p.id);
+    setFormData({
+      name: p.name,
+      type: p.type,
+      email: p.email || "",
+      phone: p.phone || "",
+      gstNo: p.gstNo || "",
+      panNo: p.panNo || "",
+      creditLimit: p.creditLimit ? String(p.creditLimit) : "",
+      creditDays: p.creditDays ? String(p.creditDays) : "",
+      billingAddress: p.billingAddress || "",
+      city: p.billingCity || "",
+      state: p.billingState || "",
+      openingBalance: p.openingBalance || "",
+      openingBalanceType: p.openingBalanceType || "DEBIT",
+    });
+    setIsDialogOpen(true);
   };
 
   // Handle delete
@@ -330,9 +353,23 @@ export default function PartiesPage() {
             Manage customers, vendors, and other business contacts
           </p>
         </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <Dialog
+          open={isDialogOpen}
+          onOpenChange={(o) => {
+            setIsDialogOpen(o);
+            if (!o) {
+              setEditingPartyId(null);
+              resetForm();
+            }
+          }}
+        >
           <DialogTrigger asChild>
-            <Button onClick={resetForm}>
+            <Button
+              onClick={() => {
+                setEditingPartyId(null);
+                resetForm();
+              }}
+            >
               <Plus className="mr-2 h-4 w-4" />
               Add Party
             </Button>
@@ -340,7 +377,7 @@ export default function PartiesPage() {
           <DialogContent className="max-w-2xl">
             <form onSubmit={handleSubmit}>
               <DialogHeader>
-                <DialogTitle>Add New Party</DialogTitle>
+                <DialogTitle>{editingPartyId ? "Edit Party" : "Add New Party"}</DialogTitle>
                 <DialogDescription>
                   Add a new customer or vendor to your contacts
                 </DialogDescription>
@@ -503,7 +540,7 @@ export default function PartiesPage() {
                 </Button>
                 <Button type="submit" disabled={saving}>
                   {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  {saving ? "Saving..." : "Save Party"}
+                  {saving ? "Saving..." : editingPartyId ? "Save Changes" : "Save Party"}
                 </Button>
               </DialogFooter>
             </form>
@@ -678,17 +715,21 @@ export default function PartiesPage() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem>
-                                <Eye className="mr-2 h-4 w-4" />
-                                View Details
+                              <DropdownMenuItem asChild>
+                                <Link href={`/reports/registers?tab=party&partyId=${customer.id}`}>
+                                  <Eye className="mr-2 h-4 w-4" />
+                                  View Details
+                                </Link>
                               </DropdownMenuItem>
-                              <DropdownMenuItem>
+                              <DropdownMenuItem onSelect={() => openEditParty(customer)}>
                                 <Edit className="mr-2 h-4 w-4" />
                                 Edit
                               </DropdownMenuItem>
-                              <DropdownMenuItem>
-                                <CreditCard className="mr-2 h-4 w-4" />
-                                View Transactions
+                              <DropdownMenuItem asChild>
+                                <Link href={`/reports/registers?tab=party&partyId=${customer.id}`}>
+                                  <CreditCard className="mr-2 h-4 w-4" />
+                                  View Transactions
+                                </Link>
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 className="text-red-600"
@@ -822,17 +863,21 @@ export default function PartiesPage() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem>
-                                <Eye className="mr-2 h-4 w-4" />
-                                View Details
+                              <DropdownMenuItem asChild>
+                                <Link href={`/reports/registers?tab=party&partyId=${vendor.id}`}>
+                                  <Eye className="mr-2 h-4 w-4" />
+                                  View Details
+                                </Link>
                               </DropdownMenuItem>
-                              <DropdownMenuItem>
+                              <DropdownMenuItem onSelect={() => openEditParty(vendor)}>
                                 <Edit className="mr-2 h-4 w-4" />
                                 Edit
                               </DropdownMenuItem>
-                              <DropdownMenuItem>
-                                <CreditCard className="mr-2 h-4 w-4" />
-                                View Transactions
+                              <DropdownMenuItem asChild>
+                                <Link href={`/reports/registers?tab=party&partyId=${vendor.id}`}>
+                                  <CreditCard className="mr-2 h-4 w-4" />
+                                  View Transactions
+                                </Link>
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 className="text-red-600"

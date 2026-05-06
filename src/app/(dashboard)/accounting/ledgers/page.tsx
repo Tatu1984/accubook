@@ -59,6 +59,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
 import { cn } from "@/shared/utils/common.util";
 import { useOrganization } from "@/frontend/hooks/use-organization";
 import { toast } from "sonner";
+import { downloadCsv } from "@/frontend/utils/export-csv";
 
 interface LedgerGroup {
   id: string;
@@ -433,7 +434,29 @@ export default function LedgersPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline">
+          <Button
+            variant="outline"
+            onClick={() => {
+              if (ledgers.length === 0) {
+                toast.info("Nothing to export");
+                return;
+              }
+              const rows = ledgers.map((l) => ({
+                Code: l.code ?? "",
+                Name: l.name,
+                Group: l.group?.name ?? "",
+                Nature: l.group?.nature ?? "",
+                "Opening Balance": l.openingBalance,
+                "Opening Type": l.openingBalanceType,
+                "Current Balance": l.currentBalance,
+                GSTIN: l.gstNo ?? "",
+                PAN: l.panNo ?? "",
+                Active: l.isActive ? "Yes" : "No",
+              }));
+              downloadCsv(`ledgers-${new Date().toISOString().slice(0, 10)}`, rows);
+              toast.success(`Exported ${rows.length} ledgers`);
+            }}
+          >
             <Download className="mr-2 h-4 w-4" />
             Export
           </Button>
