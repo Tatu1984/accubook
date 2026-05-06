@@ -128,28 +128,48 @@ function LoginForm() {
           </form>
         </Card>
 
-        {/*
-          Demo credentials card. Currently shown unconditionally because
-          this deployment is treated as a demo (single seed admin org,
-          no real customers). When this product onboards real customers,
-          re-gate behind `process.env.NEXT_PUBLIC_DEMO === "true"` and
-          set the flag only on the demo deployment.
-        */}
-        <Card className="mt-4 bg-slate-50 dark:bg-slate-900 border-dashed">
-          <CardContent className="pt-4 pb-4">
-            <p className="text-sm font-medium text-center mb-2">Demo Credentials</p>
-            <div className="text-sm text-muted-foreground space-y-1">
-              <p><span className="font-medium">Email:</span> admin@accubook.com</p>
-              <p><span className="font-medium">Password:</span> password123!</p>
-            </div>
-          </CardContent>
-        </Card>
+        <DemoCredentialsCard />
 
         <p className="mt-6 text-center text-sm text-muted-foreground">
           Enterprise Accounting Platform
         </p>
       </div>
     </div>
+  );
+}
+
+/*
+  Demo credentials card. Currently shown unconditionally because
+  this deployment is treated as a demo (single seed admin org,
+  no real customers). Rendered in BOTH the live form and the
+  Suspense fallback so the credentials are visible during SSR
+  too — `useSearchParams()` in LoginForm forces dynamic rendering,
+  meaning the fallback is what gets streamed before hydration.
+  When this product onboards real customers, re-gate behind
+  `process.env.NEXT_PUBLIC_DEMO === "true"` and set the flag only
+  on the demo deployment.
+*/
+function DemoCredentialsCard() {
+  return (
+    <Card className="mt-4 bg-slate-50 dark:bg-slate-900 border-dashed">
+      <CardContent className="pt-4 pb-4">
+        <p className="text-sm font-semibold text-center mb-2">Demo Credentials</p>
+        <div className="text-sm space-y-1">
+          <p>
+            <span className="font-medium">Email:</span>{" "}
+            <code className="bg-muted px-1 py-0.5 rounded font-mono text-xs">
+              admin@accubook.com
+            </code>
+          </p>
+          <p>
+            <span className="font-medium">Password:</span>{" "}
+            <code className="bg-muted px-1 py-0.5 rounded font-mono text-xs">
+              password123!
+            </code>
+          </p>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -169,13 +189,19 @@ function LoginFormFallback() {
           <CardHeader className="space-y-1">
             <CardTitle className="text-2xl text-center">Welcome back</CardTitle>
             <CardDescription className="text-center">
-              Loading...
+              Loading…
             </CardDescription>
           </CardHeader>
           <CardContent className="flex justify-center py-8">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </CardContent>
         </Card>
+
+        <DemoCredentialsCard />
+
+        <p className="mt-6 text-center text-sm text-muted-foreground">
+          Enterprise Accounting Platform
+        </p>
       </div>
     </div>
   );

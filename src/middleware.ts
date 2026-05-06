@@ -14,8 +14,10 @@ export function middleware(request: NextRequest) {
   const publicRoutes = ["/login", "/register", "/forgot-password", "/reset-password"];
   const isPublicRoute = publicRoutes.some(route => pathname.startsWith(route));
 
-  // API routes that don't require authentication
-  const publicApiRoutes = ["/api/auth"];
+  // API routes that don't require authentication.
+  // /api/health: public ops probe (uptime checks, deploy-readiness gates).
+  // /api/hsn-search: public lookup helper used pre-login on quoting flows.
+  const publicApiRoutes = ["/api/auth", "/api/health", "/api/hsn-search"];
   const isPublicApiRoute = publicApiRoutes.some(route => pathname.startsWith(route));
 
   // Static files - skip middleware
