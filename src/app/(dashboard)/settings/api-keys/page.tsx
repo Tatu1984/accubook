@@ -350,6 +350,7 @@ export default function ApiKeysPage() {
   const [loading, setLoading] = React.useState(true);
   const [createOpen, setCreateOpen] = React.useState(false);
   const [revokeTarget, setRevokeTarget] = React.useState<ApiKeyRow | null>(null);
+  const [hardDeleteTarget, setHardDeleteTarget] = React.useState<ApiKeyRow | null>(null);
 
   // Create form state
   const [name, setName] = React.useState("");
@@ -570,6 +571,25 @@ export default function ApiKeysPage() {
     }
   }
 
+  /** Permanent (hard) delete of an already-revoked API key. */
+  async function handleHardDelete() {
+    if (!organizationId || !hardDeleteTarget) return;
+    try {
+      const r = await fetch(
+        `/api/organizations/${organizationId}/api-keys/${hardDeleteTarget.id}?force=true`,
+        { method: "DELETE" }
+      );
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || "Failed to delete");
+      toast.success(`Deleted "${hardDeleteTarget.name}" permanently`);
+      fetchKeys();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete key");
+    } finally {
+      setHardDeleteTarget(null);
+    }
+  }
+
   async function copyToken() {
     if (!newKey) return;
     try {
@@ -757,14 +777,25 @@ export default function ApiKeysPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      {k.isActive && (
+                      {k.isActive ? (
                         <Button
                           variant="ghost"
                           size="icon"
                           aria-label="Revoke key"
+                          title="Revoke this key (stops working immediately, row stays for audit)"
                           onClick={() => setRevokeTarget(k)}
                         >
                           <Trash2 className="h-4 w-4 text-red-600" />
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label="Delete revoked key permanently"
+                          title="Delete permanently — removes the row from this list"
+                          onClick={() => setHardDeleteTarget(k)}
+                        >
+                          <Trash2 className="h-4 w-4 text-muted-foreground" />
                         </Button>
                       )}
                     </TableCell>
@@ -1254,6 +1285,65 @@ invoices = resp.json()`}</CodeBlock>
               className="bg-red-600 hover:bg-red-700"
             >
               Revoke
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* HARD DELETE CONFIRM (for already-revoked keys only) */}
+      <AlertDialog
+        open={!!hardDeleteTarget}
+        onOpenChange={(o) => !o && setHardDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Trash2 className="h-5 w-5 text-red-600" />
+              Delete this revoked key permanently?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 pt-1">
+                <div>
+                  {hardDeleteTarget && (
+                    <>
+                      <strong className="text-foreground">
+                        {hardDeleteTarget.name}
+                      </strong>{" "}
+                      <code className="text-xs bg-muted px-1 py-0.5 rounded">
+                        acb_live_{hardDeleteTarget.keyPrefix}…
+                      </code>{" "}
+                      will be removed from the API keys list.
+                    </>
+                  )}
+                </div>
+                <div className="rounded-md border bg-muted/40 p-2 text-xs space-y-1">
+                  <div className="flex items-start gap-1.5">
+                    <Check className="h-3 w-3 mt-0.5 text-green-600 flex-shrink-0" />
+                    <span>
+                      The audit log entry stays — `keyPrefix` and original
+                      creation/revoke history remain queryable in Settings →
+                      Audit Logs.
+                    </span>
+                  </div>
+                  <div className="flex items-start gap-1.5">
+                    <AlertTriangle className="h-3 w-3 mt-0.5 text-yellow-600 flex-shrink-0" />
+                    <span>
+                      The key was already revoked, so this only changes what you
+                      see in this list. No security impact.
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleHardDelete}
+              className="bg-red-600 hover:bg-red-700 gap-1.5"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete permanently
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
