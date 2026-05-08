@@ -3,7 +3,7 @@ import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { D, sum, toNumber } from "@/backend/utils/money";
 import { Prisma } from "@/generated/prisma";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { logger } from "@/backend/utils/logger";
 
 export const runtime = "nodejs";
@@ -371,42 +371,68 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
       return NextResponse.json({ data, headers, sheetName });
     }
 
-    const worksheet = XLSX.utils.json_to_sheet(data);
-    const workbook = XLSX.utils.book_new();
-
-    // Add header row with organization info
-    XLSX.utils.sheet_add_aoa(worksheet, [
-      [organization?.name || ""],
-      [organization?.address || ""],
-      [organization?.gstNo ? `GSTIN: ${organization.gstNo}` : ""],
-      [sheetName],
-      [`Generated: ${new Date().toLocaleString()}`],
-      [],
-    ], { origin: "A1" });
-
-    // Shift data down
-    const range = XLSX.utils.decode_range(worksheet["!ref"] || "A1");
-    range.s.r = 6; // Start data from row 7
-    worksheet["!ref"] = XLSX.utils.encode_range(range);
-
-    XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+    // Build the workbook with ExcelJS (replaced xlsx after CVE GHSA-4r6h-8v6p-xvw6
+    // — write-only usage so the parse-side prototype-pollution wasn't reachable
+    // for us, but exceljs is the maintained alternative anyway).
+    const fileSafeName = sheetName.replace(/\s/g, "_");
+    const today = new Date().toISOString().split("T")[0];
 
     if (format === "csv") {
-      const csv = XLSX.utils.sheet_to_csv(worksheet);
-      return new NextResponse(csv, {
+      const headerRows = [
+        [organization?.name || ""],
+        [organization?.address || ""],
+        [organization?.gstNo ? `GSTIN: ${organization.gstNo}` : ""],
+        [sheetName],
+        [`Generated: ${new Date().toLocaleString()}`],
+        [],
+      ];
+      const escape = (v: unknown) => {
+        const s = v === null || v === undefined ? "" : String(v);
+        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const lines = [
+        ...headerRows.map((row) => row.map(escape).join(",")),
+        headers.map(escape).join(","),
+        ...data.map((d) =>
+          headers.map((h) => escape((d as Record<string, unknown>)[h])).join(",")
+        ),
+      ];
+      return new NextResponse(lines.join("\n"), {
         headers: {
           "Content-Type": "text/csv",
-          "Content-Disposition": `attachment; filename="${sheetName.replace(/\s/g, "_")}_${new Date().toISOString().split("T")[0]}.csv"`,
+          "Content-Disposition": `attachment; filename="${fileSafeName}_${today}.csv"`,
         },
       });
     }
 
-    // Default to XLSX
-    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
-    return new NextResponse(buffer, {
+    // Default to XLSX (built with exceljs).
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "AccuBook";
+    workbook.created = new Date();
+    const sheet = workbook.addWorksheet(sheetName);
+
+    // Org header
+    sheet.addRow([organization?.name || ""]);
+    sheet.addRow([organization?.address || ""]);
+    sheet.addRow([organization?.gstNo ? `GSTIN: ${organization.gstNo}` : ""]);
+    sheet.addRow([sheetName]);
+    sheet.addRow([`Generated: ${new Date().toLocaleString()}`]);
+    sheet.addRow([]);
+
+    // Column headers
+    sheet.addRow(headers);
+
+    // Data rows
+    for (const row of data) {
+      sheet.addRow(headers.map((h) => (row as Record<string, unknown>)[h] ?? ""));
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    return new NextResponse(buffer as unknown as BodyInit, {
       headers: {
-        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Content-Disposition": `attachment; filename="${sheetName.replace(/\s/g, "_")}_${new Date().toISOString().split("T")[0]}.xlsx"`,
+        "Content-Type":
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="${fileSafeName}_${today}.xlsx"`,
       },
     });
   } catch (error) {

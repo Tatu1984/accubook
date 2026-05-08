@@ -4,14 +4,8 @@ import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
 import { D, sum } from "@/backend/utils/money";
-import {
-  applyLedgerEntries,
-  generateVoucherNumber,
-  getFiscalYearForDate,
-  getOrCreateNamedLedger,
-  getVoucherTypeByCode,
-} from "@/backend/utils/posting";
 import { writeAudit } from "@/backend/utils/audit";
+import { postWorkOrderJv } from "@/backend/services/manufacturing/post-wo-journal";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -171,50 +165,22 @@ export const POST = withOrgAuth<{ workOrderId: string }>(async (request, { orgId
 
       // 2. Post the JV: Dr Stock-in-Hand / Cr Work in Progress (reverses
       //    the WIP capitalisation booked at issue).
-      const wipLedger = await getOrCreateNamedLedger(tx, orgId, "Work in Progress", "Stock-in-Hand");
-      const stockLedger = await getOrCreateNamedLedger(tx, orgId, "Stock-in-Hand", "Stock-in-Hand");
-
-      const voucherType = await getVoucherTypeByCode(tx, "JOURNAL");
-      const fy = await getFiscalYearForDate(tx, orgId, validated.date);
-      const voucherNumber = await generateVoucherNumber(tx, orgId, voucherType.id, fy.id, "WO-COMP");
-
-      const voucher = await tx.voucher.create({
-        data: {
-          organizationId: orgId,
-          fiscalYearId: fy.id,
-          voucherTypeId: voucherType.id,
-          voucherNumber,
-          date: validated.date,
-          narration: `Completion of WO ${workOrder.workOrderNumber} — ${completed.toString()} units of ${workOrder.item.name}`,
-          totalDebit: wipValue,
-          totalCredit: wipValue,
-          status: "APPROVED",
-          isPosted: true,
-          postedAt: new Date(),
-          createdById: userId,
-          metadata: {
-            kind: "WORK_ORDER_COMPLETE",
-            workOrderId: workOrder.id,
-            workOrderNumber: workOrder.workOrderNumber,
-            completedQuantity: completed.toString(),
-            scrapQuantity: scrap.toString(),
-            fgUnitCost: fgUnitCost.toString(),
-          },
+      const { voucherId } = await postWorkOrderJv({
+        tx,
+        orgId,
+        userId,
+        date: validated.date,
+        amount: wipValue,
+        kind: "COMPLETE",
+        workOrderId: workOrder.id,
+        workOrderNumber: workOrder.workOrderNumber,
+        narration: `Completion of WO ${workOrder.workOrderNumber} — ${completed.toString()} units of ${workOrder.item.name}`,
+        extraMetadata: {
+          completedQuantity: completed.toString(),
+          scrapQuantity: scrap.toString(),
+          fgUnitCost: fgUnitCost.toString(),
         },
-        select: { id: true },
       });
-
-      await tx.voucherEntry.createMany({
-        data: [
-          { voucherId: voucher.id, ledgerId: stockLedger.id, debitAmount: wipValue, creditAmount: D(0), sequence: 0 },
-          { voucherId: voucher.id, ledgerId: wipLedger.id, debitAmount: D(0), creditAmount: wipValue, sequence: 1 },
-        ],
-      });
-
-      await applyLedgerEntries(tx, [
-        { ledgerId: stockLedger.id, debitAmount: wipValue, creditAmount: D(0) },
-        { ledgerId: wipLedger.id, debitAmount: D(0), creditAmount: wipValue },
-      ]);
 
       // 3. Transition WO to COMPLETED.
       const updated = await tx.workOrder.update({
@@ -235,7 +201,7 @@ export const POST = withOrgAuth<{ workOrderId: string }>(async (request, { orgId
         entityId: workOrder.id,
         newData: {
           workOrderNumber: workOrder.workOrderNumber,
-          voucherId: voucher.id,
+          voucherId,
           warehouseId: grnWarehouseId,
           completedQuantity: completed.toString(),
           scrapQuantity: scrap.toString(),
@@ -244,7 +210,7 @@ export const POST = withOrgAuth<{ workOrderId: string }>(async (request, { orgId
         },
       });
 
-      return { workOrder: updated, voucherId: voucher.id, wipValue, fgUnitCost };
+      return { workOrder: updated, voucherId, wipValue, fgUnitCost };
     });
 
     return NextResponse.json(

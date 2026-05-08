@@ -39,10 +39,10 @@ import { Badge } from "@/frontend/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
 import { Switch } from "@/frontend/components/ui/switch";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
+  
+  
+  
+  
 } from "@/frontend/components/ui/tooltip";
 import {
   Alert,
@@ -66,7 +66,6 @@ import {
   Clock,
   Settings,
   Info,
-  HelpCircle,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -549,7 +548,7 @@ Generated on: ${new Date().toLocaleDateString()}
                       <TableCell>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
+                            <Button variant="ghost" size="icon" aria-label="Open actions menu">
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
@@ -663,7 +662,7 @@ Generated on: ${new Date().toLocaleDateString()}
                       <TableCell>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
+                            <Button variant="ghost" size="icon" aria-label="Open actions menu">
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>

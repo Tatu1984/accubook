@@ -4,14 +4,8 @@ import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
 import { D, sum } from "@/backend/utils/money";
-import {
-  applyLedgerEntries,
-  generateVoucherNumber,
-  getFiscalYearForDate,
-  getOrCreateNamedLedger,
-  getVoucherTypeByCode,
-} from "@/backend/utils/posting";
 import { writeAudit } from "@/backend/utils/audit";
+import { postWorkOrderJv } from "@/backend/services/manufacturing/post-wo-journal";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -194,48 +188,18 @@ export const POST = withOrgAuth<{ workOrderId: string }>(async (request, { orgId
       const totalIssueValue = sum(movements.map((m) => m.totalValue));
 
       // 2. Post the JV: Dr Work in Progress / Cr Stock-in-Hand.
-      const wipLedger = await getOrCreateNamedLedger(tx, orgId, "Work in Progress", "Stock-in-Hand");
-      const stockLedger = await getOrCreateNamedLedger(tx, orgId, "Stock-in-Hand", "Stock-in-Hand");
-
-      const voucherType = await getVoucherTypeByCode(tx, "JOURNAL");
-      const fy = await getFiscalYearForDate(tx, orgId, validated.date);
-      const voucherNumber = await generateVoucherNumber(tx, orgId, voucherType.id, fy.id, "WO-ISSUE");
-
-      const voucher = await tx.voucher.create({
-        data: {
-          organizationId: orgId,
-          fiscalYearId: fy.id,
-          voucherTypeId: voucherType.id,
-          voucherNumber,
-          date: validated.date,
-          narration: `Material issue to WO ${workOrder.workOrderNumber}`,
-          totalDebit: totalIssueValue,
-          totalCredit: totalIssueValue,
-          status: "APPROVED",
-          isPosted: true,
-          postedAt: new Date(),
-          createdById: userId,
-          metadata: {
-            kind: "WORK_ORDER_ISSUE",
-            workOrderId: workOrder.id,
-            workOrderNumber: workOrder.workOrderNumber,
-            componentCount: movements.length,
-          },
-        },
-        select: { id: true },
+      const { voucherId } = await postWorkOrderJv({
+        tx,
+        orgId,
+        userId,
+        date: validated.date,
+        amount: totalIssueValue,
+        kind: "ISSUE",
+        workOrderId: workOrder.id,
+        workOrderNumber: workOrder.workOrderNumber,
+        narration: `Material issue to WO ${workOrder.workOrderNumber}`,
+        extraMetadata: { componentCount: movements.length },
       });
-
-      await tx.voucherEntry.createMany({
-        data: [
-          { voucherId: voucher.id, ledgerId: wipLedger.id, debitAmount: totalIssueValue, creditAmount: D(0), sequence: 0 },
-          { voucherId: voucher.id, ledgerId: stockLedger.id, debitAmount: D(0), creditAmount: totalIssueValue, sequence: 1 },
-        ],
-      });
-
-      await applyLedgerEntries(tx, [
-        { ledgerId: wipLedger.id, debitAmount: totalIssueValue, creditAmount: D(0) },
-        { ledgerId: stockLedger.id, debitAmount: D(0), creditAmount: totalIssueValue },
-      ]);
 
       // 3. Transition WO to IN_PROGRESS.
       const updated = await tx.workOrder.update({
@@ -254,14 +218,14 @@ export const POST = withOrgAuth<{ workOrderId: string }>(async (request, { orgId
         entityId: workOrder.id,
         newData: {
           workOrderNumber: workOrder.workOrderNumber,
-          voucherId: voucher.id,
+          voucherId,
           warehouseId: issueWarehouseId,
           totalIssueValue: totalIssueValue.toString(),
           componentCount: movements.length,
         },
       });
 
-      return { workOrder: updated, voucherId: voucher.id, totalIssueValue, movements };
+      return { workOrder: updated, voucherId, totalIssueValue, movements };
     });
 
     return NextResponse.json(

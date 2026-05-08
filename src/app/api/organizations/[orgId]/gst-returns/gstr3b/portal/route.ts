@@ -5,6 +5,11 @@ import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
 import { computeGstr3b } from "@/backend/services/gst/gstr3b";
 import { gstr3bToPortalJson } from "@/backend/services/gst/gstr3b-portal";
+import {
+  monthlyPortalFilename,
+  requireOrgGstin,
+  respondPortalJson,
+} from "@/backend/services/gst/portal-shell";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,34 +43,19 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
     const to = new Date(`${parsed.data.to}T23:59:59.999Z`);
     if (from > to) return badRequest("`from` must be on or before `to`");
 
-    const org = await prisma.organization.findUnique({
-      where: { id: orgId },
-      select: { gstNo: true },
-    });
-    if (!org?.gstNo) {
-      return badRequest(
-        "Organization does not have a GSTIN configured. Add it in Settings → Organization."
-      );
-    }
+    const gstin = await requireOrgGstin(orgId);
+    if (!gstin.ok) return gstin.response;
 
     const result = await computeGstr3b(prisma, orgId, { from, to });
     const payload = gstr3bToPortalJson(result, {
-      gstin: org.gstNo,
+      gstin: gstin.gstin,
       periodStart: from,
     });
 
-    if (parsed.data.download === "true") {
-      const period = `${String(from.getUTCMonth() + 1).padStart(2, "0")}${from.getUTCFullYear()}`;
-      const filename = `GSTR3B_${org.gstNo.toUpperCase()}_${period}.json`;
-      return new NextResponse(JSON.stringify(payload, null, 2), {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
-          "Content-Disposition": `attachment; filename="${filename}"`,
-        },
-      });
-    }
-    return NextResponse.json(payload);
+    return respondPortalJson(payload, {
+      wantsDownload: parsed.data.download === "true",
+      filename: monthlyPortalFilename("GSTR3B", gstin.gstin, from),
+    });
   } catch (error) {
     logger.error({ err: error }, "Error generating GSTR-3B portal JSON");
     return NextResponse.json(

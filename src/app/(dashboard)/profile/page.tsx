@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import {
-  User,
+  
   Loader2,
   Save,
   Camera,
@@ -61,7 +61,7 @@ export default function ProfilePage() {
       localStorage.setItem("userProfile", JSON.stringify(profile));
 
       toast.success("Profile updated successfully");
-    } catch (error) {
+    } catch {
       toast.error("Failed to update profile");
     } finally {
       setIsSaving(false);
@@ -74,7 +74,7 @@ export default function ProfilePage() {
     if (savedProfile) {
       try {
         setProfile(JSON.parse(savedProfile));
-      } catch (e) {
+      } catch {
         // Ignore parse errors
       }
     }

@@ -12,9 +12,6 @@ import { Button } from "@/frontend/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/frontend/components/ui/card";
 import { Badge } from "@/frontend/components/ui/badge";
 import { useOrganization } from "@/frontend/hooks/use-organization";

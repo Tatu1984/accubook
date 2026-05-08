@@ -14,7 +14,6 @@ import {
   Users,
   Landmark,
   BarChart3,
-  Settings,
   LogOut,
   ChevronDown,
   FileText,
@@ -71,7 +70,6 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/frontend/components/ui/collapsible";
-import { cn } from "@/shared/utils/common.util";
 
 const navigation = [
   {
@@ -246,7 +244,11 @@ export function AppSidebar() {
                   >
                     <SidebarMenuItem>
                       <CollapsibleTrigger asChild>
-                        <SidebarMenuButton>
+                        <SidebarMenuButton
+                          data-testid={`sidebar-section-${item.title
+                            .toLowerCase()
+                            .replace(/[^a-z0-9]+/g, "-")}`}
+                        >
                           <item.icon className="h-4 w-4" />
                           <span>{item.title}</span>
                           <ChevronDown className="ml-auto h-4 w-4 transition-transform group-data-[state=open]/collapsible:rotate-180" />
@@ -260,7 +262,12 @@ export function AppSidebar() {
                                 asChild
                                 isActive={pathname === child.href}
                               >
-                                <Link href={child.href}>
+                                <Link
+                                  href={child.href}
+                                  data-testid={`sidebar-link-${child.href
+                                    .replace(/^\//, "")
+                                    .replace(/[^a-z0-9]+/gi, "-")}`}
+                                >
                                   <child.icon className="h-4 w-4" />
                                   <span>{child.title}</span>
                                 </Link>

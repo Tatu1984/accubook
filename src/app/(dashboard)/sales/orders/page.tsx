@@ -46,7 +46,6 @@ import {
 } from "@/frontend/components/ui/select";
 import { Label } from "@/frontend/components/ui/label";
 import { Badge } from "@/frontend/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
 import {
   Plus,
   Search,
@@ -609,7 +608,7 @@ export default function SalesOrdersPage() {
                     <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon">
+                          <Button variant="ghost" size="icon" aria-label="Open actions menu">
                             <MoreHorizontal className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>

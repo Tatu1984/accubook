@@ -43,8 +43,8 @@ import {
   Plus,
   Search,
   Clock,
-  Calendar as CalendarIcon,
-  Users,
+  Calendar as 
+  
   MoreHorizontal,
   Download,
   Eye,
@@ -429,7 +429,7 @@ export default function AttendancePage() {
                       <TableCell>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
+                            <Button variant="ghost" size="icon" aria-label="Open actions menu">
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
@@ -522,7 +522,7 @@ export default function AttendancePage() {
                       <TableCell>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
+                            <Button variant="ghost" size="icon" aria-label="Open actions menu">
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>

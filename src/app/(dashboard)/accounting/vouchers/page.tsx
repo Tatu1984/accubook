@@ -205,7 +205,7 @@ export default function VouchersPage() {
 
       toast.success("Voucher deleted successfully");
       fetchVouchers();
-    } catch (err) {
+    } catch {
       toast.error("Failed to delete voucher");
     } finally {
       setDeleteDialogOpen(false);
@@ -233,7 +233,7 @@ export default function VouchersPage() {
 
       toast.success(`Voucher ${newStatus.toLowerCase()}`);
       fetchVouchers();
-    } catch (err) {
+    } catch {
       toast.error("Failed to update voucher status");
     }
   };

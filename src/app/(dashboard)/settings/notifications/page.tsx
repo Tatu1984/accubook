@@ -24,7 +24,7 @@ import {
   CardTitle,
 } from "@/frontend/components/ui/card";
 import { Badge } from "@/frontend/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
 import { ScrollArea } from "@/frontend/components/ui/scroll-area";
 import { cn } from "@/shared/utils/common.util";
 

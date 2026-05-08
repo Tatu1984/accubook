@@ -40,7 +40,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/frontend/components/
 import { Switch } from "@/frontend/components/ui/switch";
 import {
   Plus,
-  Search,
   GitBranch,
   MoreHorizontal,
   Edit,
@@ -48,10 +47,7 @@ import {
   CheckCircle,
   XCircle,
   Clock,
-  ArrowRight,
-  Users,
   FileCheck,
-  AlertCircle,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -512,7 +508,7 @@ export default function ApprovalsPage() {
                       <TableCell>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
+                            <Button variant="ghost" size="icon" aria-label="Open actions menu">
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>

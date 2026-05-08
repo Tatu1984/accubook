@@ -140,7 +140,7 @@ function CostCenterTree({
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon">
+                <Button variant="ghost" size="icon" aria-label="Open actions menu">
                   <MoreHorizontal className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
@@ -323,7 +323,7 @@ export default function CostCentersPage() {
 
       toast.success("Cost center deleted successfully");
       fetchCostCenters();
-    } catch (error) {
+    } catch {
       toast.error("Failed to delete cost center");
     } finally {
       setDeleteDialogOpen(false);

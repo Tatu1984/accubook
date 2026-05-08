@@ -14,13 +14,11 @@ import {
   Clock,
   RefreshCw,
   AlertTriangle,
-  Calendar,
 } from "lucide-react";
 import { Button } from "@/frontend/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/frontend/components/ui/card";

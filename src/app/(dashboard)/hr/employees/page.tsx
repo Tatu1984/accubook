@@ -11,10 +11,6 @@ import {
   ArrowUpDown,
   Download,
   Upload,
-  User,
-  Mail,
-  Phone,
-  Building,
   Calendar,
   FileText,
   Loader2,
@@ -23,7 +19,6 @@ import { Button } from "@/frontend/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/frontend/components/ui/card";
@@ -66,7 +61,7 @@ import {
 } from "@/frontend/components/ui/select";
 import { Checkbox } from "@/frontend/components/ui/checkbox";
 import { DataTable } from "@/frontend/components/ui/data-table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/frontend/components/ui/avatar";
 import { cn } from "@/shared/utils/common.util";
 import { useOrganization } from "@/frontend/hooks/use-organization";
@@ -561,7 +556,7 @@ export default function EmployeesPage() {
       if (!response.ok) throw new Error("Failed to delete");
       toast.success("Employee deactivated successfully");
       fetchEmployees();
-    } catch (error) {
+    } catch {
       toast.error("Failed to deactivate employee");
     } finally {
       setDeleteDialogOpen(false);

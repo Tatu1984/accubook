@@ -181,8 +181,8 @@ export async function computeGstr3b(
     // The portal accepts net values per cell, so signed accumulation is correct.
     const sign = inv.type === "CREDIT_NOTE" ? -1 : 1;
 
-    let isZeroRated = inv.supplyType === "EXPORT";
-    let isNonGst = false;          // not yet modeled
+    const isZeroRated = inv.supplyType === "EXPORT";
+    const isNonGst = false;          // not yet modeled
     let isNilOrExempt = false;
     let totalTaxOnInvoice = D(0);
 
@@ -248,9 +248,9 @@ export async function computeGstr3b(
   const inward_interExempt = D(0);
   const inward_interNonGst = D(0);
   let _inwardIntraExempt = inward_intraExempt;
-  let _inwardIntraNonGst = inward_intraNonGst;
+  const _inwardIntraNonGst = inward_intraNonGst;
   let _inwardInterExempt = inward_interExempt;
-  let _inwardInterNonGst = inward_interNonGst;
+  const _inwardInterNonGst = inward_interNonGst;
 
   for (const bill of bills) {
     const isInter = bill.supplyType === "INTERSTATE" || bill.supplyType === "IMPORT";

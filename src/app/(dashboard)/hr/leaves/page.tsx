@@ -21,7 +21,6 @@ import {
 import { Badge } from "@/frontend/components/ui/badge";
 import { DataTable } from "@/frontend/components/ui/data-table";
 import { useOrganization } from "@/frontend/hooks/use-organization";
-import { toast } from "sonner";
 
 interface LeaveRequest {
   id: string;

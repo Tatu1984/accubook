@@ -5,9 +5,6 @@ import { ColumnDef } from "@tanstack/react-table";
 import {
   ArrowUpDown,
   Download,
-  Filter,
-  Search,
-  User,
   Clock,
   FileText,
   Plus,
@@ -26,7 +23,6 @@ import {
   CardTitle,
 } from "@/frontend/components/ui/card";
 import { Badge } from "@/frontend/components/ui/badge";
-import { Input } from "@/frontend/components/ui/input";
 import { Label } from "@/frontend/components/ui/label";
 import {
   Select,

@@ -5,6 +5,11 @@ import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
 import { computeGstr1 } from "@/backend/services/gst/gstr1";
 import { gstr1ToPortalJson } from "@/backend/services/gst/gstr1-portal";
+import {
+  monthlyPortalFilename,
+  requireOrgGstin,
+  respondPortalJson,
+} from "@/backend/services/gst/portal-shell";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,11 +18,8 @@ export const dynamic = "force-dynamic";
  * GET /api/organizations/[orgId]/gst-returns/gstr1/portal?from=...&to=...&download=true
  *
  * Returns the GSTR-1 in GSTN portal upload JSON format. The org must
- * have a GSTIN configured (Organization.gstNo) — that's the supplier
- * GSTIN required by the portal.
- *
- * `download=true` sets Content-Disposition so the browser saves the file
- * as `GSTR1_<gstin>_<MMYYYY>.json`.
+ * have a GSTIN configured (Organization.gstNo). With download=true the
+ * response is served as `GSTR1_<gstin>_<MMYYYY>.json`.
  */
 const querySchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "from must be YYYY-MM-DD"),
@@ -41,35 +43,19 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
     const to = new Date(`${parsed.data.to}T23:59:59.999Z`);
     if (from > to) return badRequest("`from` must be on or before `to`");
 
-    const org = await prisma.organization.findUnique({
-      where: { id: orgId },
-      select: { gstNo: true },
-    });
-    if (!org?.gstNo) {
-      return badRequest(
-        "Organization does not have a GSTIN configured. Add it in Settings → Organization."
-      );
-    }
+    const gstin = await requireOrgGstin(orgId);
+    if (!gstin.ok) return gstin.response;
 
     const result = await computeGstr1(prisma, orgId, { from, to });
     const payload = gstr1ToPortalJson(result, {
-      gstin: org.gstNo,
+      gstin: gstin.gstin,
       periodStart: from,
     });
 
-    const wantsDownload = parsed.data.download === "true";
-    if (wantsDownload) {
-      const period = `${String(from.getUTCMonth() + 1).padStart(2, "0")}${from.getUTCFullYear()}`;
-      const filename = `GSTR1_${org.gstNo.toUpperCase()}_${period}.json`;
-      return new NextResponse(JSON.stringify(payload, null, 2), {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
-          "Content-Disposition": `attachment; filename="${filename}"`,
-        },
-      });
-    }
-    return NextResponse.json(payload);
+    return respondPortalJson(payload, {
+      wantsDownload: parsed.data.download === "true",
+      filename: monthlyPortalFilename("GSTR1", gstin.gstin, from),
+    });
   } catch (error) {
     logger.error({ err: error }, "Error generating GSTR-1 portal JSON");
     return NextResponse.json(

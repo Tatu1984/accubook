@@ -7,14 +7,11 @@ import {
   ArrowRightLeft,
   Loader2,
   ArrowRight,
-  Package,
 } from "lucide-react";
 import { Button } from "@/frontend/components/ui/button";
 import {
   Card,
   CardContent,
-  CardHeader,
-  CardTitle,
 } from "@/frontend/components/ui/card";
 import { Badge } from "@/frontend/components/ui/badge";
 import { DataTable } from "@/frontend/components/ui/data-table";

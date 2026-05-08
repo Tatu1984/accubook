@@ -417,7 +417,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
           checkDigit: ean13.charAt(12),
           image: `data:image/png;base64,${base64}`,
         });
-      } catch (err) {
+      } catch {
         return NextResponse.json({
           ean13,
           checkDigit: ean13.charAt(12),
@@ -463,7 +463,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
             image: `data:image/png;base64,${png.toString("base64")}`,
             copies: item.copies || 1,
           });
-        } catch (err) {
+        } catch {
           labels.push({
             id: item.id,
             name: item.name,

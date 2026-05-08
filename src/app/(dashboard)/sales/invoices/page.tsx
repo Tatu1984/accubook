@@ -174,7 +174,7 @@ export default function InvoicesPage() {
 
       toast.success("Invoice deleted successfully");
       fetchInvoices();
-    } catch (err) {
+    } catch {
       toast.error("Failed to delete invoice");
     } finally {
       setDeleteDialogOpen(false);
@@ -266,7 +266,7 @@ export default function InvoicesPage() {
 
       toast.success(`Invoice ${newStatus.toLowerCase()}`);
       fetchInvoices();
-    } catch (err) {
+    } catch {
       toast.error("Failed to update invoice status");
     }
   };

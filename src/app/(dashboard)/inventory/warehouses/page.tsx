@@ -10,9 +10,6 @@ import {
   ArrowUpDown,
   Warehouse,
   Loader2,
-  MapPin,
-  Phone,
-  User,
   Star,
 } from "lucide-react";
 import { Button } from "@/frontend/components/ui/button";

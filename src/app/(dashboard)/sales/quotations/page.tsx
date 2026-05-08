@@ -23,7 +23,6 @@ import { Button } from "@/frontend/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/frontend/components/ui/card";
@@ -67,7 +66,7 @@ import {
 import { Textarea } from "@/frontend/components/ui/textarea";
 import { Checkbox } from "@/frontend/components/ui/checkbox";
 import { DataTable } from "@/frontend/components/ui/data-table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
 import { cn } from "@/shared/utils/common.util";
 import { useOrganization } from "@/frontend/hooks/use-organization";
 import { toast } from "sonner";

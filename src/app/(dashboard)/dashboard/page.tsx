@@ -22,12 +22,10 @@ import {
   Truck,
   Wallet,
   BookOpen,
-  Loader2,
   RefreshCw,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/frontend/components/ui/card";
 import { Button } from "@/frontend/components/ui/button";
-import { Badge } from "@/frontend/components/ui/badge";
 import { Progress } from "@/frontend/components/ui/progress";
 import { Skeleton } from "@/frontend/components/ui/skeleton";
 import {
@@ -37,18 +35,18 @@ import {
   DropdownMenuTrigger,
 } from "@/frontend/components/ui/dropdown-menu";
 import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
+  
+  
+  
 } from "@/frontend/components/ui/chart";
 import {
-  Area,
-  AreaChart,
-  Bar,
-  BarChart,
-  CartesianGrid,
-  XAxis,
-  YAxis,
+  
+  
+  
+  
+  
+  
+  
   ResponsiveContainer,
   PieChart,
   Pie,

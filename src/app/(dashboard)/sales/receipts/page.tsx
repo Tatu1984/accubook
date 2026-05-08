@@ -709,8 +709,8 @@ export default function ReceiptsPage() {
               will be decremented by the gross amount that landed, the TCS
               collection (if any) will be dropped, and the linked
               invoice&apos;s status will be recomputed. Pick CANCELLED for
-              "we entered the wrong amount" or BOUNCED for "the cheque
-              didn&apos;t clear".
+              &ldquo;we entered the wrong amount&rdquo; or BOUNCED for &ldquo;the cheque
+              didn&apos;t clear&rdquo;.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

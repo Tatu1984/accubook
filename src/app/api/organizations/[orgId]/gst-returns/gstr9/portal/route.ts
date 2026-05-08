@@ -8,6 +8,10 @@ import {
   gstr9ToPortalJson,
   gstr9PortalFilename,
 } from "@/backend/services/gst/gstr9-portal";
+import {
+  requireOrgGstin,
+  respondPortalJson,
+} from "@/backend/services/gst/portal-shell";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,8 +31,8 @@ const querySchema = z.object({
  * GET /api/organizations/[orgId]/gst-returns/gstr9/portal?fy=2025-26&download=true
  *
  * Returns the GSTR-9 in GSTN portal upload JSON format. Mirrors the
- * GSTR-1 / GSTR-3B portal endpoints. Org GSTIN required (Settings →
- * Organization). With download=true, served as `GSTR9_<gstin>_<FY>.json`.
+ * GSTR-1 / GSTR-3B portal endpoints. Org GSTIN required. With
+ * download=true, served as `GSTR9_<gstin>_<FY>.json`.
  */
 export const GET = withOrgAuth(async (request, { orgId }) => {
   try {
@@ -40,15 +44,8 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
     });
     if (!parsed.success) return badRequest("Invalid query parameters", parsed.error.issues);
 
-    const org = await prisma.organization.findUnique({
-      where: { id: orgId },
-      select: { gstNo: true },
-    });
-    if (!org?.gstNo) {
-      return badRequest(
-        "Organization does not have a GSTIN configured. Add it in Settings → Organization."
-      );
-    }
+    const gstin = await requireOrgGstin(orgId);
+    if (!gstin.ok) return gstin.response;
 
     const fy = fyFromLabel(parsed.data.fy);
     const result = await computeGstr9(prisma, orgId, fy);
@@ -57,20 +54,16 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       ? Number(parsed.data.precedingFyTurnover)
       : undefined;
     const payload = gstr9ToPortalJson(result, {
-      gstin: org.gstNo,
-      precedingFyTurnover: Number.isFinite(precedingFyTurnover) ? precedingFyTurnover : undefined,
+      gstin: gstin.gstin,
+      precedingFyTurnover: Number.isFinite(precedingFyTurnover)
+        ? precedingFyTurnover
+        : undefined,
     });
 
-    if (parsed.data.download === "true") {
-      return new NextResponse(JSON.stringify(payload, null, 2), {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
-          "Content-Disposition": `attachment; filename="${gstr9PortalFilename(org.gstNo, fy.label)}"`,
-        },
-      });
-    }
-    return NextResponse.json(payload);
+    return respondPortalJson(payload, {
+      wantsDownload: parsed.data.download === "true",
+      filename: gstr9PortalFilename(gstin.gstin, fy.label),
+    });
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Invalid FY label")) {
       return badRequest(error.message);

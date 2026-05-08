@@ -5,7 +5,6 @@ import { ColumnDef } from "@tanstack/react-table";
 import {
   Plus,
   MoreHorizontal,
-  Eye,
   Pencil,
   Trash2,
   ArrowUpDown,
@@ -217,7 +216,7 @@ export default function ProjectsPage() {
 
       toast.success("Project deleted successfully");
       fetchProjects();
-    } catch (error) {
+    } catch {
       toast.error("Failed to delete project");
     } finally {
       setDeleteDialogOpen(false);
