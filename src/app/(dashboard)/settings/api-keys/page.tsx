@@ -424,6 +424,40 @@ export default function ApiKeysPage() {
     });
   }
 
+  /** Grant the same access mode across ALL sections at once. */
+  function setAllAccess(mode: "read-only" | "full" | "clear") {
+    setScopeMatrix((prev) => {
+      const next = { ...prev };
+      // Collect every unique scopeKey across the entire SIDEBAR_SCOPE tree.
+      const keys = new Set<string>();
+      for (const section of SIDEBAR_SCOPE) {
+        for (const it of section.items) {
+          keys.add(it.scopeKey);
+          if (it.scopeKey2) keys.add(it.scopeKey2);
+        }
+      }
+      if (mode === "clear") return {};
+      for (const k of keys) {
+        const { module, category } = parseScopeKey(k);
+        const mod = { ...(next[module] ?? {}) };
+        mod[category] = mode === "read-only" ? ["read"] : [...ALL_ACTIONS];
+        next[module] = mod;
+      }
+      return next;
+    });
+  }
+
+  /** Total scope count for the granted summary. */
+  const grantedScopeCount = React.useMemo(() => {
+    let n = 0;
+    for (const cats of Object.values(scopeMatrix)) {
+      for (const actions of Object.values(cats)) {
+        if (actions.length > 0) n++;
+      }
+    }
+    return n;
+  }, [scopeMatrix]);
+
   function buildScopes() {
     const out: { module: string; category: string; actions: Action[] }[] = [];
     for (const [module, cats] of Object.entries(scopeMatrix)) {
@@ -754,14 +788,51 @@ export default function ApiKeysPage() {
               </div>
 
               <div className="rounded-md border bg-muted/30 p-3 text-sm">
-                <div className="font-medium mb-1 flex items-center gap-2">
-                  <ShieldCheck className="h-4 w-4 text-green-600" />
-                  Permissions — mirrors the sidebar
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
+                  <div className="font-medium flex items-center gap-2">
+                    <ShieldCheck className="h-4 w-4 text-green-600" />
+                    Permissions — mirrors the sidebar
+                    <Badge variant="outline" className="text-[10px]">
+                      {grantedScopeCount} granted
+                    </Badge>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    <Button
+                      type="button"
+                      variant="default"
+                      size="sm"
+                      className="h-7 text-xs gap-1"
+                      onClick={() => setAllAccess("full")}
+                    >
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                      Full permission (all)
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => setAllAccess("read-only")}
+                    >
+                      Read-only (all)
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => setAllAccess("clear")}
+                    >
+                      Clear all
+                    </Button>
+                  </div>
                 </div>
                 <p className="text-xs text-muted-foreground">
                   Each section below maps to a sidebar group; each row maps to a
                   sidebar item. Tick Read / Write / Delete to grant the API key
-                  that action on that resource. Rows tagged{" "}
+                  that action on that resource. Use{" "}
+                  <strong>Full permission (all)</strong> above to grant Read +
+                  Write + Delete across every module in one click. Rows tagged{" "}
                   <span className="italic">&ldquo;shares X&rdquo;</span> hit the same backend
                   resource as another row, so toggling one will light up its
                   siblings &mdash; that&apos;s an honest reflection of what the
