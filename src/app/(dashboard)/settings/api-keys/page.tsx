@@ -14,7 +14,46 @@ import {
   Eye,
   EyeOff,
   Calendar,
+  ChevronDown,
+  // Sidebar-mirror icons (must stay in sync with app-sidebar.tsx)
+  LayoutDashboard,
+  BookOpen,
+  Package,
+  ShoppingCart,
+  Receipt,
+  Calculator,
+  Users,
+  Landmark,
+  BarChart3,
+  Settings,
+  FileText,
+  CreditCard,
+  Wallet,
+  Building,
+  User,
+  Box,
+  Truck,
+  ClipboardList,
+  PiggyBank,
+  Scale,
+  FileSpreadsheet,
+  UserCheck,
+  CheckSquare,
+  Percent,
+  Hammer,
+  Repeat,
+  Upload,
+  Inbox,
+  ScrollText,
+  PlayCircle,
+  Building2,
+  type LucideIcon,
 } from "lucide-react";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/frontend/components/ui/collapsible";
 import { Button } from "@/frontend/components/ui/button";
 import {
   Card,
@@ -56,10 +95,186 @@ import {
 import { ScrollArea } from "@/frontend/components/ui/scroll-area";
 import { useOrganization } from "@/frontend/hooks/use-organization";
 import { toast } from "sonner";
-import { SCOPE_TREE } from "@/backend/utils/api-scope";
+import { cn } from "@/shared/utils/common.util";
 
 type Action = "read" | "write" | "delete";
 const ALL_ACTIONS: Action[] = ["read", "write", "delete"];
+
+/* --------------------------------------------------------------------- *
+ * Sidebar-mirror scope tree                                             *
+ * --------------------------------------------------------------------- *
+ * Mirrors `app-sidebar.tsx` exactly (titles, icons, order, grouping)    *
+ * so the API-key permission picker reads the same way the user already  *
+ * navigates the app. Each row carries a `scopeKey` ("module:category")  *
+ * that ties the checkbox to the canonical backend scope. Multiple rows  *
+ * may share a key when several sidebar items hit the same backend       *
+ * resource (e.g. Stock Summary / Movements / Adjustment all surface     *
+ * the inventory:stock API surface). Toggling any one of them lights up  *
+ * its siblings — that's an honest reflection of what the backend can    *
+ * grant.                                                                *
+ * --------------------------------------------------------------------- */
+
+interface SidebarScopeItem {
+  title: string;
+  icon: LucideIcon;
+  /** Canonical "module:category" key. Multiple items may share. */
+  scopeKey: string;
+  /** Optional second scope key for items that span two backend resources (e.g. TDS+TCS). */
+  scopeKey2?: string;
+  /** Note shown next to the row when multiple sidebar items share this key. */
+  note?: string;
+}
+
+interface SidebarScopeSection {
+  title: string;
+  icon: LucideIcon;
+  items: SidebarScopeItem[];
+}
+
+const SIDEBAR_SCOPE: SidebarScopeSection[] = [
+  {
+    title: "Dashboard",
+    icon: LayoutDashboard,
+    items: [
+      { title: "Dashboard", icon: LayoutDashboard, scopeKey: "reports:dashboard" },
+    ],
+  },
+  {
+    title: "Accounting",
+    icon: BookOpen,
+    items: [
+      { title: "Chart of Accounts", icon: FileText,        scopeKey: "accounting:ledger-groups" },
+      { title: "Ledgers",           icon: BookOpen,        scopeKey: "accounting:ledgers" },
+      { title: "Vouchers",          icon: Receipt,         scopeKey: "accounting:vouchers" },
+      { title: "Journal Entries",   icon: FileSpreadsheet, scopeKey: "accounting:vouchers", note: "shares Vouchers" },
+      { title: "Cost Centers",      icon: Building,        scopeKey: "accounting:cost-centers" },
+      { title: "Projects",          icon: ClipboardList,   scopeKey: "accounting:projects" },
+    ],
+  },
+  {
+    title: "Parties",
+    icon: UserCheck,
+    items: [
+      { title: "Parties (Customers + Vendors)", icon: UserCheck, scopeKey: "parties:parties" },
+    ],
+  },
+  {
+    title: "Inventory",
+    icon: Package,
+    items: [
+      { title: "Items",            icon: Box,           scopeKey: "inventory:items" },
+      { title: "Categories",       icon: Package,       scopeKey: "inventory:categories" },
+      { title: "Warehouses",       icon: Building,      scopeKey: "inventory:warehouses" },
+      { title: "Stock Summary",    icon: ClipboardList, scopeKey: "inventory:stock" },
+      { title: "Stock Movements",  icon: Truck,         scopeKey: "inventory:stock", note: "shares Stock Summary" },
+      { title: "Stock Adjustment", icon: Scale,         scopeKey: "inventory:stock", note: "shares Stock Summary" },
+    ],
+  },
+  {
+    title: "Sales",
+    icon: ShoppingCart,
+    items: [
+      { title: "Quotations",         icon: FileText,    scopeKey: "sales:quotations" },
+      { title: "Sales Orders",       icon: ClipboardList, scopeKey: "sales:orders" },
+      { title: "Invoices",           icon: Receipt,     scopeKey: "sales:invoices" },
+      { title: "Recurring Invoices", icon: Repeat,      scopeKey: "sales:recurring" },
+      { title: "Credit Notes",       icon: FileText,    scopeKey: "sales:invoices", note: "shares Invoices" },
+      { title: "Receipts",           icon: CreditCard,  scopeKey: "sales:receipts" },
+    ],
+  },
+  {
+    title: "Purchases",
+    icon: Truck,
+    items: [
+      { title: "Purchase Orders", icon: ClipboardList, scopeKey: "purchases:orders" },
+      { title: "Bills",           icon: Receipt,       scopeKey: "purchases:bills" },
+      { title: "Debit Notes",     icon: FileText,      scopeKey: "purchases:bills", note: "shares Bills" },
+      { title: "Payments",        icon: Wallet,        scopeKey: "purchases:payments" },
+    ],
+  },
+  {
+    title: "Banking",
+    icon: Landmark,
+    items: [
+      { title: "Bank Accounts",     icon: Landmark,    scopeKey: "banking:accounts" },
+      { title: "Transactions",      icon: CreditCard,  scopeKey: "banking:accounts", note: "shares Bank Accounts" },
+      { title: "Statement Import",  icon: Upload,      scopeKey: "banking:import" },
+      { title: "Reconciliation",    icon: Scale,       scopeKey: "banking:reconciliation" },
+      { title: "Cash Management",   icon: PiggyBank,   scopeKey: "banking:accounts", note: "shares Bank Accounts" },
+    ],
+  },
+  {
+    title: "Manufacturing",
+    icon: Hammer,
+    items: [
+      { title: "Work Orders (+ BOMs)", icon: Hammer, scopeKey: "manufacturing:operations" },
+    ],
+  },
+  {
+    title: "Taxation",
+    icon: Calculator,
+    items: [
+      { title: "Tax Configuration", icon: Percent,    scopeKey: "taxation:tax-config" },
+      { title: "GST Returns",       icon: FileText,   scopeKey: "taxation:gst-returns" },
+      { title: "GSTR-2B Reconcile", icon: Scale,      scopeKey: "taxation:gst-returns", note: "shares GST Returns" },
+      { title: "TDS / TCS",         icon: Calculator, scopeKey: "taxation:tds", scopeKey2: "taxation:tcs" },
+      { title: "Tax Reports",       icon: BarChart3,  scopeKey: "reports:reports", note: "covered by Reports" },
+    ],
+  },
+  {
+    title: "Payroll & HR",
+    icon: Users,
+    items: [
+      { title: "Employees",        icon: User,         scopeKey: "hr:employees" },
+      { title: "Departments",      icon: Building,     scopeKey: "hr:employees", note: "shares Employees" },
+      { title: "Attendance",       icon: ClipboardList, scopeKey: "hr:attendance" },
+      { title: "Leave Management", icon: FileText,     scopeKey: "hr:leaves" },
+      { title: "Payroll",          icon: Wallet,       scopeKey: "hr:payroll" },
+      { title: "Run Payroll",      icon: PlayCircle,   scopeKey: "hr:payroll", note: "shares Payroll" },
+      { title: "Expense Claims",   icon: Receipt,      scopeKey: "hr:expense-claims" },
+    ],
+  },
+  {
+    title: "Reports",
+    icon: BarChart3,
+    items: [
+      { title: "Financial Reports", icon: FileSpreadsheet, scopeKey: "reports:reports" },
+      { title: "Profit & Loss",     icon: BarChart3,       scopeKey: "reports:reports", note: "shares Reports" },
+      { title: "Balance Sheet",     icon: Scale,           scopeKey: "reports:reports", note: "shares Reports" },
+      { title: "Cash Flow",         icon: PiggyBank,       scopeKey: "reports:reports", note: "shares Reports" },
+      { title: "Trial Balance",     icon: BookOpen,        scopeKey: "reports:reports", note: "shares Reports" },
+      { title: "Registers",         icon: ScrollText,      scopeKey: "reports:reports", note: "shares Reports" },
+      { title: "Custom Reports",    icon: FileText,        scopeKey: "reports:reports", note: "shares Reports" },
+    ],
+  },
+  {
+    title: "Approvals",
+    icon: Inbox,
+    items: [
+      { title: "Approvals inbox", icon: Inbox, scopeKey: "organization:approvals" },
+    ],
+  },
+  {
+    title: "Settings",
+    icon: Settings,
+    items: [
+      { title: "Organization",       icon: Building2,   scopeKey: "organization:branches", note: "Settings → Organization shares Branches scope" },
+      { title: "India Tax",          icon: Percent,     scopeKey: "organization:branches", note: "shares Organization" },
+      { title: "Branches",           icon: Building,    scopeKey: "organization:branches" },
+      { title: "Users & Roles",      icon: Users,       scopeKey: "organization:users", scopeKey2: "organization:roles" },
+      { title: "Tax Configuration",  icon: Percent,     scopeKey: "taxation:tax-config", note: "covered by Taxation" },
+      { title: "Approval Workflows", icon: CheckSquare, scopeKey: "organization:approvals", note: "shares Approvals inbox" },
+      { title: "Tally Migration",    icon: Upload,      scopeKey: "organization:migration" },
+      { title: "API Keys",           icon: KeyRound,    scopeKey: "organization:api-keys" },
+      { title: "Audit Logs",         icon: ScrollText,  scopeKey: "organization:audit-logs" },
+    ],
+  },
+];
+
+function parseScopeKey(key: string): { module: string; category: string } {
+  const [module, category] = key.split(":");
+  return { module, category };
+}
 
 interface ApiKeyRow {
   id: string;
@@ -153,43 +368,59 @@ export default function ApiKeysPage() {
     return scopeMatrix[module]?.[category]?.includes(action) ?? false;
   }
 
-  function selectAllForCategory(module: string, category: string) {
-    setScopeMatrix((prev) => {
-      const mod = { ...(prev[module] ?? {}) };
-      const cur = mod[category] ?? [];
-      mod[category] = cur.length === ALL_ACTIONS.length ? [] : [...ALL_ACTIONS];
-      return { ...prev, [module]: mod };
-    });
-  }
-
-  function selectReadOnlyForModule(moduleName: string) {
-    const mod = SCOPE_TREE.find((m) => m.module === moduleName);
-    if (!mod) return;
+  /** Toggle an action across one or two scope keys (sidebar items can span). */
+  function toggleSidebarItemAction(item: SidebarScopeItem, action: Action) {
+    const keys = [item.scopeKey, item.scopeKey2].filter(Boolean) as string[];
+    // Decide on/off based on the FIRST key — keep both keys in sync.
+    const first = parseScopeKey(keys[0]);
+    const willTurnOn = !isChecked(first.module, first.category, action);
     setScopeMatrix((prev) => {
       const next = { ...prev };
-      next[moduleName] = Object.fromEntries(
-        mod.categories.map((c) => [c.category, ["read"] as Action[]])
-      );
+      for (const k of keys) {
+        const { module, category } = parseScopeKey(k);
+        const mod = { ...(next[module] ?? {}) };
+        const cur = mod[category] ?? [];
+        if (willTurnOn) {
+          mod[category] = cur.includes(action) ? cur : [...cur, action];
+        } else {
+          mod[category] = cur.filter((a) => a !== action);
+        }
+        next[module] = mod;
+      }
       return next;
     });
   }
 
-  function selectAllForModule(moduleName: string) {
-    const mod = SCOPE_TREE.find((m) => m.module === moduleName);
-    if (!mod) return;
-    setScopeMatrix((prev) => {
-      const next = { ...prev };
-      next[moduleName] = Object.fromEntries(
-        mod.categories.map((c) => [c.category, [...ALL_ACTIONS] as Action[]])
-      );
-      return next;
-    });
+  function isSidebarItemChecked(item: SidebarScopeItem, action: Action): boolean {
+    const { module, category } = parseScopeKey(item.scopeKey);
+    return isChecked(module, category, action);
   }
 
-  function clearModule(moduleName: string) {
+  function setSectionAccess(
+    section: SidebarScopeSection,
+    mode: "read-only" | "full" | "clear"
+  ) {
     setScopeMatrix((prev) => {
       const next = { ...prev };
-      delete next[moduleName];
+      // Collect every unique scopeKey in this section (incl. scopeKey2).
+      const keys = new Set<string>();
+      for (const it of section.items) {
+        keys.add(it.scopeKey);
+        if (it.scopeKey2) keys.add(it.scopeKey2);
+      }
+      for (const k of keys) {
+        const { module, category } = parseScopeKey(k);
+        const mod = { ...(next[module] ?? {}) };
+        if (mode === "clear") {
+          delete mod[category];
+        } else if (mode === "read-only") {
+          mod[category] = ["read"];
+        } else {
+          mod[category] = [...ALL_ACTIONS];
+        }
+        next[module] = mod;
+        if (Object.keys(mod).length === 0) delete next[module];
+      }
       return next;
     });
   }
@@ -517,97 +748,127 @@ export default function ApiKeysPage() {
             <div className="rounded-md border bg-muted/30 p-3 text-sm flex-shrink-0">
               <div className="font-medium mb-1 flex items-center gap-2">
                 <ShieldCheck className="h-4 w-4 text-green-600" />
-                Scopes — {SCOPE_TREE.length} modules · scroll for more
+                Permissions — mirrors the sidebar
               </div>
               <p className="text-xs text-muted-foreground">
-                Tick the actions this key should have for each (module, category).
-                Leave a row empty to deny that resource entirely. The key gets
-                only what's checked — no implicit permissions.
+                Each section below maps to a sidebar group; each row maps to a
+                sidebar item. Tick Read / Write / Delete to grant the API key
+                that action on that resource. Rows tagged{" "}
+                <span className="italic">&ldquo;shares X&rdquo;</span> hit the same backend
+                resource as another row, so toggling one will light up its
+                siblings &mdash; that&apos;s an honest reflection of what the
+                backend can grant.
               </p>
             </div>
 
             <ScrollArea className="flex-1 min-h-0 -mr-3 pr-3">
-              <div className="space-y-4 pb-2">
-                {SCOPE_TREE.map((mod) => (
-                  <Card key={mod.module}>
-                    <CardHeader className="pb-2 flex-row items-center justify-between space-y-0">
-                      <CardTitle className="text-sm">{mod.label}</CardTitle>
-                      <div className="flex gap-1">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="text-xs h-7"
-                          onClick={() => selectReadOnlyForModule(mod.module)}
-                        >
-                          Read-only
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="text-xs h-7"
-                          onClick={() => selectAllForModule(mod.module)}
-                        >
-                          Full access
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="text-xs h-7"
-                          onClick={() => clearModule(mod.module)}
-                        >
-                          Clear
-                        </Button>
+              <div className="space-y-3 pb-2">
+                {SIDEBAR_SCOPE.map((section) => {
+                  const SectionIcon = section.icon;
+                  return (
+                    <Collapsible
+                      key={section.title}
+                      defaultOpen
+                      className="border rounded-md bg-background"
+                    >
+                      <div className="flex items-center justify-between px-3 py-2 gap-2">
+                        <CollapsibleTrigger asChild>
+                          <button
+                            type="button"
+                            className="flex items-center gap-2 flex-1 text-left hover:bg-muted/40 rounded px-1 py-1 -mx-1"
+                            aria-label={`Toggle ${section.title}`}
+                          >
+                            <SectionIcon className="h-4 w-4 text-muted-foreground" />
+                            <span className="font-medium text-sm">
+                              {section.title}
+                            </span>
+                            <Badge variant="outline" className="text-[10px] ml-1">
+                              {section.items.length} {section.items.length === 1 ? "item" : "items"}
+                            </Badge>
+                            <ChevronDown className="h-4 w-4 ml-auto transition-transform data-[state=closed]:-rotate-90" />
+                          </button>
+                        </CollapsibleTrigger>
+                        <div className="flex gap-1 flex-shrink-0">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="text-xs h-7"
+                            onClick={() => setSectionAccess(section, "read-only")}
+                          >
+                            Read-only
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="text-xs h-7"
+                            onClick={() => setSectionAccess(section, "full")}
+                          >
+                            Full
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="text-xs h-7"
+                            onClick={() => setSectionAccess(section, "clear")}
+                          >
+                            Clear
+                          </Button>
+                        </div>
                       </div>
-                    </CardHeader>
-                    <CardContent className="pt-0">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="w-[40%]">Category</TableHead>
-                            <TableHead className="text-center">Read</TableHead>
-                            <TableHead className="text-center">Write</TableHead>
-                            <TableHead className="text-center">Delete</TableHead>
-                            <TableHead className="text-center w-[80px]">All</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {mod.categories.map((c) => (
-                            <TableRow key={c.category}>
-                              <TableCell className="text-sm">{c.label}</TableCell>
-                              {ALL_ACTIONS.map((a) => (
-                                <TableCell key={a} className="text-center">
-                                  <Checkbox
-                                    checked={isChecked(mod.module, c.category, a)}
-                                    onCheckedChange={() =>
-                                      toggleAction(mod.module, c.category, a)
-                                    }
-                                    aria-label={`${mod.label} ${c.label} ${a}`}
-                                  />
-                                </TableCell>
-                              ))}
-                              <TableCell className="text-center">
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-xs h-7"
-                                  onClick={() =>
-                                    selectAllForCategory(mod.module, c.category)
-                                  }
-                                >
-                                  Toggle
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </CardContent>
-                  </Card>
-                ))}
+                      <CollapsibleContent>
+                        <div className="border-t">
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="bg-muted/40">
+                                <TableHead className="pl-8">Item</TableHead>
+                                <TableHead className="text-center w-[70px]">Read</TableHead>
+                                <TableHead className="text-center w-[70px]">Write</TableHead>
+                                <TableHead className="text-center w-[70px]">Delete</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {section.items.map((item, idx) => {
+                                const ItemIcon = item.icon;
+                                return (
+                                  <TableRow key={`${section.title}-${idx}`}>
+                                    <TableCell className="pl-8">
+                                      <div className="flex items-center gap-2">
+                                        <ItemIcon className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                                        <span className="text-sm">{item.title}</span>
+                                        {item.note && (
+                                          <span className={cn(
+                                            "text-[10px] italic text-muted-foreground",
+                                            "px-1.5 py-0.5 rounded bg-muted/60"
+                                          )}>
+                                            {item.note}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </TableCell>
+                                    {ALL_ACTIONS.map((a) => (
+                                      <TableCell key={a} className="text-center">
+                                        <Checkbox
+                                          checked={isSidebarItemChecked(item, a)}
+                                          onCheckedChange={() =>
+                                            toggleSidebarItemAction(item, a)
+                                          }
+                                          aria-label={`${section.title} ${item.title} ${a}`}
+                                        />
+                                      </TableCell>
+                                    ))}
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  );
+                })}
               </div>
             </ScrollArea>
           </div>
@@ -646,7 +907,7 @@ export default function ApiKeysPage() {
               <AlertTriangle className="h-4 w-4 mt-0.5 text-yellow-700 flex-shrink-0" />
               <div>
                 <p className="font-medium text-yellow-800 dark:text-yellow-200">
-                  This is the only time you'll see this key.
+                  This is the only time you&apos;ll see this key.
                 </p>
                 <p className="text-xs text-yellow-700 dark:text-yellow-300 mt-0.5">
                   Save it in your secrets manager (1Password, Vault, AWS Secrets
