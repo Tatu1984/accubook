@@ -54,6 +54,8 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/frontend/components/ui/collapsible";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/frontend/components/ui/tabs";
+import { Separator } from "@/frontend/components/ui/separator";
 import { Button } from "@/frontend/components/ui/button";
 import {
   Card,
@@ -275,6 +277,42 @@ function parseScopeKey(key: string): { module: string; category: string } {
   return { module, category };
 }
 
+/** Small monospaced code block with a copy-token button — used in the
+ *  show-once dialog for cURL / Node / Python snippets. */
+function CodeBlock({
+  children,
+  onCopyToken,
+  copied,
+}: {
+  children: string;
+  onCopyToken: () => void | Promise<void>;
+  copied: boolean;
+}) {
+  return (
+    <div className="relative mt-2 rounded-md border bg-zinc-950 dark:bg-zinc-900 text-zinc-100">
+      <pre className="text-xs font-mono p-3 overflow-x-auto whitespace-pre">
+        <code>{children}</code>
+      </pre>
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        onClick={onCopyToken}
+        className={cn(
+          "absolute top-2 right-2 h-7 text-xs gap-1 text-zinc-300 hover:text-white hover:bg-zinc-800",
+          copied && "text-green-400 hover:text-green-300"
+        )}
+      >
+        {copied ? (
+          <><Check className="h-3 w-3" /> Token copied</>
+        ) : (
+          <><Copy className="h-3 w-3" /> Copy token</>
+        )}
+      </Button>
+    </div>
+  );
+}
+
 interface ApiKeyRow {
   id: string;
   name: string;
@@ -323,8 +361,9 @@ export default function ApiKeysPage() {
 
   // Newly-created key (shown ONCE)
   const [newKey, setNewKey] = React.useState<CreatedKey | null>(null);
-  const [revealed, setRevealed] = React.useState(false);
+  const [revealed, setRevealed] = React.useState(true); // default-reveal post-creation
   const [copied, setCopied] = React.useState(false);
+  const [snippetTab, setSnippetTab] = React.useState<"curl" | "node" | "python">("curl");
 
   const fetchKeys = React.useCallback(async () => {
     if (!organizationId) return;
@@ -502,7 +541,8 @@ export default function ApiKeysPage() {
         expiresAt: j.expiresAt,
         createdAt: j.createdAt,
       });
-      setRevealed(false);
+      setRevealed(true);
+      setSnippetTab("curl");
       setCopied(false);
       fetchKeys();
     } catch (e) {
@@ -969,25 +1009,91 @@ export default function ApiKeysPage() {
 
       {/* SHOW-ONCE KEY REVEAL */}
       <Dialog open={!!newKey} onOpenChange={(o) => !o && setNewKey(null)}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ShieldCheck className="h-5 w-5 text-green-600" />
+        <DialogContent className="max-w-2xl p-0 gap-0 overflow-hidden">
+          {/* Success accent bar */}
+          <div className="h-1.5 w-full bg-gradient-to-r from-green-500 via-emerald-500 to-teal-500" />
+
+          <DialogHeader className="px-6 pt-5 pb-3">
+            <DialogTitle className="flex items-center gap-2 text-lg">
+              <div className="rounded-full bg-green-100 dark:bg-green-900/40 p-1.5">
+                <ShieldCheck className="h-5 w-5 text-green-600 dark:text-green-400" />
+              </div>
               API key created
             </DialogTitle>
-            <DialogDescription>
-              <strong>{newKey?.name}</strong> is ready. Copy the token now — for
-              security it will not be shown again.
+            <DialogDescription className="pt-1">
+              <strong className="text-foreground">{newKey?.name}</strong> is ready
+              to use. Copy the token below before closing this dialog &mdash; for
+              security it will <strong>never be shown again</strong>.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
+
+          <div className="px-6 pb-5 space-y-4 max-h-[70vh] overflow-y-auto">
+            {/* TOKEN BLOCK — primary action */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Bearer token
+                </Label>
+                <button
+                  type="button"
+                  onClick={() => setRevealed((v) => !v)}
+                  className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+                  aria-label={revealed ? "Mask token" : "Reveal token"}
+                >
+                  {revealed ? (
+                    <><EyeOff className="h-3 w-3" /> Mask</>
+                  ) : (
+                    <><Eye className="h-3 w-3" /> Reveal</>
+                  )}
+                </button>
+              </div>
+              <div className="relative rounded-md border border-green-300 dark:border-green-900 bg-green-50/50 dark:bg-green-950/20 p-3 pr-32">
+                <code className="block text-sm font-mono break-all leading-relaxed">
+                  {revealed && newKey?.token ? (
+                    <>
+                      <span className="text-muted-foreground">
+                        {newKey.token.slice(0, 9)}
+                      </span>
+                      <span className="font-bold text-foreground">
+                        {newKey.token.slice(9)}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">
+                      {(newKey?.token || "").replace(/./g, "•")}
+                    </span>
+                  )}
+                </code>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={copyToken}
+                  className={cn(
+                    "absolute top-1/2 -translate-y-1/2 right-2 gap-1.5 transition-colors",
+                    copied && "bg-green-600 hover:bg-green-700"
+                  )}
+                >
+                  {copied ? (
+                    <>
+                      <Check className="h-3.5 w-3.5" /> Copied
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-3.5 w-3.5" /> Copy
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            {/* WARNING */}
             <div className="flex items-start gap-2 rounded-md border border-yellow-300 bg-yellow-50 p-3 text-sm dark:bg-yellow-950/20 dark:border-yellow-900">
-              <AlertTriangle className="h-4 w-4 mt-0.5 text-yellow-700 flex-shrink-0" />
-              <div>
+              <AlertTriangle className="h-4 w-4 mt-0.5 text-yellow-700 dark:text-yellow-500 flex-shrink-0" />
+              <div className="space-y-0.5">
                 <p className="font-medium text-yellow-800 dark:text-yellow-200">
                   This is the only time you&apos;ll see this key.
                 </p>
-                <p className="text-xs text-yellow-700 dark:text-yellow-300 mt-0.5">
+                <p className="text-xs text-yellow-700 dark:text-yellow-300">
                   Save it in your secrets manager (1Password, Vault, AWS Secrets
                   Manager, …) or wherever your hospital ERP reads its secrets
                   from. If lost, revoke this key and create a new one.
@@ -995,56 +1101,135 @@ export default function ApiKeysPage() {
               </div>
             </div>
 
-            <div>
-              <Label className="text-xs">Bearer token</Label>
-              <div className="mt-1 flex items-center gap-2 rounded-md border bg-muted/30 p-3">
-                <code className="flex-1 text-xs font-mono break-all">
-                  {revealed ? newKey?.token : (newKey?.token || "").replace(/./g, "•")}
+            {/* KEY METADATA */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-md border bg-muted/30 p-3 text-sm">
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  Name
+                </div>
+                <div className="font-medium truncate" title={newKey?.name}>
+                  {newKey?.name}
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  Prefix
+                </div>
+                <code className="text-xs font-mono">
+                  acb_live_{newKey?.keyPrefix}
                 </code>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={revealed ? "Hide key" : "Reveal key"}
-                  onClick={() => setRevealed((v) => !v)}
-                >
-                  {revealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={copyToken}
-                >
-                  {copied ? (
-                    <>
-                      <Check className="mr-1 h-3 w-3" /> Copied
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="mr-1 h-3 w-3" /> Copy
-                    </>
-                  )}
-                </Button>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  Scopes
+                </div>
+                <div className="font-medium">
+                  {keys.find((k) => k.id === newKey?.id)?.scopes.length ?? "—"}{" "}
+                  granted
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  Expires
+                </div>
+                <div className="font-medium">
+                  {newKey?.expiresAt
+                    ? new Date(newKey.expiresAt).toLocaleDateString("en-IN", {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                      })
+                    : "Never"}
+                </div>
               </div>
             </div>
 
-            <div className="rounded-md border bg-muted/30 p-3 text-sm">
-              <p className="font-medium mb-1">How to use</p>
-              <p className="text-xs text-muted-foreground mb-2">
-                Add this header to every request to{" "}
-                <code className="bg-background px-1 rounded">
-                  /api/organizations/{organizationId}/...
-                </code>
-              </p>
-              <pre className="text-xs bg-background p-2 rounded overflow-x-auto">
-{`curl -H "Authorization: Bearer ${revealed ? newKey?.token : "acb_live_…"}" \\
-     https://accubook.tensparrows.com/api/organizations/${organizationId}/invoices`}
-              </pre>
+            <Separator />
+
+            {/* CODE SAMPLES */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                  How to use it
+                </Label>
+                <span className="text-[11px] text-muted-foreground">
+                  Send on every request to{" "}
+                  <code className="bg-muted px-1 rounded">
+                    /api/organizations/{organizationId}/…
+                  </code>
+                </span>
+              </div>
+              <Tabs
+                value={snippetTab}
+                onValueChange={(v) => setSnippetTab(v as typeof snippetTab)}
+              >
+                <TabsList className="grid grid-cols-3 w-full">
+                  <TabsTrigger value="curl">cURL</TabsTrigger>
+                  <TabsTrigger value="node">JavaScript (Node)</TabsTrigger>
+                  <TabsTrigger value="python">Python</TabsTrigger>
+                </TabsList>
+                <TabsContent value="curl">
+                  <CodeBlock
+                    onCopyToken={copyToken}
+                    copied={copied}
+                  >{`curl -H "Authorization: Bearer ${
+                    revealed && newKey ? newKey.token : "acb_live_…"
+                  }" \\
+     ${typeof window !== "undefined" ? window.location.origin : ""}/api/organizations/${organizationId}/invoices`}</CodeBlock>
+                </TabsContent>
+                <TabsContent value="node">
+                  <CodeBlock
+                    onCopyToken={copyToken}
+                    copied={copied}
+                  >{`const res = await fetch(
+  "${typeof window !== "undefined" ? window.location.origin : ""}/api/organizations/${organizationId}/invoices",
+  {
+    headers: {
+      Authorization: \`Bearer ${
+        revealed && newKey ? newKey.token : "acb_live_…"
+      }\`,
+    },
+  }
+);
+const invoices = await res.json();`}</CodeBlock>
+                </TabsContent>
+                <TabsContent value="python">
+                  <CodeBlock
+                    onCopyToken={copyToken}
+                    copied={copied}
+                  >{`import requests
+
+resp = requests.get(
+    "${typeof window !== "undefined" ? window.location.origin : ""}/api/organizations/${organizationId}/invoices",
+    headers={
+        "Authorization": "Bearer ${
+          revealed && newKey ? newKey.token : "acb_live_…"
+        }",
+    },
+)
+invoices = resp.json()`}</CodeBlock>
+                </TabsContent>
+              </Tabs>
             </div>
           </div>
-          <DialogFooter>
-            <Button onClick={() => setNewKey(null)}>Done</Button>
+
+          <DialogFooter className="px-6 py-3 border-t bg-muted/30 gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setNewKey(null)}
+            >
+              Close
+            </Button>
+            <Button
+              onClick={async () => {
+                await copyToken();
+                setTimeout(() => setNewKey(null), 600);
+              }}
+              className="gap-1.5"
+            >
+              <Copy className="h-3.5 w-3.5" />
+              Copy &amp; close
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
