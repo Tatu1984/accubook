@@ -92,7 +92,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/frontend/components/ui/table";
-import { ScrollArea } from "@/frontend/components/ui/scroll-area";
 import { useOrganization } from "@/frontend/hooks/use-organization";
 import { toast } from "sonner";
 import { cn } from "@/shared/utils/common.util";
@@ -711,8 +710,8 @@ export default function ApiKeysPage() {
           if (!o) resetForm();
         }}
       >
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
-          <DialogHeader>
+        <DialogContent className="max-w-3xl h-[85vh] flex flex-col p-0 gap-0">
+          <DialogHeader className="px-6 pt-6 pb-3 flex-shrink-0 border-b">
             <DialogTitle>Create new API key</DialogTitle>
             <DialogDescription>
               Pick a name, the modules + categories the key should have access to,
@@ -720,49 +719,57 @@ export default function ApiKeysPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex flex-col flex-1 min-h-0 gap-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-shrink-0">
-              <div className="space-y-2">
-                <Label htmlFor="key-name">Name *</Label>
-                <Input
-                  id="key-name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Hospital ERP integration"
-                />
+          {/*
+            Single scrolling region. The form fields + permission tree all live
+            inside one `overflow-y-auto` container so the user can scroll
+            freely top-to-bottom regardless of which section they're focused
+            on. Tables also get an `overflow-x-auto` wrapper so wide rows
+            (long titles + "shares X" notes) scroll horizontally instead of
+            wrapping awkwardly.
+          */}
+          <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="key-name">Name *</Label>
+                  <Input
+                    id="key-name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. Hospital ERP integration"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="key-expiry">
+                    <Calendar className="inline h-3 w-3 mr-1" />
+                    Expires (optional)
+                  </Label>
+                  <Input
+                    id="key-expiry"
+                    type="date"
+                    value={expiresAt}
+                    onChange={(e) => setExpiresAt(e.target.value)}
+                  />
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="key-expiry">
-                  <Calendar className="inline h-3 w-3 mr-1" />
-                  Expires (optional)
-                </Label>
-                <Input
-                  id="key-expiry"
-                  type="date"
-                  value={expiresAt}
-                  onChange={(e) => setExpiresAt(e.target.value)}
-                />
-              </div>
-            </div>
 
-            <div className="rounded-md border bg-muted/30 p-3 text-sm flex-shrink-0">
-              <div className="font-medium mb-1 flex items-center gap-2">
-                <ShieldCheck className="h-4 w-4 text-green-600" />
-                Permissions — mirrors the sidebar
+              <div className="rounded-md border bg-muted/30 p-3 text-sm">
+                <div className="font-medium mb-1 flex items-center gap-2">
+                  <ShieldCheck className="h-4 w-4 text-green-600" />
+                  Permissions — mirrors the sidebar
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Each section below maps to a sidebar group; each row maps to a
+                  sidebar item. Tick Read / Write / Delete to grant the API key
+                  that action on that resource. Rows tagged{" "}
+                  <span className="italic">&ldquo;shares X&rdquo;</span> hit the same backend
+                  resource as another row, so toggling one will light up its
+                  siblings &mdash; that&apos;s an honest reflection of what the
+                  backend can grant.
+                </p>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Each section below maps to a sidebar group; each row maps to a
-                sidebar item. Tick Read / Write / Delete to grant the API key
-                that action on that resource. Rows tagged{" "}
-                <span className="italic">&ldquo;shares X&rdquo;</span> hit the same backend
-                resource as another row, so toggling one will light up its
-                siblings &mdash; that&apos;s an honest reflection of what the
-                backend can grant.
-              </p>
-            </div>
 
-            <ScrollArea className="flex-1 min-h-0 -mr-3 pr-3">
-              <div className="space-y-3 pb-2">
+              <div className="space-y-3">
                 {SIDEBAR_SCOPE.map((section) => {
                   const SectionIcon = section.icon;
                   return (
@@ -819,11 +826,11 @@ export default function ApiKeysPage() {
                         </div>
                       </div>
                       <CollapsibleContent>
-                        <div className="border-t">
+                        <div className="border-t overflow-x-auto">
                           <Table>
                             <TableHeader>
                               <TableRow className="bg-muted/40">
-                                <TableHead className="pl-8">Item</TableHead>
+                                <TableHead className="pl-8 min-w-[220px]">Item</TableHead>
                                 <TableHead className="text-center w-[70px]">Read</TableHead>
                                 <TableHead className="text-center w-[70px]">Write</TableHead>
                                 <TableHead className="text-center w-[70px]">Delete</TableHead>
@@ -834,8 +841,8 @@ export default function ApiKeysPage() {
                                 const ItemIcon = item.icon;
                                 return (
                                   <TableRow key={`${section.title}-${idx}`}>
-                                    <TableCell className="pl-8">
-                                      <div className="flex items-center gap-2">
+                                    <TableCell className="pl-8 min-w-[220px]">
+                                      <div className="flex items-center gap-2 flex-wrap">
                                         <ItemIcon className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
                                         <span className="text-sm">{item.title}</span>
                                         {item.note && (
@@ -870,10 +877,10 @@ export default function ApiKeysPage() {
                   );
                 })}
               </div>
-            </ScrollArea>
+            </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="px-6 py-3 flex-shrink-0 border-t bg-background">
             <Button
               variant="outline"
               onClick={() => setCreateOpen(false)}
