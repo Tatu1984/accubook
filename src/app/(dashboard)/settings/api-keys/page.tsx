@@ -489,8 +489,8 @@ export default function ApiKeysPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 overflow-hidden flex flex-col">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="flex flex-col flex-1 min-h-0 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-shrink-0">
               <div className="space-y-2">
                 <Label htmlFor="key-name">Name *</Label>
                 <Input
@@ -514,10 +514,10 @@ export default function ApiKeysPage() {
               </div>
             </div>
 
-            <div className="rounded-md border bg-muted/30 p-3 text-sm">
+            <div className="rounded-md border bg-muted/30 p-3 text-sm flex-shrink-0">
               <div className="font-medium mb-1 flex items-center gap-2">
                 <ShieldCheck className="h-4 w-4 text-green-600" />
-                Scopes
+                Scopes — {SCOPE_TREE.length} modules · scroll for more
               </div>
               <p className="text-xs text-muted-foreground">
                 Tick the actions this key should have for each (module, category).
@@ -526,8 +526,8 @@ export default function ApiKeysPage() {
               </p>
             </div>
 
-            <ScrollArea className="flex-1 max-h-[400px] pr-3">
-              <div className="space-y-4">
+            <ScrollArea className="flex-1 min-h-0 -mr-3 pr-3">
+              <div className="space-y-4 pb-2">
                 {SCOPE_TREE.map((mod) => (
                   <Card key={mod.module}>
                     <CardHeader className="pb-2 flex-row items-center justify-between space-y-0">
