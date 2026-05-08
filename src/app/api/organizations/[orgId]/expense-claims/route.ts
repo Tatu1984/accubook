@@ -172,11 +172,11 @@ export const PATCH = withOrgAuth(async (request, { orgId, userId, session }) => 
 
     if (action === "APPROVE") {
       updateData.status = "APPROVED";
-      updateData.approvedBy = session.user?.name || userId;
+      updateData.approvedBy = session?.user?.name || userId;
       updateData.approvedAt = new Date();
     } else if (action === "REJECT") {
       updateData.status = "REJECTED";
-      updateData.approvedBy = session.user?.name || userId;
+      updateData.approvedBy = session?.user?.name || userId;
       updateData.approvedAt = new Date();
     } else if (action === "REIMBURSE") {
       updateData.status = "REIMBURSED";

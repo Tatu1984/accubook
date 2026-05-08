@@ -45,6 +45,7 @@ model User {
   expenseClaims      ExpenseClaim[]
   attendances        Attendance[]
   leaves             Leave[]
+  apiKeysCreated     ApiKey[]           @relation("ApiKeyCreatedBy")
 
   @@map("users")
 }
@@ -168,6 +169,7 @@ model Organization {
   tcsCollections    TcsCollection[]
   recurringInvoices RecurringInvoice[]
   approvals         Approval[]
+  apiKeys           ApiKey[]
 
   @@map("organizations")
 }
@@ -2018,4 +2020,34 @@ model AuditLog {
   @@index([organizationId, createdAt])
   @@index([entityType, entityId])
   @@map("audit_logs")
+}
+
+// API keys for external programmatic access. Each key is org-scoped and
+// carries a JSON `scopes` array shaped as
+//   [{ module: string, category: string, actions: ("read"|"write"|"delete")[] }]
+// with `*` wildcards on module/category. The full key is shown to the
+// creator exactly once at issuance; only a SHA-256 hash + the visible
+// prefix are persisted.
+model ApiKey {
+  id             String    @id @default(cuid())
+  organizationId String
+  name           String                                          // user-friendly label (e.g. "Hospital ERP integration")
+  keyPrefix      String                                          // first 12 chars of `acb_live_<hex>` — visible, indexable, unique
+  keyHash        String                                          // SHA-256 hex of the full token
+  scopes         Json                                            // ApiScope[] (see verifyApiKey.ts)
+  createdById    String
+  expiresAt      DateTime?
+  lastUsedAt     DateTime?
+  lastUsedIp     String?
+  isActive       Boolean   @default(true)
+  revokedAt      DateTime?
+  revokedReason  String?
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User         @relation("ApiKeyCreatedBy", fields: [createdById], references: [id])
+
+  @@unique([keyPrefix])
+  @@index([organizationId, isActive])
+  @@map("api_keys")
 }

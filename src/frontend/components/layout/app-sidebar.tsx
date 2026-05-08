@@ -38,6 +38,7 @@ import {
   Upload,
   Inbox,
   ScrollText,
+  KeyRound,
   PlayCircle,
 } from "lucide-react";
 
@@ -198,6 +199,7 @@ const settingsNav = [
   { title: "Tax Configuration", href: "/settings/taxes", icon: Percent },
   { title: "Approval Workflows", href: "/settings/approvals", icon: CheckSquare },
   { title: "Tally Migration", href: "/setup/migrate", icon: Upload },
+  { title: "API Keys", href: "/settings/api-keys", icon: KeyRound },
   { title: "Audit Logs", href: "/settings/audit-logs", icon: ScrollText },
 ];
 

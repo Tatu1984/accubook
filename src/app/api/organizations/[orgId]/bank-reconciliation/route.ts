@@ -279,7 +279,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
   }
 });
 
-export const POST = withOrgAuth(async (request, { orgId, session }) => {
+export const POST = withOrgAuth(async (request, { orgId, userId }) => {
   try {
     const body = await request.json();
     const { action } = body;
@@ -552,7 +552,7 @@ export const POST = withOrgAuth(async (request, { orgId, session }) => {
               difference,
               status: "COMPLETED",
               completedAt: new Date(),
-              completedBy: session.user.id,
+              completedBy: userId,
             },
           });
 
