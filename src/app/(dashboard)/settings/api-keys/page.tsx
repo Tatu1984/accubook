@@ -1040,11 +1040,11 @@ export default function ApiKeysPage() {
 
       {/* SHOW-ONCE KEY REVEAL */}
       <Dialog open={!!newKey} onOpenChange={(o) => !o && setNewKey(null)}>
-        <DialogContent className="max-w-3xl p-0 gap-0 overflow-hidden">
+        <DialogContent className="!max-w-[min(95vw,1100px)] w-[95vw] max-h-[90vh] p-0 gap-0 overflow-hidden flex flex-col">
           {/* Success accent bar */}
           <div className="h-1.5 w-full bg-gradient-to-r from-green-500 via-emerald-500 to-teal-500" />
 
-          <DialogHeader className="px-8 pt-7 pb-4">
+          <DialogHeader className="px-10 pt-8 pb-5 flex-shrink-0 border-b">
             <DialogTitle className="flex items-center gap-2 text-lg">
               <div className="rounded-full bg-green-100 dark:bg-green-900/40 p-1.5">
                 <ShieldCheck className="h-5 w-5 text-green-600 dark:text-green-400" />
@@ -1058,7 +1058,7 @@ export default function ApiKeysPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="px-8 pb-6 space-y-5 max-h-[78vh] overflow-y-auto">
+          <div className="flex-1 min-h-0 px-10 py-6 space-y-6 overflow-y-auto">
             {/* TOKEN BLOCK — primary action */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
@@ -1244,7 +1244,7 @@ invoices = resp.json()`}</CodeBlock>
             </div>
           </div>
 
-          <DialogFooter className="px-8 py-4 border-t bg-muted/30 gap-2">
+          <DialogFooter className="px-10 py-4 border-t bg-muted/30 gap-2 flex-shrink-0">
             <Button
               variant="outline"
               onClick={() => setNewKey(null)}
