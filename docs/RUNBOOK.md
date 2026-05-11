@@ -125,28 +125,30 @@ EXISTS`, `IF EXISTS`) and re-apply.
 
 ## Index of cron-friendly endpoints
 
-| Endpoint | Auth | Cadence |
-|---|---|---|
-| `POST /api/cron/check-overdue` | Bearer `CRON_SECRET` | Daily, e.g. 0 3 * * * |
-| `POST /api/organizations/[orgId]/recurring-invoices/run` | Session + `invoices:create` | Daily per org |
-| `POST /api/organizations/[orgId]/notifications/check-overdue` | Session + `settings:read` | Manual / per-org cron |
+| Endpoint | Auth | Cadence | Wired in vercel.json |
+|---|---|---|---|
+| `POST /api/cron/check-overdue` | Bearer `CRON_SECRET` | Daily, 03:00 UTC | ✅ |
+| `POST /api/cron/run-recurring` | Bearer `CRON_SECRET` | Daily, 04:00 UTC | ✅ |
+| `POST /api/organizations/[orgId]/recurring-invoices/run` | Session + `invoices:create` | Manual / per-org tick | — |
+| `POST /api/organizations/[orgId]/notifications/check-overdue` | Session + `settings:read` | Manual / per-org tick | — |
 
-Set up the daily sweep in `vercel.json`:
+Both cross-org sweeps are scheduled in `vercel.json` (`crons` array). The
+per-org routes call the same underlying service helpers, so a customer's
+"Run now" button in the UI hits the identical code path the cron uses.
 
 ```json
 {
   "crons": [
-    {
-      "path": "/api/cron/check-overdue",
-      "schedule": "0 3 * * *"
-    }
+    { "path": "/api/cron/check-overdue", "schedule": "0 3 * * *" },
+    { "path": "/api/cron/run-recurring", "schedule": "0 4 * * *" }
   ]
 }
 ```
 
 Vercel Cron auto-injects an `Authorization: Bearer ${CRON_SECRET}`
 header when `CRON_SECRET` is set as an env var matching Vercel's
-naming convention.
+naming convention. Hobby plan supports up to 2 crons at daily
+granularity; this fits.
 
 ## Incident severity guidance
 

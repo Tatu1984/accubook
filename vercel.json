@@ -1,5 +1,15 @@
 {
   "buildCommand": "prisma migrate deploy && prisma generate && next build",
   "framework": "nextjs",
-  "installCommand": "npm install"
+  "installCommand": "npm install",
+  "crons": [
+    {
+      "path": "/api/cron/check-overdue",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/run-recurring",
+      "schedule": "0 4 * * *"
+    }
+  ]
 }
