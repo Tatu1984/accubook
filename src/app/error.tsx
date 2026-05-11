@@ -11,8 +11,13 @@ export default function Error({
   reset: () => void;
 }) {
   useEffect(() => {
-     
-    console.error(error);
+    // Forward to Sentry when initialized; the SDK noop is automatic when
+    // NEXT_PUBLIC_SENTRY_DSN is unset.
+    if (process.env.NEXT_PUBLIC_SENTRY_DSN) {
+      import("@sentry/nextjs").then((Sentry) => {
+        Sentry.captureException(error);
+      });
+    }
   }, [error]);
 
   return (

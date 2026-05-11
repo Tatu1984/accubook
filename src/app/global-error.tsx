@@ -10,8 +10,11 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
-     
-    console.error(error);
+    if (process.env.NEXT_PUBLIC_SENTRY_DSN) {
+      import("@sentry/nextjs").then((Sentry) => {
+        Sentry.captureException(error);
+      });
+    }
   }, [error]);
 
   return (
