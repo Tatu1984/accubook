@@ -1,6 +1,51 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+/**
+ * Build a per-request CSP string from a freshly-generated nonce.
+ *
+ * Strict policy:
+ *  - default-src 'self' — everything denied unless explicitly allowed
+ *  - script-src nonce + 'strict-dynamic' — only nonced scripts run, and
+ *    they can dynamically load further scripts (Next, React, Sentry SDK)
+ *    without re-enumerating every URL. No 'unsafe-inline', no 'unsafe-eval'.
+ *  - style-src 'self' 'unsafe-inline' — Tailwind v4 injects inline styles
+ *    we can't easily nonce; this is the standard concession.
+ *  - connect-src — same-origin plus Sentry ingest + Upstash REST (the only
+ *    external services this app talks to from the browser; cheap to keep
+ *    unconditional whether or not the env vars are wired).
+ *  - frame-ancestors 'none' — defense in depth alongside XFO=SAMEORIGIN.
+ *  - object-src 'none', base-uri 'self', form-action 'self' — close common
+ *    XSS amplification vectors.
+ *
+ * In production this is a hard enforcement header. In dev we ship a
+ * Report-Only variant so the React refresh runtime + Turbopack HMR aren't
+ * blocked while you're iterating. The set-cookie path stays consistent.
+ */
+function buildCsp(nonce: string, isProd: boolean): { header: string; value: string } {
+  const directives = [
+    "default-src 'self'",
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' ${isProd ? "" : "'unsafe-eval'"}`.trim(),
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    "connect-src 'self' https://*.ingest.sentry.io https://*.upstash.io",
+    "frame-src 'none'",
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    isProd ? "upgrade-insecure-requests" : "",
+  ]
+    .filter(Boolean)
+    .join("; ");
+
+  return {
+    header: isProd ? "Content-Security-Policy" : "Content-Security-Policy-Report-Only",
+    value: directives,
+  };
+}
+
 export function middleware(request: NextRequest) {
   const { nextUrl } = request;
   const pathname = nextUrl.pathname;
@@ -36,41 +81,53 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Allow public API routes
+  // Auth / redirect logic. Compute the desired response, then attach the
+  // CSP nonce + header to it on the way out.
+  let response: NextResponse;
+
   if (isPublicApiRoute) {
-    return NextResponse.next();
-  }
-
-  // Allow API-key requests under /api/* through to the route handler so
-  // `withOrgAuth` can verify the bearer token. The handler returns 401
-  // on bad keys and 403 on scope_denied — middleware doesn't second-guess.
-  if (hasApiKey && pathname.startsWith("/api/")) {
-    return NextResponse.next();
-  }
-
-  // Home page is the public marketing landing. Logged-in users hitting "/"
-  // land directly in the dashboard so they don't see the marketing page
-  // every time they type the bare domain.
-  if (pathname === "/") {
+    response = NextResponse.next();
+  } else if (hasApiKey && pathname.startsWith("/api/")) {
+    // Let API-key requests through to withOrgAuth.
+    response = NextResponse.next();
+  } else if (pathname === "/") {
     if (isLoggedIn) {
-      return NextResponse.redirect(new URL("/dashboard", nextUrl));
+      response = NextResponse.redirect(new URL("/dashboard", nextUrl));
+    } else {
+      response = NextResponse.next();
     }
-    return NextResponse.next();
-  }
-
-  // Redirect logged-in users away from auth pages
-  if (isLoggedIn && isPublicRoute) {
-    return NextResponse.redirect(new URL("/dashboard", nextUrl));
-  }
-
-  // Redirect non-logged-in users to login page
-  if (!isLoggedIn && !isPublicRoute) {
+  } else if (isLoggedIn && isPublicRoute) {
+    response = NextResponse.redirect(new URL("/dashboard", nextUrl));
+  } else if (!isLoggedIn && !isPublicRoute) {
     const loginUrl = new URL("/login", nextUrl);
     loginUrl.searchParams.set("callbackUrl", pathname);
-    return NextResponse.redirect(loginUrl);
+    response = NextResponse.redirect(loginUrl);
+  } else {
+    response = NextResponse.next();
   }
 
-  return NextResponse.next();
+  // Attach CSP only to HTML responses (not /api/*). API responses are
+  // JSON; CSP on them is useless and clutters the wire.
+  if (!pathname.startsWith("/api/")) {
+    const nonce = crypto.randomUUID().replace(/-/g, "");
+    const isProd = process.env.NODE_ENV === "production";
+    const csp = buildCsp(nonce, isProd);
+    const isRedirect = response.headers.get("location") !== null;
+
+    if (!isRedirect) {
+      // Mutate request headers so server components reading `headers()`
+      // can pick up the nonce and emit nonced inline JSON if needed.
+      // Next.js auto-adds the nonce to its emitted <script> tags when
+      // `x-nonce` is present on the request.
+      const requestHeaders = new Headers(request.headers);
+      requestHeaders.set("x-nonce", nonce);
+      response = NextResponse.next({ request: { headers: requestHeaders } });
+    }
+    response.headers.set(csp.header, csp.value);
+    response.headers.set("x-nonce", nonce);
+  }
+
+  return response;
 }
 
 export const config = {
