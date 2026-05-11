@@ -1,10 +1,44 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const ACCOUNT_TYPES = ["CURRENT", "SAVINGS", "CC", "OD"] as const;
+
+const createBankAccountSchema = z
+  .object({
+    name: z.string().min(1, "Name is required"),
+    bankName: z.string().min(1, "Bank name is required"),
+    branch: z.string().optional(),
+    accountNumber: z.string().min(1, "Account number is required"),
+    ifscCode: z.string().optional(),
+    swiftCode: z.string().optional(),
+    accountType: z.enum(ACCOUNT_TYPES),
+    openingBalance: z.number().finite().optional(),
+  })
+  .strict();
+
+// currentBalance and openingBalance are intentionally NOT editable here —
+// currentBalance is derived from posted payments/receipts; openingBalance is
+// captured at creation and shifting it after the fact would silently restate
+// the books. Use a journal voucher instead.
+const updateBankAccountSchema = z
+  .object({
+    id: z.string().min(1, "Bank account ID is required"),
+    name: z.string().min(1).optional(),
+    bankName: z.string().min(1).optional(),
+    branch: z.string().nullable().optional(),
+    accountNumber: z.string().min(1).optional(),
+    ifscCode: z.string().nullable().optional(),
+    swiftCode: z.string().nullable().optional(),
+    accountType: z.enum(ACCOUNT_TYPES).optional(),
+    isActive: z.boolean().optional(),
+  })
+  .strict();
 
 export const GET = withOrgAuth(async (_request, { orgId }) => {
   try {
@@ -41,40 +75,29 @@ export const GET = withOrgAuth(async (_request, { orgId }) => {
 
 export const POST = withOrgAuth(async (request, { orgId }) => {
   try {
-    const body = await request.json();
-
-    const {
-      name,
-      bankName,
-      branch,
-      accountNumber,
-      ifscCode,
-      swiftCode,
-      accountType,
-      openingBalance,
-    } = body;
-
-    if (!name || !bankName || !accountNumber || !accountType) {
-      return badRequest("Name, bank name, account number, and account type are required");
-    }
+    const data = createBankAccountSchema.parse(await request.json());
+    const opening = data.openingBalance ?? 0;
 
     const bankAccount = await prisma.bankAccount.create({
       data: {
         organizationId: orgId,
-        name,
-        bankName,
-        branch,
-        accountNumber,
-        ifscCode,
-        swiftCode,
-        accountType,
-        openingBalance: openingBalance || 0,
-        currentBalance: openingBalance || 0,
+        name: data.name,
+        bankName: data.bankName,
+        branch: data.branch,
+        accountNumber: data.accountNumber,
+        ifscCode: data.ifscCode,
+        swiftCode: data.swiftCode,
+        accountType: data.accountType,
+        openingBalance: opening,
+        currentBalance: opening,
       },
     });
 
     return NextResponse.json(bankAccount, { status: 201 });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return badRequest("Validation failed", error.issues);
+    }
     logger.error({ err: error }, "Error creating bank account");
     return NextResponse.json(
       { error: "Failed to create bank account" },
@@ -85,23 +108,24 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
 
 export const PATCH = withOrgAuth(async (request, { orgId }) => {
   try {
-    const body = await request.json();
-    const { id, ...updateData } = body;
+    const { id, ...updateData } = updateBankAccountSchema.parse(await request.json());
 
-    if (!id) {
-      return badRequest("Bank account ID is required");
-    }
+    const existing = await prisma.bankAccount.findFirst({
+      where: { id, organizationId: orgId },
+      select: { id: true },
+    });
+    if (!existing) return notFound("Bank account not found");
 
     const bankAccount = await prisma.bankAccount.update({
-      where: {
-        id,
-        organizationId: orgId,
-      },
+      where: { id, organizationId: orgId },
       data: updateData,
     });
 
     return NextResponse.json(bankAccount);
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return badRequest("Validation failed", error.issues);
+    }
     logger.error({ err: error }, "Error updating bank account");
     return NextResponse.json(
       { error: "Failed to update bank account" },

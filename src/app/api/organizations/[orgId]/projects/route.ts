@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
-import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
+import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { z } from "zod";
 import { logger } from "@/backend/utils/logger";
 
@@ -8,16 +8,40 @@ import { logger } from "@/backend/utils/logger";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const createProjectSchema = z.object({
-  name: z.string().min(1, "Name is required"),
-  code: z.string().optional(),
-  description: z.string().optional(),
-  startDate: z.string().optional().transform((val) => val ? new Date(val) : undefined),
-  endDate: z.string().optional().transform((val) => val ? new Date(val) : undefined),
-  budget: z.number().optional(),
-  status: z.enum(["ACTIVE", "COMPLETED", "ON_HOLD", "CANCELLED"]).default("ACTIVE"),
-  isActive: z.boolean().default(true),
-});
+const createProjectSchema = z
+  .object({
+    name: z.string().min(1, "Name is required"),
+    code: z.string().optional(),
+    description: z.string().optional(),
+    startDate: z.string().optional().transform((val) => (val ? new Date(val) : undefined)),
+    endDate: z.string().optional().transform((val) => (val ? new Date(val) : undefined)),
+    budget: z.number().optional(),
+    status: z.enum(["ACTIVE", "COMPLETED", "ON_HOLD", "CANCELLED"]).default("ACTIVE"),
+    isActive: z.boolean().default(true),
+  })
+  .strict();
+
+const updateProjectSchema = z
+  .object({
+    id: z.string().min(1, "Project ID is required"),
+    name: z.string().min(1).optional(),
+    code: z.string().nullable().optional(),
+    description: z.string().nullable().optional(),
+    startDate: z
+      .string()
+      .nullable()
+      .optional()
+      .transform((val) => (val ? new Date(val) : val === null ? null : undefined)),
+    endDate: z
+      .string()
+      .nullable()
+      .optional()
+      .transform((val) => (val ? new Date(val) : val === null ? null : undefined)),
+    budget: z.number().nullable().optional(),
+    status: z.enum(["ACTIVE", "COMPLETED", "ON_HOLD", "CANCELLED"]).optional(),
+    isActive: z.boolean().optional(),
+  })
+  .strict();
 
 export const GET = withOrgAuth(async (request, { orgId }) => {
   try {
@@ -122,22 +146,26 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
   }
 });
 
-export const PATCH = withOrgAuth(async (request) => {
+export const PATCH = withOrgAuth(async (request, { orgId }) => {
   try {
     const body = await request.json();
-    const { id, ...updateData } = body;
+    const { id, ...updateData } = updateProjectSchema.parse(body);
 
-    if (!id) {
-      return badRequest("Project ID is required");
-    }
+    const existing = await prisma.project.findFirst({
+      where: { id, organizationId: orgId },
+    });
+    if (!existing) return notFound("Project not found");
 
     const project = await prisma.project.update({
-      where: { id },
+      where: { id, organizationId: orgId },
       data: updateData,
     });
 
     return NextResponse.json(project);
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return badRequest("Validation failed", error.issues);
+    }
     logger.error({ err: error }, "Error updating project");
     return NextResponse.json(
       { error: "Failed to update project" },
@@ -146,7 +174,7 @@ export const PATCH = withOrgAuth(async (request) => {
   }
 });
 
-export const DELETE = withOrgAuth(async (request) => {
+export const DELETE = withOrgAuth(async (request, { orgId }) => {
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
@@ -155,8 +183,23 @@ export const DELETE = withOrgAuth(async (request) => {
       return badRequest("Project ID is required");
     }
 
+    const existing = await prisma.project.findFirst({
+      where: { id, organizationId: orgId },
+      include: { _count: { select: { voucherEntries: true } } },
+    });
+    if (!existing) return notFound("Project not found");
+
+    // Soft-delete if any voucher entries reference it — preserves books.
+    if (existing._count.voucherEntries > 0) {
+      await prisma.project.update({
+        where: { id, organizationId: orgId },
+        data: { isActive: false },
+      });
+      return NextResponse.json({ success: true, softDeleted: true });
+    }
+
     await prisma.project.delete({
-      where: { id },
+      where: { id, organizationId: orgId },
     });
 
     return NextResponse.json({ success: true });
