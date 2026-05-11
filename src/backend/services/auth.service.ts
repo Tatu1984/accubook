@@ -3,6 +3,7 @@ import Credentials from "next-auth/providers/credentials";
 import { compare } from "bcryptjs";
 import prisma from "@/backend/database/client";
 import { env } from "@/config/env";
+import { checkRateLimit, clientIpFromHeaders } from "@/backend/utils/rate-limit";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   // Pin both: relying on auto-detection (`AUTH_SECRET` env var)
@@ -27,9 +28,34 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, request) {
         if (!credentials?.email || !credentials?.password) {
           throw new Error("Email and password are required");
+        }
+
+        // Brute-force defense: rate-limit by IP (broad) AND by email
+        // (narrow). The narrow bucket stops an attacker rotating IPs
+        // against one account; the wide bucket stops a single host
+        // spraying many accounts. Both must allow.
+        const ip = request?.headers
+          ? clientIpFromHeaders(request.headers as Headers)
+          : "unknown";
+        const emailKey = String(credentials.email).toLowerCase();
+        const [byIp, byEmail] = await Promise.all([
+          checkRateLimit({
+            key: `login:ip:${ip}`,
+            limit: 10,
+            windowMs: 10 * 60 * 1000,
+          }),
+          checkRateLimit({
+            key: `login:email:${emailKey}`,
+            limit: 5,
+            windowMs: 10 * 60 * 1000,
+          }),
+        ]);
+        if (!byIp.allowed || !byEmail.allowed) {
+          // Generic message — don't tell the attacker which axis tripped.
+          throw new Error("Too many sign-in attempts. Please try again later.");
         }
 
         const user = await prisma.user.findUnique({

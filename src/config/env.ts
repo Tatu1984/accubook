@@ -46,6 +46,19 @@ const envSchema = z.object({
   // recurring + overdue + payroll-post without a real session
   // cookie. Must be at least 32 chars when set; rotate quarterly.
   CRON_SECRET: z.string().min(32).optional(),
+
+  // Upstash Redis REST API — when set, /api/auth/* endpoints rate-limit
+  // by IP + email to slow brute-force and account enumeration. When
+  // unset, the rate-limit helper no-ops with a one-time warning, so
+  // dev / preview deploys aren't blocked on Upstash provisioning. Both
+  // vars must be set together for rate limiting to activate.
+  UPSTASH_REDIS_REST_URL: z.string().url().optional(),
+  UPSTASH_REDIS_REST_TOKEN: z.string().min(1).optional(),
+
+  // Sentry — when set, error tracking is initialized at boot. No-op
+  // when unset so local dev doesn't need a Sentry account.
+  SENTRY_DSN: z.string().url().optional(),
+  NEXT_PUBLIC_SENTRY_DSN: z.string().url().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

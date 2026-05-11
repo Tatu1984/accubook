@@ -3,6 +3,11 @@ import { prisma } from "@/backend/database/client";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { logger } from "@/backend/utils/logger";
+import {
+  checkRateLimit,
+  clientIpFromHeaders,
+  rateLimited,
+} from "@/backend/utils/rate-limit";
 
 const registerSchema = z.object({
   // User details
@@ -20,6 +25,19 @@ const registerSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    // Rate-limit before parsing — drops abusive traffic with no DB work.
+    // 5 registrations per IP per 10 minutes is generous for human use,
+    // tight enough to slow scripted enumeration.
+    const ip = clientIpFromHeaders(request.headers);
+    const rl = await checkRateLimit({
+      key: `register:ip:${ip}`,
+      limit: 5,
+      windowMs: 10 * 60 * 1000,
+    });
+    if (!rl.allowed) {
+      return rateLimited(rl, "Too many registration attempts. Try again later.") as unknown as NextResponse;
+    }
+
     const body = await request.json();
     const validatedData = registerSchema.parse(body);
 
