@@ -3,6 +3,7 @@ import type { Session } from "next-auth";
 import { auth } from "@/backend/services/auth.service";
 import { prisma } from "@/backend/database/client";
 import type { Prisma } from "@/generated/prisma";
+import { env } from "@/config/env";
 import { hasPermission as hasPermissionLeaf } from "@/backend/utils/permissions";
 import {
   extractBearerToken,
@@ -10,6 +11,68 @@ import {
   type VerifiedApiKey,
 } from "@/backend/utils/verify-api-key";
 import { resolveScopeTarget, scopesCover } from "@/backend/utils/api-scope";
+
+/**
+ * Anti-CSRF check for session-authenticated, mutating requests.
+ *
+ * Browsers auto-attach cookies but enforce the Same-Origin Policy on
+ * cross-origin Origin headers. By rejecting any mutating request whose
+ * Origin doesn't match the Host (or a known allowlisted app URL), we
+ * close the classic "malicious page POSTs to our cookie-authed endpoint"
+ * vector even when SameSite=Lax cookies aren't enough (e.g. top-level
+ * navigations).
+ *
+ * Skipped for:
+ *  - GET / HEAD / OPTIONS — RFC-safe methods (browsers don't pre-flight
+ *    these so CSRF isn't applicable; reads are allowed).
+ *  - API-key requests — bearer tokens aren't auto-attached by the
+ *    browser, so there's no cross-origin ride.
+ *
+ * Returns null on success, a 403 NextResponse on failure.
+ */
+function checkSameOrigin(request: NextRequest): NextResponse | null {
+  const method = request.method.toUpperCase();
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") {
+    return null;
+  }
+
+  const origin = request.headers.get("origin");
+  const host = request.headers.get("host");
+  // No Origin on a mutating request → either an older/odd client, or a
+  // crafted request that stripped the header. Reject conservatively.
+  if (!origin || !host) {
+    return NextResponse.json(
+      { error: "Missing Origin header" },
+      { status: 403 }
+    );
+  }
+
+  let originHost: string;
+  try {
+    originHost = new URL(origin).host;
+  } catch {
+    return NextResponse.json({ error: "Invalid Origin header" }, { status: 403 });
+  }
+
+  if (originHost === host) return null;
+
+  // Allow an explicit APP_URL (canonical public URL, may differ from the
+  // internal Host behind a proxy or load balancer).
+  const appUrl = env.APP_URL || env.NEXTAUTH_URL;
+  if (appUrl) {
+    try {
+      const allowedHost = new URL(appUrl).host;
+      if (originHost === allowedHost) return null;
+    } catch {
+      // Malformed APP_URL — fall through to deny.
+    }
+  }
+
+  return NextResponse.json(
+    { error: "Cross-origin request denied" },
+    { status: 403 }
+  );
+}
 
 export type OrgUser = Prisma.OrganizationUserGetPayload<{
   include: { role: true };
@@ -130,6 +193,11 @@ export function withOrgAuth<P extends Record<string, string> = Record<string, st
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    // 2a. CSRF: session-authed mutations must come from a same-origin
+    // request. Belt-and-braces alongside the auth cookie's SameSite=Lax.
+    const csrfDenied = checkSameOrigin(request);
+    if (csrfDenied) return csrfDenied;
 
     const orgUser = await prisma.organizationUser.findUnique({
       where: {
