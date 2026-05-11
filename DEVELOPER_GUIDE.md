@@ -23,7 +23,7 @@
 | Language | TypeScript | 5.x |
 | Database | PostgreSQL | 16+ |
 | ORM | Prisma | 7.1.0 |
-| Auth | NextAuth.js | v5 |
+| Auth | NextAuth.js | 5.0.0-beta.30 (pinned exactly — do not float) |
 | UI Components | Radix UI | Latest |
 | Styling | TailwindCSS | 4.x |
 | State | Zustand | 5.0.9 |
