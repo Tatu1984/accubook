@@ -22,23 +22,28 @@ import type { NextRequest } from "next/server";
  * Report-Only variant so the React refresh runtime + Turbopack HMR aren't
  * blocked while you're iterating. The set-cookie path stays consistent.
  */
-function buildCsp(nonce: string, isProd: boolean): { header: string; value: string } {
-  // NOTE on strict-dynamic: previously this policy used `'strict-dynamic'`
-  // alongside the per-request nonce. That works only when every <script>
-  // tag in the HTML carries the matching nonce. Next.js can inject nonces
-  // for *dynamically* rendered pages (where middleware's x-nonce header
-  // reaches the renderer), but pages prerendered at build time
-  // (x-nextjs-prerender: 1) are served from the CDN as static HTML whose
-  // script tags have NO nonce attribute — the build had no request and
-  // therefore no x-nonce. With strict-dynamic, 'self' is ignored, so the
-  // browser blocks every framework script on those prerendered pages,
-  // leaving the page non-interactive (dashboards stuck on skeletons,
-  // dropdowns dead, login form unsubmittable). Dropping 'strict-dynamic'
-  // lets 'self' allow same-origin static chunks while still gating any
-  // inline scripts behind the nonce.
+function buildCsp(_nonce: string, isProd: boolean): { header: string; value: string } {
+  // NOTE on script-src: we tried two stricter variants and both broke
+  // production. (1) `'nonce-X' 'strict-dynamic'` — modern, recommended —
+  // blocks every script on a prerendered page because the static HTML's
+  // script tags have no nonce attribute (the build had no request and
+  // therefore no x-nonce header). (2) `'self' 'nonce-X'` (no strict-dynamic)
+  // — `self` covered the external chunks but Next still emits ~20 inline
+  // <script> bootstrap tags in the prerendered HTML, and per CSP3 the
+  // presence of any nonce in script-src causes browsers to ignore
+  // 'unsafe-inline', so those inline tags still got blocked.
+  //
+  // Pragmatic resolution: drop the nonce; use `'self' 'unsafe-inline'`.
+  // We lose inline-script XSS defense (an injected <script>alert(...)
+  // would now run), but keep all the other valuable CSP gates:
+  // frame-ancestors 'none', object-src 'none', base-uri 'self',
+  // form-action 'self', connect-src allowlist, same-origin script
+  // loading. Tightening back to nonce-only requires forcing every page
+  // dynamic (export const dynamic = 'force-dynamic') or computing per-
+  // build script hashes — both intrusive enough to defer.
   const directives = [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' ${isProd ? "" : "'unsafe-eval'"}`.trim(),
+    `script-src 'self' 'unsafe-inline' ${isProd ? "" : "'unsafe-eval'"}`.trim(),
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
