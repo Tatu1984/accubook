@@ -83,14 +83,6 @@ export default function Home() {
           <a href="#stats" className="hover:text-slate-900 dark:hover:text-white">
             Why us
           </a>
-          <a
-            href="https://github.com/Tatu1984/accubook"
-            target="_blank"
-            rel="noreferrer"
-            className="hover:text-slate-900 dark:hover:text-white"
-          >
-            GitHub
-          </a>
         </nav>
         <Magnetic>
           <Button asChild className="rounded-full px-6">
@@ -268,14 +260,6 @@ export default function Home() {
           <div className="flex items-center gap-6">
             <a href={LOGIN_URL} className="hover:text-slate-700 dark:hover:text-slate-200">
               Sign in
-            </a>
-            <a
-              href="https://github.com/Tatu1984/accubook"
-              target="_blank"
-              rel="noreferrer"
-              className="hover:text-slate-700 dark:hover:text-slate-200"
-            >
-              GitHub
             </a>
           </div>
         </div>
