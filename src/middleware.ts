@@ -23,9 +23,22 @@ import type { NextRequest } from "next/server";
  * blocked while you're iterating. The set-cookie path stays consistent.
  */
 function buildCsp(nonce: string, isProd: boolean): { header: string; value: string } {
+  // NOTE on strict-dynamic: previously this policy used `'strict-dynamic'`
+  // alongside the per-request nonce. That works only when every <script>
+  // tag in the HTML carries the matching nonce. Next.js can inject nonces
+  // for *dynamically* rendered pages (where middleware's x-nonce header
+  // reaches the renderer), but pages prerendered at build time
+  // (x-nextjs-prerender: 1) are served from the CDN as static HTML whose
+  // script tags have NO nonce attribute — the build had no request and
+  // therefore no x-nonce. With strict-dynamic, 'self' is ignored, so the
+  // browser blocks every framework script on those prerendered pages,
+  // leaving the page non-interactive (dashboards stuck on skeletons,
+  // dropdowns dead, login form unsubmittable). Dropping 'strict-dynamic'
+  // lets 'self' allow same-origin static chunks while still gating any
+  // inline scripts behind the nonce.
   const directives = [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' ${isProd ? "" : "'unsafe-eval'"}`.trim(),
+    `script-src 'self' 'nonce-${nonce}' ${isProd ? "" : "'unsafe-eval'"}`.trim(),
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
@@ -91,11 +104,10 @@ export function middleware(request: NextRequest) {
     // Let API-key requests through to withOrgAuth.
     response = NextResponse.next();
   } else if (pathname === "/") {
-    if (isLoggedIn) {
-      response = NextResponse.redirect(new URL("/dashboard", nextUrl));
-    } else {
-      response = NextResponse.next();
-    }
+    // Landing page is public for everyone — logged-in users get the
+    // header's "Sign in" → /login link, which will then bounce them to
+    // /dashboard via the rule below.
+    response = NextResponse.next();
   } else if (isLoggedIn && isPublicRoute) {
     response = NextResponse.redirect(new URL("/dashboard", nextUrl));
   } else if (!isLoggedIn && !isPublicRoute) {
