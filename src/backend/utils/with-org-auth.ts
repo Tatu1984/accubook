@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { Session } from "next-auth";
 import { auth } from "@/backend/services/auth.service";
-import { prisma } from "@/backend/database/client";
+import { prisma, withDbRetry } from "@/backend/database/client";
 import type { Prisma } from "@/generated/prisma";
 import { env } from "@/config/env";
 import { hasPermission as hasPermissionLeaf } from "@/backend/utils/permissions";
@@ -162,15 +162,17 @@ export function withOrgAuth<P extends Record<string, string> = Record<string, st
 
       // Resolve the API key's owner orgUser (so the handler sees a
       // permissions object and audit trail attribution).
-      const orgUser = await prisma.organizationUser.findUnique({
-        where: {
-          organizationId_userId: {
-            organizationId: orgId,
-            userId: verified.createdById,
+      const orgUser = await withDbRetry(() =>
+        prisma.organizationUser.findUnique({
+          where: {
+            organizationId_userId: {
+              organizationId: orgId,
+              userId: verified.createdById,
+            },
           },
-        },
-        include: { role: true },
-      });
+          include: { role: true },
+        })
+      );
       if (!orgUser || !orgUser.isActive) {
         return NextResponse.json(
           { error: "Access denied (key creator no longer active)" },
@@ -199,15 +201,20 @@ export function withOrgAuth<P extends Record<string, string> = Record<string, st
     const csrfDenied = checkSameOrigin(request);
     if (csrfDenied) return csrfDenied;
 
-    const orgUser = await prisma.organizationUser.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: session.user.id,
+    // Membership check runs on EVERY org-scoped request. Retry transient
+    // Neon connection errors (cold-start ETIMEDOUT) so a sleeping DB doesn't
+    // 500 an otherwise-valid request.
+    const orgUser = await withDbRetry(() =>
+      prisma.organizationUser.findUnique({
+        where: {
+          organizationId_userId: {
+            organizationId: orgId,
+            userId: session.user.id,
+          },
         },
-      },
-      include: { role: true },
-    });
+        include: { role: true },
+      })
+    );
 
     if (!orgUser || !orgUser.isActive) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });

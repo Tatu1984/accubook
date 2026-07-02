@@ -64,7 +64,7 @@ function buildCsp(_nonce: string, isProd: boolean): { header: string; value: str
   };
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { nextUrl } = request;
   const pathname = nextUrl.pathname;
 
@@ -74,7 +74,7 @@ export function middleware(request: NextRequest) {
   const isLoggedIn = !!sessionToken;
 
   // API-key auth: external integrations send `Authorization: Bearer
-  // acb_live_…`. Let those requests pass through middleware so the route
+  // acb_live_…`. Let those requests pass through proxy so the route
   // handler's `withOrgAuth` wrapper can verify the token + check scopes.
   // We only sniff for the prefix here — actual verification is server-side.
   const authHeader = request.headers.get("authorization") || "";
@@ -90,7 +90,7 @@ export function middleware(request: NextRequest) {
   const publicApiRoutes = ["/api/auth", "/api/health", "/api/hsn-search"];
   const isPublicApiRoute = publicApiRoutes.some(route => pathname.startsWith(route));
 
-  // Static files - skip middleware
+  // Static files - skip proxy
   if (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
