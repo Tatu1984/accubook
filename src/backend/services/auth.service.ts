@@ -1,7 +1,7 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { compare } from "bcryptjs";
-import prisma from "@/backend/database/client";
+import prisma, { withDbRetry } from "@/backend/database/client";
 import { env } from "@/config/env";
 import { checkRateLimit, clientIpFromHeaders } from "@/backend/utils/rate-limit";
 
@@ -58,26 +58,31 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           throw new Error("Too many sign-in attempts. Please try again later.");
         }
 
-        const user = await prisma.user.findUnique({
-          where: { email: credentials.email as string },
-          include: {
-            organizationUsers: {
-              where: { isActive: true },
-              include: {
-                organization: {
-                  include: {
-                    baseCurrency: true,
-                    branches: {
-                      where: { isActive: true },
-                      orderBy: { isHeadOffice: "desc" },
+        // Retry transient Neon connection errors (cold-start ETIMEDOUT) —
+        // otherwise NextAuth surfaces a dropped first handshake as the
+        // generic "Authentication is misconfigured."
+        const user = await withDbRetry(() =>
+          prisma.user.findUnique({
+            where: { email: credentials.email as string },
+            include: {
+              organizationUsers: {
+                where: { isActive: true },
+                include: {
+                  organization: {
+                    include: {
+                      baseCurrency: true,
+                      branches: {
+                        where: { isActive: true },
+                        orderBy: { isHeadOffice: "desc" },
+                      },
                     },
                   },
+                  role: true,
                 },
-                role: true,
               },
             },
-          },
-        });
+          })
+        );
 
         if (!user || !user.passwordHash) {
           throw new Error("Invalid email or password");
