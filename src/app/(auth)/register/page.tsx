@@ -260,7 +260,7 @@ export default function RegisterPage() {
                 </>
               )}
             </CardContent>
-            <CardFooter className="flex flex-col gap-4">
+            <CardFooter className="flex flex-col gap-4 mt-6">
               {step === 1 ? (
                 <Button
                   type="button"

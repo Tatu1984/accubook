@@ -127,7 +127,7 @@ export default function Home() {
                 className="rounded-full bg-slate-900 px-8 text-base shadow-lg hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
               >
                 <a href={LOGIN_URL}>
-                  <span className="shiny-text">Sign in to portal</span>
+                  <span>Sign in to portal</span>
                   <ArrowRight className="ml-1.5 h-4 w-4" />
                 </a>
               </Button>
