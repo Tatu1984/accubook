@@ -19,6 +19,7 @@ import {
 import { SidebarTrigger } from "@/frontend/components/ui/sidebar";
 import { Separator } from "@/frontend/components/ui/separator";
 import { Badge } from "@/frontend/components/ui/badge";
+import { ModeToggle } from "@/frontend/components/mode-toggle";
 
 interface Branch {
   id: string;
@@ -320,6 +321,9 @@ export function Header() {
             )}
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {/* Theme toggle */}
+        <ModeToggle />
 
         {/* Notifications */}
         <DropdownMenu>

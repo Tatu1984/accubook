@@ -161,12 +161,23 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         token.permissions = user.permissions;
       }
 
-      // Handle session updates (e.g., switching organizations)
+      // Handle session updates (e.g., switching branches/organizations).
+      // Only overwrite fields the caller actually sent — a branch switch
+      // that passes just branchId/branchName must not clobber the
+      // existing organizationId/organizationName with undefined.
       if (trigger === "update" && session) {
-        token.organizationId = session.organizationId;
-        token.organizationName = session.organizationName;
-        token.branchId = session.branchId;
-        token.branchName = session.branchName;
+        if (session.organizationId !== undefined) {
+          token.organizationId = session.organizationId;
+        }
+        if (session.organizationName !== undefined) {
+          token.organizationName = session.organizationName;
+        }
+        if (session.branchId !== undefined) {
+          token.branchId = session.branchId;
+        }
+        if (session.branchName !== undefined) {
+          token.branchName = session.branchName;
+        }
       }
 
       return token;

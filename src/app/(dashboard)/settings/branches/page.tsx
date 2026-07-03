@@ -79,7 +79,10 @@ export default function BranchesSettingsPage() {
   });
 
   const fetchBranches = React.useCallback(async () => {
-    if (!organizationId) return;
+    if (!organizationId) {
+      setLoading(false);
+      return;
+    }
 
     try {
       const response = await fetch(`/api/organizations/${organizationId}/branches`);
