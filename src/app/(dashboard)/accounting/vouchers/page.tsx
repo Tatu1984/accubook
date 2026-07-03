@@ -49,6 +49,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
 import { Checkbox } from "@/frontend/components/ui/checkbox";
 import { cn } from "@/shared/utils/common.util";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useOrganization } from "@/frontend/hooks/use-organization";
 import { toast } from "sonner";
 import { downloadCsv } from "@/frontend/utils/export-csv";
@@ -136,12 +137,25 @@ function formatDate(dateStr: string) {
   });
 }
 
+// Voucher-type codes the filter tabs support. Also used to validate the
+// incoming `?type=` query param so a stray value can't select a nonexistent tab.
+const VOUCHER_TYPE_TABS = ["all", "PAYMENT", "RECEIPT", "JOURNAL", "CONTRA", "SALES", "PURCHASE"] as const;
+
 export default function VouchersPage() {
   const { organizationId, isLoading: authLoading } = useOrganization();
+  // Sidebar links here as `/accounting/vouchers?type=JOURNAL` (Journal Entries),
+  // etc. Seed the active tab from that param so those links land on the right
+  // filter instead of always showing "All Vouchers".
+  const searchParams = useSearchParams();
+  const typeParam = searchParams.get("type");
+  const initialType =
+    typeParam && (VOUCHER_TYPE_TABS as readonly string[]).includes(typeParam)
+      ? typeParam
+      : "all";
   const [vouchers, setVouchers] = React.useState<Voucher[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
-  const [selectedType, setSelectedType] = React.useState<string>("all");
+  const [selectedType, setSelectedType] = React.useState<string>(initialType);
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [voucherToDelete, setVoucherToDelete] = React.useState<string | null>(null);
   const [pagination, setPagination] = React.useState({
@@ -150,6 +164,13 @@ export default function VouchersPage() {
     total: 0,
     totalPages: 0,
   });
+
+  // Keep the active tab in sync when navigating between sidebar links
+  // (e.g. Vouchers → Journal Entries) without a full remount, where the
+  // useState initializer above wouldn't re-run.
+  React.useEffect(() => {
+    setSelectedType(initialType);
+  }, [initialType]);
 
   // Fetch vouchers from API
   const fetchVouchers = React.useCallback(async () => {
