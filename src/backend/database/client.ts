@@ -39,6 +39,18 @@ export const prisma =
   new PrismaClient({
     adapter,
     log: env.isDevelopment ? ["query", "error", "warn"] : ["error"],
+    // Interactive-transaction defaults. Prisma's built-in default is a 5s
+    // timeout, which is too tight against a cold/distant Neon pooler where a
+    // single multi-step posting transaction (numbering → insert voucher +
+    // entries → update ledger balances → audit) can legitimately take longer
+    // than 5s and get killed with P2028 ("transaction expired"). Raising the
+    // default to 20s (with 10s maxWait to acquire a connection) covers the
+    // GL-posting flows app-wide without patching each $transaction call site.
+    // Individual calls can still override (e.g. Tally import uses 30s).
+    transactionOptions: {
+      timeout: 20_000,
+      maxWait: 10_000,
+    },
   });
 
 if (!env.isProduction) {

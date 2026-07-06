@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Loader2, AlertCircle } from "lucide-react";
+import { ArrowLeft, Loader2, AlertCircle, Pencil } from "lucide-react";
 import { useOrganization } from "@/frontend/hooks/use-organization";
 import { Button } from "@/frontend/components/ui/button";
 import {
@@ -191,6 +191,16 @@ export default function VoucherDetailPage() {
             {voucher.voucherType?.name ?? typeCode}
           </Badge>
           <Badge className={status.color}>{status.label}</Badge>
+          {/* Edit is only meaningful before posting — the PATCH API refuses
+              content edits on a posted voucher. */}
+          {!voucher.isPosted ? (
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/accounting/vouchers/${voucher.id}/edit`}>
+                <Pencil className="mr-2 h-4 w-4" />
+                Edit
+              </Link>
+            </Button>
+          ) : null}
         </div>
       </div>
 
