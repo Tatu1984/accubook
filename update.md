@@ -533,6 +533,32 @@ out every existing user. Re-seeding rewrites the system roles to the new vocabul
 - **`components.json`** — shadcn config, aliases now point at `@/frontend/components` etc.
 - **`tsconfig.json`** — paths: `@/*`, `@/backend/*`, `@/frontend/*`, `@/shared/*`, `@/config/*`.
 
+## 10b. Deployment hazards discovered 2026-08-14
+
+- **A branch push migrates the production database.** `vercel.json`'s
+  `buildCommand` is `prisma migrate deploy && prisma generate && next build`,
+  and preview deployments share the single production `DATABASE_URL`. Pushing
+  the PR-6 branch applied migrations 12 and 13 to production before anything
+  merged. Additive columns made that harmless, but a destructive migration
+  would hit live customer books from an unmerged PR. **Give previews their own
+  Neon branch.**
+- **Concurrent builds fail on the Prisma advisory lock.** The PR-6 merge built
+  a preview and a production deployment at the same moment; both ran
+  `migrate deploy`, contended for `pg_advisory_lock(72707369)`, and died with
+  `P1002` after the 10s timeout. Failure mode is safe (Vercel keeps serving the
+  previous deployment) and the fix is simply to redeploy once nothing else is
+  building.
+- **Env is validated at boot** (`src/config/env.ts`). A malformed *optional*
+  var (e.g. `CRON_SECRET` under 32 chars, a non-URL `APP_URL`) throws at module
+  load. This fails the build rather than the running site, so it degrades to
+  "deploy did not land" — but check it when a deploy errors.
+- **Crons need `CRON_SECRET`** (≥32 chars) set on Vercel, or
+  `/api/cron/check-overdue` and `/api/cron/run-recurring` return 503.
+- **Demo credentials card** needs all three of `NEXT_PUBLIC_DEMO=true`,
+  `NEXT_PUBLIC_DEMO_EMAIL`, `NEXT_PUBLIC_DEMO_PASSWORD` set on Vercel. They are
+  `NEXT_PUBLIC_*`, so they are inlined at build time — a redeploy is required
+  after setting them, and whatever is set is public to every visitor of /login.
+
 ## 11. Critical "do not break"
 
 - **Never move `src/app/api/`** — Next.js requires API routes there. The `src/backend/` folder is for *logic*, not handlers.
