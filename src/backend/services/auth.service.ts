@@ -4,6 +4,8 @@ import { compare } from "bcryptjs";
 import prisma, { withDbRetry } from "@/backend/database/client";
 import { env } from "@/config/env";
 import { checkRateLimit, clientIpFromHeaders } from "@/backend/utils/rate-limit";
+import { writeAudit } from "@/backend/utils/audit";
+import { logger } from "@/backend/utils/logger";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   // Pin both: relying on auto-detection (`AUTH_SECRET` env var)
@@ -131,6 +133,49 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         const org = orgUser?.organization;
         const branch = org?.branches?.[0];
 
+        /**
+         * Record the sign-in.
+         *
+         * `LOGIN` and `LOGOUT` have been in the AuditAction union since the
+         * audit log was written, but nothing ever emitted them, so the
+         * audit screen could never answer "who signed in, from where" —
+         * the first question anyone reviewing an accounting system asks.
+         *
+         * The IP is passed explicitly rather than left to `writeAudit` to
+         * infer: this runs inside NextAuth's handler, and it is the same
+         * address the rate limiter above already keyed on, so the audit
+         * trail and the brute-force defence cannot disagree about who the
+         * caller was.
+         *
+         * Best-effort on purpose — an audit row that fails to write must
+         * never cost a legitimate user their sign-in. Audit rows are
+         * organization-scoped, so a user who belongs to no organization
+         * has nowhere to record this.
+         */
+        if (org?.id) {
+          try {
+            await writeAudit(prisma, {
+              organizationId: org.id,
+              userId: user.id,
+              action: "LOGIN",
+              entityType: "User",
+              entityId: user.id,
+              ipAddress: ip === "unknown" ? undefined : ip,
+              userAgent:
+                request?.headers instanceof Headers
+                  ? request.headers.get("user-agent") ?? undefined
+                  : undefined,
+              newData: {
+                email: user.email,
+                role: orgUser?.role?.name ?? null,
+                organizationName: org.name,
+              },
+            });
+          } catch (err) {
+            logger.error({ err, userId: user.id }, "Failed to write LOGIN audit entry");
+          }
+        }
+
         return {
           id: user.id,
           email: user.email,
@@ -227,6 +272,35 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     },
     async authorized({ auth }) {
       return !!auth?.user;
+    },
+  },
+  events: {
+    /**
+     * Close the pair: a sign-in that is recorded but a sign-out that is
+     * not leaves every session looking permanently open.
+     *
+     * On the JWT strategy this fires with the decoded token rather than a
+     * database session, so the organization comes from the claim the jwt
+     * callback put there. `writeAudit` reads the IP off the outgoing
+     * request itself.
+     */
+    async signOut(message) {
+      const token = "token" in message ? message.token : null;
+      const userId = token?.sub;
+      const organizationId = token?.organizationId;
+      if (!userId || typeof organizationId !== "string") return;
+      try {
+        await writeAudit(prisma, {
+          organizationId,
+          userId,
+          action: "LOGOUT",
+          entityType: "User",
+          entityId: userId,
+          newData: { email: token?.email ?? null },
+        });
+      } catch (err) {
+        logger.error({ err, userId }, "Failed to write LOGOUT audit entry");
+      }
     },
   },
 });

@@ -13,7 +13,14 @@ import {
   LogIn,
   LogOut,
   Eye,
+  Loader2,
+  AlertCircle,
+  BookCheck,
+  Undo2,
+  PackageMinus,
+  CheckCircle2,
 } from "lucide-react";
+import { useOrganization } from "@/frontend/hooks/use-organization";
 import { Button } from "@/frontend/components/ui/button";
 import {
   Card,
@@ -50,7 +57,7 @@ interface AuditLog {
   userName: string;
   userEmail: string;
   userAvatar?: string;
-  action: "CREATE" | "UPDATE" | "DELETE" | "LOGIN" | "LOGOUT" | "EXPORT" | "VIEW";
+  action: string;
   entityType: string;
   entityId?: string;
   oldData?: Record<string, unknown>;
@@ -60,105 +67,49 @@ interface AuditLog {
   createdAt: string;
 }
 
-const auditLogs: AuditLog[] = [
-  {
-    id: "1",
-    userId: "1",
-    userName: "Admin User",
-    userEmail: "admin@accubooks.com",
-    action: "CREATE",
-    entityType: "INVOICE",
-    entityId: "INV/2024-25/007",
-    newData: { customerName: "New Customer", amount: 50000 },
-    ipAddress: "192.168.1.100",
-    createdAt: "2024-12-09T14:30:00",
-  },
-  {
-    id: "2",
-    userId: "1",
-    userName: "Admin User",
-    userEmail: "admin@accubooks.com",
-    action: "UPDATE",
-    entityType: "PARTY",
-    entityId: "Acme Corporation",
-    oldData: { phone: "9876543210" },
-    newData: { phone: "9876543211" },
-    ipAddress: "192.168.1.100",
-    createdAt: "2024-12-09T14:15:00",
-  },
-  {
-    id: "3",
-    userId: "2",
-    userName: "Finance Manager",
-    userEmail: "finance@accubooks.com",
-    action: "EXPORT",
-    entityType: "REPORT",
-    entityId: "Balance Sheet FY 2024-25",
-    ipAddress: "192.168.1.101",
-    createdAt: "2024-12-09T13:45:00",
-  },
-  {
-    id: "4",
-    userId: "3",
-    userName: "Sales User",
-    userEmail: "sales@accubooks.com",
-    action: "CREATE",
-    entityType: "QUOTATION",
-    entityId: "QT-000007",
-    newData: { customerName: "Prospect Ltd", amount: 125000 },
-    ipAddress: "192.168.1.102",
-    createdAt: "2024-12-09T12:30:00",
-  },
-  {
-    id: "5",
-    userId: "1",
-    userName: "Admin User",
-    userEmail: "admin@accubooks.com",
-    action: "DELETE",
-    entityType: "VOUCHER",
-    entityId: "JV/2024-25/089",
-    oldData: { amount: 15000, narration: "Test entry" },
-    ipAddress: "192.168.1.100",
-    createdAt: "2024-12-09T11:00:00",
-  },
-  {
-    id: "6",
-    userId: "2",
-    userName: "Finance Manager",
-    userEmail: "finance@accubooks.com",
-    action: "LOGIN",
-    entityType: "USER",
-    ipAddress: "192.168.1.101",
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
-    createdAt: "2024-12-09T09:00:00",
-  },
-  {
-    id: "7",
-    userId: "3",
-    userName: "Sales User",
-    userEmail: "sales@accubooks.com",
-    action: "VIEW",
-    entityType: "REPORT",
-    entityId: "Profit & Loss Statement",
-    ipAddress: "192.168.1.102",
-    createdAt: "2024-12-08T16:30:00",
-  },
-  {
-    id: "8",
-    userId: "1",
-    userName: "Admin User",
-    userEmail: "admin@accubooks.com",
-    action: "UPDATE",
-    entityType: "SETTINGS",
-    entityId: "Organization Settings",
-    oldData: { fiscalYearStart: 4 },
-    newData: { fiscalYearStart: 4, dateFormat: "DD/MM/YYYY" },
-    ipAddress: "192.168.1.100",
-    createdAt: "2024-12-08T15:00:00",
-  },
-];
+/**
+ * Shape returned by GET /api/organizations/[orgId]/audit-logs, which nests
+ * the actor. The table above wants it flat.
+ */
+interface AuditLogResponse {
+  id: string;
+  userId: string;
+  action: string;
+  entityType: string;
+  entityId?: string | null;
+  oldData?: Record<string, unknown> | null;
+  newData?: Record<string, unknown> | null;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+  createdAt: string;
+  user?: { id: string; name: string | null; email: string; avatar?: string | null } | null;
+}
 
-const actionConfig = {
+function toAuditLog(row: AuditLogResponse): AuditLog {
+  return {
+    id: row.id,
+    userId: row.userId,
+    userName: row.user?.name || row.user?.email || "Unknown user",
+    userEmail: row.user?.email || "",
+    userAvatar: row.user?.avatar ?? undefined,
+    action: row.action as AuditLog["action"],
+    entityType: row.entityType,
+    entityId: row.entityId ?? undefined,
+    oldData: row.oldData ?? undefined,
+    newData: row.newData ?? undefined,
+    ipAddress: row.ipAddress ?? undefined,
+    userAgent: row.userAgent ?? undefined,
+    createdAt: row.createdAt,
+  };
+}
+
+/**
+ * Must cover every member of `AuditAction` in backend/utils/audit.ts. The
+ * ledger-side actions were missing while this page rendered mock rows that
+ * never contained them — on real data the `POST` entries already in the log
+ * resolved to `undefined` here and crashed the table on `config.icon`.
+ */
+const actionConfig: Record<string, { color: string; icon: typeof Plus }> = {
   CREATE: { color: "bg-green-100 text-green-800", icon: Plus },
   UPDATE: { color: "bg-blue-100 text-blue-800", icon: Pencil },
   DELETE: { color: "bg-red-100 text-red-800", icon: Trash2 },
@@ -166,7 +117,14 @@ const actionConfig = {
   LOGOUT: { color: "bg-gray-100 text-gray-800", icon: LogOut },
   EXPORT: { color: "bg-orange-100 text-orange-800", icon: Download },
   VIEW: { color: "bg-cyan-100 text-cyan-800", icon: Eye },
+  POST: { color: "bg-emerald-100 text-emerald-800", icon: BookCheck },
+  REVERSE: { color: "bg-amber-100 text-amber-800", icon: Undo2 },
+  ISSUE: { color: "bg-indigo-100 text-indigo-800", icon: PackageMinus },
+  COMPLETE: { color: "bg-teal-100 text-teal-800", icon: CheckCircle2 },
 };
+
+/** Anything a future release starts writing still renders, just plainly. */
+const UNKNOWN_ACTION = { color: "bg-slate-100 text-slate-800", icon: FileText };
 
 function formatDateTime(dateStr: string) {
   return new Date(dateStr).toLocaleString("en-IN", {
@@ -260,8 +218,8 @@ const columns: ColumnDef<AuditLog>[] = [
     accessorKey: "action",
     header: "Action",
     cell: ({ row }) => {
-      const action = row.getValue("action") as keyof typeof actionConfig;
-      const config = actionConfig[action];
+      const action = row.getValue("action") as string;
+      const config = actionConfig[action] ?? UNKNOWN_ACTION;
       const Icon = config.icon;
       return (
         <Badge variant="secondary" className={cn("text-xs gap-1", config.color)}>
@@ -373,34 +331,92 @@ const columns: ColumnDef<AuditLog>[] = [
 ];
 
 export default function AuditLogsPage() {
+  const { organizationId, isLoading: authLoading } = useOrganization();
   const [actionFilter, setActionFilter] = React.useState<string>("all");
   const [entityFilter, setEntityFilter] = React.useState<string>("all");
 
-  const filteredLogs = React.useMemo(() => {
-    return auditLogs.filter((log) => {
-      if (actionFilter !== "all" && log.action !== actionFilter) return false;
-      if (entityFilter !== "all" && log.entityType !== entityFilter) return false;
-      return true;
-    });
-  }, [actionFilter, entityFilter]);
+  const [logs, setLogs] = React.useState<AuditLog[]>([]);
+  const [entityTypes, setEntityTypes] = React.useState<string[]>([]);
+  const [total, setTotal] = React.useState(0);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
 
-  const entityTypes = React.useMemo(() => {
-    return Array.from(new Set(auditLogs.map((l) => l.entityType)));
-  }, []);
+  /**
+   * This page previously rendered a hard-coded array of eight sample rows,
+   * so it showed invented users and invented 192.168.x addresses and never
+   * once contacted the server. Nothing a user actually did appeared here.
+   *
+   * Filtering runs server-side so the counts describe the whole log rather
+   * than whatever slice was fetched.
+   */
+  React.useEffect(() => {
+    if (!organizationId) return;
+    const controller = new AbortController();
+
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const params = new URLSearchParams({ limit: "200" });
+        if (actionFilter !== "all") params.set("action", actionFilter);
+        if (entityFilter !== "all") params.set("entityType", entityFilter);
+
+        const res = await fetch(
+          `/api/organizations/${organizationId}/audit-logs?${params}`,
+          { signal: controller.signal }
+        );
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || `Failed to load audit logs (${res.status})`);
+        }
+        const json = await res.json();
+        setLogs((json.data as AuditLogResponse[]).map(toAuditLog));
+        setTotal(json.pagination?.total ?? json.data.length);
+        // Options come from the whole log, not the filtered page, so
+        // choosing one filter cannot empty the other dropdown.
+        if (json.filters?.entityTypes) setEntityTypes(json.filters.entityTypes);
+      } catch (e) {
+        if ((e as Error).name === "AbortError") return;
+        setError((e as Error).message);
+        setLogs([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    load();
+    return () => controller.abort();
+  }, [organizationId, actionFilter, entityFilter]);
+
+  const filteredLogs = logs;
 
   const stats = React.useMemo(() => {
     const today = new Date().toDateString();
-    const todayLogs = auditLogs.filter(
-      (l) => new Date(l.createdAt).toDateString() === today
-    );
     return {
-      total: auditLogs.length,
-      today: todayLogs.length,
-      creates: auditLogs.filter((l) => l.action === "CREATE").length,
-      updates: auditLogs.filter((l) => l.action === "UPDATE").length,
-      deletes: auditLogs.filter((l) => l.action === "DELETE").length,
+      total,
+      today: logs.filter((l) => new Date(l.createdAt).toDateString() === today).length,
+      creates: logs.filter((l) => l.action === "CREATE").length,
+      updates: logs.filter((l) => l.action === "UPDATE").length,
+      deletes: logs.filter((l) => l.action === "DELETE").length,
     };
-  }, []);
+  }, [logs, total]);
+
+  if (authLoading || (loading && logs.length === 0 && !error)) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-96 gap-3">
+        <AlertCircle className="h-10 w-10 text-muted-foreground" />
+        <p className="text-muted-foreground">{error}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -488,6 +504,9 @@ export default function AuditLogsPage() {
                   <SelectItem value="UPDATE">Update</SelectItem>
                   <SelectItem value="DELETE">Delete</SelectItem>
                   <SelectItem value="LOGIN">Login</SelectItem>
+                  <SelectItem value="LOGOUT">Logout</SelectItem>
+                  <SelectItem value="POST">Post to ledger</SelectItem>
+                  <SelectItem value="REVERSE">Reverse</SelectItem>
                   <SelectItem value="EXPORT">Export</SelectItem>
                 </SelectContent>
               </Select>
