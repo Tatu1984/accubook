@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound, hasPermission, forbidden } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -16,8 +17,8 @@ const createWorkflowSchema = z.object({
   steps: z.array(z.object({
     stepNumber: z.number().int().min(1),
     approverType: z.enum(["ROLE", "USER", "MANAGER"]),
-    approverId: z.string().optional(),
-    amountLimit: z.number().nonnegative().optional(),
+    approverId: optional(z.string()),
+    amountLimit: optional(z.number().nonnegative()),
     isRequired: z.boolean().default(true),
   }).strict()).min(1, "At least one step is required"),
 }).strict();
@@ -25,7 +26,7 @@ const createWorkflowSchema = z.object({
 const processApprovalSchema = z.object({
   approvalId: z.string().min(1, "Approval ID is required"),
   action: z.enum(["APPROVE", "REJECT"]),
-  comments: z.string().optional(),
+  comments: optional(z.string()),
 }).strict();
 
 export const GET = withOrgAuth(async (request, { orgId, userId }) => {
@@ -172,7 +173,7 @@ export const GET = withOrgAuth(async (request, { orgId, userId }) => {
 });
 
 export const POST = withOrgAuth(async (request, { orgId, orgUser }) => {
-  if (!hasPermission(orgUser, "approvals", "create")) {
+  if (!hasPermission(orgUser, "organization", "approvals", "write")) {
     return forbidden("You don't have permission to create approval workflows");
   }
   try {
@@ -359,7 +360,7 @@ export const PATCH = withOrgAuth(async (request, { orgId, userId }) => {
 });
 
 export const DELETE = withOrgAuth(async (request, { orgId, orgUser }) => {
-  if (!hasPermission(orgUser, "approvals", "delete")) {
+  if (!hasPermission(orgUser, "organization", "approvals", "delete")) {
     return forbidden("You don't have permission to delete approval workflows");
   }
   try {

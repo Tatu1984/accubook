@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * POST /api/cron/check-overdue
+ * GET | POST /api/cron/check-overdue
  *
  * Cross-org cron sweep — invoked by an external scheduler with a
  * Bearer `CRON_SECRET` header. Iterates every active organization
@@ -23,8 +23,13 @@ export const dynamic = "force-dynamic";
  * The per-org route at `/api/organizations/[orgId]/notifications/
  * check-overdue` is still available for manual / admin-driven sweep
  * via the regular session+permission flow.
+ *
+ * Exposed on BOTH verbs on purpose: Vercel Cron issues a GET (and
+ * attaches `Authorization: Bearer $CRON_SECRET` itself), while
+ * external schedulers and manual `curl` runs tend to POST. Shipping
+ * POST alone meant every scheduled invocation 405'd silently.
  */
-export const POST = async (request: NextRequest) => {
+const handler = async (request: NextRequest) => {
   const denied = requireCronSecret(request);
   if (denied) return denied;
 
@@ -64,3 +69,6 @@ export const POST = async (request: NextRequest) => {
     );
   }
 };
+
+export const GET = handler;
+export const POST = handler;

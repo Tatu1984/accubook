@@ -42,5 +42,9 @@ declare module "next-auth/jwt" {
     branchName: string | null;
     role: string;
     permissions: unknown[];
+    // Revocation accounting: issuedAt is set at sign-in; lastRevocationCheck
+    // is rolled forward each time the jwt callback re-queries the DB.
+    issuedAt: number;
+    lastRevocationCheck: number;
   }
 }

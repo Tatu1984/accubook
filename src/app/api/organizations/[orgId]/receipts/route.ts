@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -35,23 +36,23 @@ export const dynamic = "force-dynamic";
 // booking a TDS-Payable line via a mistyped section.
 const createReceiptSchema = z.object({
   partyId: z.string().min(1, "Party is required"),
-  invoiceId: z.string().optional(),
+  invoiceId: optional(z.string()),
   date: z.string().transform((val) => new Date(val)),
   amount: z.union([z.number().positive(), z.string()]).transform((v) => D(v)),
   paymentMode: z.enum(["CASH", "BANK_TRANSFER", "CHEQUE", "UPI", "CARD"]),
-  bankAccountId: z.string().optional(),
-  chequeNo: z.string().optional(),
-  chequeDate: z.string().optional().transform((val) => (val ? new Date(val) : undefined)),
-  transactionRef: z.string().optional(),
-  notes: z.string().optional(),
+  bankAccountId: optional(z.string()),
+  chequeNo: optional(z.string()),
+  chequeDate: optional(z.string()).transform((val) => (val ? new Date(val) : undefined)),
+  transactionRef: optional(z.string()),
+  notes: optional(z.string()),
   // Optional TCS at receipt time. When `tcsSection` is set, we compute
   // TCS via computeTds() against the buyer's YTD aggregate, then post a
   // 3-line voucher (Dr Bank gross / Cr Party amount / Cr TCS Payable)
   // instead of the usual 2-line one. `amount` remains the invoice value
   // applied to AR; the buyer actually remits amount + tcs.
-  tcsSection: z.enum(TCS_COLLECTION_SECTIONS).optional(),
-  deducteeType: z.enum(["INDIVIDUAL_HUF", "COMPANY_OTHER"]).optional(),
-  noPan: z.boolean().optional(),
+  tcsSection: optional(z.enum(TCS_COLLECTION_SECTIONS)),
+  deducteeType: optional(z.enum(["INDIVIDUAL_HUF", "COMPANY_OTHER"])),
+  noPan: optional(z.boolean()),
 });
 
 export const GET = withOrgAuth(async (request, { orgId }) => {
@@ -270,7 +271,7 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
           creditAmount: tcsAmount,
         });
       }
-      await applyLedgerEntries(tx, balanceEntries);
+      await applyLedgerEntries(tx, orgId, balanceEntries);
 
       if (bankAccount) {
         await tx.bankAccount.update({

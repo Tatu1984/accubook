@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -11,19 +12,19 @@ const createBatchSchema = z.object({
   itemId: z.string(),
   warehouseId: z.string(),
   batchNumber: z.string().min(1),
-  serialNumber: z.string().optional(),
-  manufacturingDate: z.string().transform(s => new Date(s)).optional(),
-  expiryDate: z.string().transform(s => new Date(s)).optional(),
+  serialNumber: optional(z.string()),
+  manufacturingDate: optional(z.string().transform(s => new Date(s))),
+  expiryDate: optional(z.string().transform(s => new Date(s))),
   quantity: z.number().positive(),
   costPrice: z.number().nonnegative(),
-  sellingPrice: z.number().nonnegative().optional(),
+  sellingPrice: optional(z.number().nonnegative()),
 });
 
 const updateBatchSchema = z.object({
-  quantity: z.number().nonnegative().optional(),
-  costPrice: z.number().nonnegative().optional(),
-  sellingPrice: z.number().nonnegative().optional(),
-  status: z.enum(["ACTIVE", "EXPIRED", "CONSUMED"]).optional(),
+  quantity: optional(z.number().nonnegative()),
+  costPrice: optional(z.number().nonnegative()),
+  sellingPrice: optional(z.number().nonnegative()),
+  status: optional(z.enum(["ACTIVE", "EXPIRED", "CONSUMED"])),
 }).strict();
 
 export const GET = withOrgAuth(async (request, { orgId }) => {

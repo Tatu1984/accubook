@@ -159,6 +159,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         token.branchName = user.branchName;
         token.role = user.role;
         token.permissions = user.permissions;
+        // Stamp the issuance timestamp for revocation comparison.
+        token.issuedAt = Date.now();
+        token.lastRevocationCheck = Date.now();
       }
 
       // Handle session updates (e.g., switching branches/organizations).
@@ -177,6 +180,31 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         }
         if (session.branchName !== undefined) {
           token.branchName = session.branchName;
+        }
+      }
+
+      // Revocation check — at most once per 60s per active token.
+      // Bumping User.tokensRevokedAt past the token's issuedAt
+      // invalidates the token (this returns null → NextAuth deletes
+      // the cookie → next request lands on /login).
+      if (token.id && typeof token.issuedAt === "number") {
+        const REVOCATION_RECHECK_MS = 60 * 1000;
+        const lastCheck = (token.lastRevocationCheck as number | undefined) ?? 0;
+        if (Date.now() - lastCheck > REVOCATION_RECHECK_MS) {
+          const dbUser = await prisma.user.findUnique({
+            where: { id: token.id as string },
+            select: { tokensRevokedAt: true, isActive: true },
+          });
+          if (!dbUser || !dbUser.isActive) {
+            return null;
+          }
+          if (
+            dbUser.tokensRevokedAt &&
+            dbUser.tokensRevokedAt.getTime() > (token.issuedAt as number)
+          ) {
+            return null;
+          }
+          token.lastRevocationCheck = Date.now();
         }
       }
 

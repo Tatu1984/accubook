@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -9,18 +10,18 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const updateBranchSchema = z.object({
-  name: z.string().min(1).optional(),
-  code: z.string().min(1).optional(),
-  address: z.string().optional(),
-  city: z.string().optional(),
-  state: z.string().optional(),
-  country: z.string().optional(),
-  postalCode: z.string().optional(),
-  phone: z.string().optional(),
-  email: z.string().email().optional().or(z.literal("")),
-  gstNo: z.string().optional(),
-  isHeadOffice: z.boolean().optional(),
-  isActive: z.boolean().optional(),
+  name: optional(z.string().min(1)),
+  code: optional(z.string().min(1)),
+  address: optional(z.string()),
+  city: optional(z.string()),
+  state: optional(z.string()),
+  country: optional(z.string()),
+  postalCode: optional(z.string()),
+  phone: optional(z.string()),
+  email: optional(z.string().email()).or(z.literal("")),
+  gstNo: optional(z.string()),
+  isHeadOffice: optional(z.boolean()),
+  isActive: optional(z.boolean()),
 }).strict();
 
 export const GET = withOrgAuth<{ branchId: string }>(async (_request, { orgId, params }) => {

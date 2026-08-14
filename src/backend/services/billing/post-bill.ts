@@ -341,6 +341,7 @@ export async function postBillToGl(
 
   await applyLedgerEntries(
     tx,
+    opts.organizationId,
     entries.map((e) => ({
       ledgerId: e.ledgerId,
       debitAmount: e.debitAmount,

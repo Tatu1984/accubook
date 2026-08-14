@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, notFound, badRequest, forbidden, hasPermission } from "@/backend/utils/with-org-auth";
 import { applyLedgerEntries } from "@/backend/utils/posting";
@@ -10,9 +11,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const updateVoucherSchema = z.object({
-  status: z.enum(["DRAFT", "PENDING_APPROVAL", "APPROVED", "REJECTED", "CANCELLED"]).optional(),
-  narration: z.string().optional(),
-  date: z.string().optional(),
+  status: optional(z.enum(["DRAFT", "PENDING_APPROVAL", "APPROVED", "REJECTED", "CANCELLED"])),
+  narration: optional(z.string()),
+  date: optional(z.string()),
 }).strict();
 
 export const GET = withOrgAuth<{ voucherId: string }>(async (_request, { orgId, params }) => {
@@ -83,7 +84,7 @@ export const PATCH = withOrgAuth<{ voucherId: string }>(async (request, { orgId,
       validatedData.status !== "APPROVED";
     const isStatusChange = willApprove || willUnpost;
 
-    if (isStatusChange && !hasPermission(orgUser, "vouchers", "approve")) {
+    if (isStatusChange && !hasPermission(orgUser, "accounting", "vouchers", "approve")) {
       return forbidden("You don't have permission to approve or unpost vouchers");
     }
 
@@ -106,7 +107,7 @@ export const PATCH = withOrgAuth<{ voucherId: string }>(async (request, { orgId,
 
       if (willApprove) {
         // Forward post: apply each entry's balance impact.
-        await applyLedgerEntries(tx, existing.entries);
+        await applyLedgerEntries(tx, orgId, existing.entries);
         updateData.isPosted = true;
         updateData.postedAt = new Date();
         updateData.approvedById = userId;
@@ -120,7 +121,7 @@ export const PATCH = withOrgAuth<{ voucherId: string }>(async (request, { orgId,
           debitAmount: e.creditAmount,
           creditAmount: e.debitAmount,
         }));
-        await applyLedgerEntries(tx, reversed);
+        await applyLedgerEntries(tx, orgId, reversed);
         updateData.isPosted = false;
         updateData.postedAt = null;
       }

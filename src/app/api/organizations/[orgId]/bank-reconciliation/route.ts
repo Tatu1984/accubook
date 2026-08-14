@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { logger } from "@/backend/utils/logger";
 
 export const runtime = "nodejs";
@@ -12,18 +13,18 @@ const importTransactionSchema = z.object({
   bankAccountId: z.string(),
   transactions: z.array(z.object({
     date: z.string().transform(s => new Date(s)),
-    description: z.string().optional(),
-    referenceNo: z.string().optional(),
+    description: optional(z.string()),
+    referenceNo: optional(z.string()),
     debitAmount: z.number().default(0),
     creditAmount: z.number().default(0),
-    balance: z.number().optional(),
+    balance: optional(z.number()),
   })),
 });
 
 // Schema for matching transactions
 const matchTransactionSchema = z.object({
   bankTransactionId: z.string(),
-  voucherId: z.string().optional(),
+  voucherId: optional(z.string()),
   action: z.enum(["match", "unmatch", "create_voucher"]),
 });
 

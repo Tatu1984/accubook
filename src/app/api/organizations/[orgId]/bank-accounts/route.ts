@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -13,12 +14,12 @@ const createBankAccountSchema = z
   .object({
     name: z.string().min(1, "Name is required"),
     bankName: z.string().min(1, "Bank name is required"),
-    branch: z.string().optional(),
+    branch: optional(z.string()),
     accountNumber: z.string().min(1, "Account number is required"),
-    ifscCode: z.string().optional(),
-    swiftCode: z.string().optional(),
+    ifscCode: optional(z.string()),
+    swiftCode: optional(z.string()),
     accountType: z.enum(ACCOUNT_TYPES),
-    openingBalance: z.number().finite().optional(),
+    openingBalance: optional(z.number().finite()),
   })
   .strict();
 
@@ -29,14 +30,14 @@ const createBankAccountSchema = z
 const updateBankAccountSchema = z
   .object({
     id: z.string().min(1, "Bank account ID is required"),
-    name: z.string().min(1).optional(),
-    bankName: z.string().min(1).optional(),
+    name: optional(z.string().min(1)),
+    bankName: optional(z.string().min(1)),
     branch: z.string().nullable().optional(),
-    accountNumber: z.string().min(1).optional(),
+    accountNumber: optional(z.string().min(1)),
     ifscCode: z.string().nullable().optional(),
     swiftCode: z.string().nullable().optional(),
-    accountType: z.enum(ACCOUNT_TYPES).optional(),
-    isActive: z.boolean().optional(),
+    accountType: optional(z.enum(ACCOUNT_TYPES)),
+    isActive: optional(z.boolean()),
   })
   .strict();
 

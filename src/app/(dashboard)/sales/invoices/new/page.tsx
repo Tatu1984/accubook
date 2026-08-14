@@ -37,18 +37,20 @@ import Link from "next/link";
 interface Party {
   id: string;
   name: string;
-  gstNo?: string;
-  billingAddress?: string;
-  shippingAddress?: string;
+  // The API returns `null`, not `undefined`, for columns the user left blank.
+  gstNo?: string | null;
+  billingAddress?: string | null;
+  shippingAddress?: string | null;
 }
 
 interface Item {
   id: string;
   name: string;
-  code?: string;
-  sellingPrice?: string;
-  unit?: string;
-  taxConfigId?: string;
+  sku?: string | null;
+  sellingPrice?: string | null;
+  // Prisma field name. Reading `taxConfigId` here silently left every line
+  // at 0% GST, because no such field is returned by /items.
+  salesTaxId?: string | null;
 }
 
 interface TaxConfig {
@@ -201,8 +203,8 @@ export default function NewInvoicePage() {
           if (selectedItem) {
             updatedItem.itemName = selectedItem.name;
             updatedItem.rate = parseFloat(selectedItem.sellingPrice || "0");
-            if (selectedItem.taxConfigId) {
-              const tax = taxes.find((t) => t.id === selectedItem.taxConfigId);
+            if (selectedItem.salesTaxId) {
+              const tax = taxes.find((t) => t.id === selectedItem.salesTaxId);
               if (tax) {
                 updatedItem.taxId = tax.id;
                 updatedItem.taxRate = parseFloat(tax.rate);
@@ -261,8 +263,10 @@ export default function NewInvoicePage() {
             date,
             dueDate,
             referenceNo: referenceNo || undefined,
-            billingAddress: selectedParty?.billingAddress,
-            shippingAddress: selectedParty?.shippingAddress,
+            // `?? undefined` so a customer with no address on file omits the
+            // key rather than sending null.
+            billingAddress: selectedParty?.billingAddress ?? undefined,
+            shippingAddress: selectedParty?.shippingAddress ?? undefined,
             notes: notes || undefined,
             terms: terms || undefined,
             items: validItems.map((item) => ({
@@ -440,7 +444,7 @@ export default function NewInvoicePage() {
                               {items.map((i) => (
                                 <SelectItem key={i.id} value={i.id}>
                                   {i.name}
-                                  {i.code && ` (${i.code})`}
+                                  {i.sku && ` (${i.sku})`}
                                 </SelectItem>
                               ))}
                             </SelectContent>

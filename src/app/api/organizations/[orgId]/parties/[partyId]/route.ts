@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -9,8 +10,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const updatePartySchema = z.object({
-  name: z.string().min(1).optional(),
-  type: z.enum(["CUSTOMER", "VENDOR", "BOTH"]).optional(),
+  name: optional(z.string().min(1)),
+  type: optional(z.enum(["CUSTOMER", "VENDOR", "BOTH"])),
   email: z.string().email().optional().nullable(),
   phone: z.string().optional().nullable(),
   gstNo: z.string().optional().nullable(),
@@ -27,9 +28,9 @@ const updatePartySchema = z.object({
   shippingPostal: z.string().optional().nullable(),
   creditLimit: z.number().optional().nullable(),
   creditDays: z.number().optional().nullable(),
-  openingBalance: z.number().optional(),
-  openingBalanceType: z.enum(["DEBIT", "CREDIT"]).optional(),
-  isActive: z.boolean().optional(),
+  openingBalance: optional(z.number()),
+  openingBalanceType: optional(z.enum(["DEBIT", "CREDIT"])),
+  isActive: optional(z.boolean()),
 }).strict();
 
 export const GET = withOrgAuth<{ partyId: string }>(async (_request, { orgId, params }) => {

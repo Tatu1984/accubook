@@ -184,6 +184,7 @@ export const SCOPE_TREE: { module: string; label: string; categories: { category
   {
     module: "organization", label: "Organization / Admin",
     categories: [
+      { category: "profile",       label: "Organization profile" },
       { category: "branches",      label: "Branches" },
       { category: "users",         label: "Users" },
       { category: "roles",         label: "Roles" },
@@ -214,6 +215,10 @@ export function resolveScopeTarget(
   pathname: string,
   method: string
 ): { module: string; category: string; action: ApiAction } | null {
+  // /api/organizations/[orgId]  — the organization record itself.
+  if (/^\/api\/organizations\/[^/]+\/?$/.test(pathname)) {
+    return { module: "organization", category: "profile", action: methodToAction(method) };
+  }
   // /api/organizations/[orgId]/<segment>/...
   const m = pathname.match(/^\/api\/organizations\/[^/]+\/([^/?]+)/);
   if (!m) return null;

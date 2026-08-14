@@ -29,7 +29,7 @@ export const DELETE = withOrgAuth<{ keyId: string }>(
     if (apiKey) {
       return forbidden("API keys cannot revoke other API keys");
     }
-    if (!hasPermission(orgUser, "settings", "delete") && !hasPermission(orgUser, "*", "*")) {
+    if (!hasPermission(orgUser, "organization", "api-keys", "delete")) {
       return forbidden("Only admins can revoke API keys");
     }
 

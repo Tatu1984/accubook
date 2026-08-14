@@ -283,22 +283,42 @@ export async function generateVoucherNumber(
  * users expect (a vendor's AP balance shows what we owe them; a bank balance
  * shows what's in the account).
  */
+export class LedgerScopeError extends Error {
+  constructor(public readonly ledgerIds: string[]) {
+    super(
+      `Ledger(s) ${ledgerIds.join(", ")} do not belong to this organization ` +
+        `(or do not exist). Refusing to apply the entry.`
+    );
+    this.name = "LedgerScopeError";
+  }
+}
+
 export async function applyLedgerEntries(
   tx: Tx,
+  organizationId: string,
   entries: { ledgerId: string; debitAmount: Prisma.Decimal; creditAmount: Prisma.Decimal }[]
 ): Promise<void> {
   if (entries.length === 0) return;
 
   const ledgerIds = [...new Set(entries.map((e) => e.ledgerId))];
+  // Scoped by organizationId, not just by id. Without this a caller could
+  // hand over a ledger id belonging to another tenant and this function
+  // would happily move that tenant's balance.
   const ledgers = await tx.ledger.findMany({
-    where: { id: { in: ledgerIds } },
+    where: { id: { in: ledgerIds }, organizationId },
     select: { id: true, group: { select: { nature: true } } },
   });
   const natureById = new Map(ledgers.map((l) => [l.id, l.group.nature]));
 
+  // Fail loudly rather than skipping. The previous `continue` meant a
+  // payload referencing an unknown or foreign ledger produced a voucher
+  // that balanced on paper while only some of its ledger effects landed —
+  // a silent divergence between the journal and the ledger balances.
+  const unresolved = ledgerIds.filter((id) => !natureById.has(id));
+  if (unresolved.length > 0) throw new LedgerScopeError(unresolved);
+
   for (const e of entries) {
-    const nature = natureById.get(e.ledgerId);
-    if (!nature) continue;
+    const nature = natureById.get(e.ledgerId)!;
     const isDebitNatured = nature === "ASSETS" || nature === "EXPENSES";
     const delta = isDebitNatured
       ? D(e.debitAmount).minus(D(e.creditAmount))
@@ -312,9 +332,56 @@ export async function applyLedgerEntries(
 }
 
 /**
+ * Statuses that describe where a document sits in its own lifecycle rather
+ * than how much of it has been settled. Payment activity must never move a
+ * document out of one of these — an unposted draft stays a draft, and a
+ * cancelled document stays cancelled.
+ */
+const LIFECYCLE_LOCKED_INVOICE = new Set(["DRAFT", "CANCELLED"]);
+const LIFECYCLE_LOCKED_BILL = new Set(["DRAFT", "PENDING_APPROVAL", "CANCELLED"]);
+
+/**
+ * Derive a settlement status from the money, for a document that is past
+ * its lifecycle gate.
+ *
+ * This is deliberately *total*: every input maps to exactly one output, so
+ * the result never depends on the status the document happened to hold
+ * before. The earlier version left the previous value in place when no
+ * branch matched, which meant reversing a payment on a not-yet-due document
+ * left it reading PAID with the full amount outstanding — a bounced cheque
+ * silently closed the invoice while the ledger side was correctly reversed.
+ *
+ * `unpaidStatus` is the "issued but nothing received" resting state, which
+ * differs per document type (invoices sit at SENT, bills at APPROVED).
+ */
+export function deriveSettlementStatus(opts: {
+  totalAmount: Prisma.Decimal;
+  amountPaid: Prisma.Decimal;
+  amountDue: Prisma.Decimal;
+  dueDate: Date;
+  unpaidStatus: string;
+  now?: Date;
+}): string {
+  const { totalAmount, amountPaid, amountDue, dueDate, unpaidStatus } = opts;
+  const now = opts.now ?? new Date();
+
+  // Nothing to settle. Without this a zero-total document would read as
+  // PAID the moment it was issued.
+  if (totalAmount.lessThanOrEqualTo(D(0))) return unpaidStatus;
+
+  // Balance cleared. Keyed off amountDue rather than amountPaid so a bill
+  // whose remaining balance was extinguished by withheld TDS still closes.
+  if (amountDue.lessThanOrEqualTo(D(0))) return "PAID";
+
+  if (amountPaid.greaterThan(D(0))) return "PARTIAL";
+  if (dueDate < now) return "OVERDUE";
+  return unpaidStatus;
+}
+
+/**
  * Recompute an invoice's amountPaid/amountDue/status from its received receipts
  * and write them back. Caller is expected to call this within the same tx that
- * just inserted the receipt.
+ * just inserted (or reversed) the receipt.
  */
 export async function recomputeInvoiceStatus(
   tx: Tx,
@@ -333,16 +400,15 @@ export async function recomputeInvoiceStatus(
   const amountPaid = sum(receipts.map((r) => r.amount));
   const amountDue = D(invoice.totalAmount).minus(amountPaid);
 
-  let status: string = invoice.status;
-  if (status !== "CANCELLED") {
-    if (amountDue.lessThanOrEqualTo(D(0))) {
-      status = "PAID";
-    } else if (amountPaid.greaterThan(D(0))) {
-      status = "PARTIAL";
-    } else if (invoice.dueDate < new Date()) {
-      status = "OVERDUE";
-    }
-  }
+  const status = LIFECYCLE_LOCKED_INVOICE.has(invoice.status)
+    ? invoice.status
+    : deriveSettlementStatus({
+        totalAmount: D(invoice.totalAmount),
+        amountPaid,
+        amountDue,
+        dueDate: invoice.dueDate,
+        unpaidStatus: "SENT",
+      });
 
   await tx.invoice.update({
     where: { id: invoiceId },
@@ -374,16 +440,17 @@ export async function recomputeBillStatus(tx: Tx, billId: string): Promise<void>
   const tdsWithheld = D(bill.tdsAmount ?? 0);
   const amountDue = D(bill.totalAmount).minus(tdsWithheld).minus(amountPaid);
 
-  let status: string = bill.status;
-  if (status !== "CANCELLED" && status !== "DRAFT" && status !== "PENDING_APPROVAL") {
-    if (amountDue.lessThanOrEqualTo(D(0))) {
-      status = "PAID";
-    } else if (amountPaid.greaterThan(D(0))) {
-      status = "PARTIAL";
-    } else if (bill.dueDate < new Date()) {
-      status = "OVERDUE";
-    }
-  }
+  const status = LIFECYCLE_LOCKED_BILL.has(bill.status)
+    ? bill.status
+    : deriveSettlementStatus({
+        // Net of TDS: the vendor was never going to receive that portion,
+        // so it is not part of the obligation being settled in cash.
+        totalAmount: D(bill.totalAmount).minus(tdsWithheld),
+        amountPaid,
+        amountDue,
+        dueDate: bill.dueDate,
+        unpaidStatus: "APPROVED",
+      });
 
   await tx.bill.update({
     where: { id: billId },

@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
-import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
+import { withOrgAuth, badRequest, forbidden, hasPermission } from "@/backend/utils/with-org-auth";
 import { D, sum } from "@/backend/utils/money";
 import { nextNumber } from "@/backend/utils/posting";
 import { computeLineGst, determineSupplyType, type SupplyType } from "@/backend/utils/india-tax";
+import { postInvoiceToGl } from "@/backend/services/billing/post-invoice";
+import { writeAudit } from "@/backend/utils/audit";
 import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
@@ -12,13 +15,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const invoiceItemSchema = z.object({
-  itemId: z.string().optional(),
+  itemId: optional(z.string()),
   description: z.string().min(1, "Description is required"),
-  hsnCode: z.string().optional(),
+  hsnCode: optional(z.string()),
   quantity: z.number().min(0.01, "Quantity must be greater than 0"),
   unitPrice: z.number().min(0),
   discountPercent: z.number().min(0).max(100).default(0),
-  taxId: z.string().optional(),
+  taxId: optional(z.string()),
   taxAmount: z.number().min(0).default(0),
 });
 
@@ -27,13 +30,22 @@ const createInvoiceSchema = z.object({
   date: z.string().min(1, "Invoice date is required"),
   dueDate: z.string().min(1, "Due date is required"),
   type: z.enum(["INVOICE", "CREDIT_NOTE", "DEBIT_NOTE", "PROFORMA"]).default("INVOICE"),
-  billingAddress: z.string().optional(),
-  shippingAddress: z.string().optional(),
-  notes: z.string().optional(),
-  terms: z.string().optional(),
-  salesOrderId: z.string().optional(),
-  currencyId: z.string().optional(),
+  billingAddress: optional(z.string()),
+  shippingAddress: optional(z.string()),
+  notes: optional(z.string()),
+  terms: optional(z.string()),
+  salesOrderId: optional(z.string()),
+  currencyId: optional(z.string()),
   items: z.array(invoiceItemSchema).min(1, "At least 1 item required"),
+  /**
+   * Issue the invoice immediately instead of saving it as a draft.
+   *
+   * `SENT` books it to the general ledger inside the same transaction,
+   * mirroring how bills POST posts a bill created as APPROVED. `DRAFT`
+   * (the default, and the old behaviour) creates a document with no
+   * accounting effect, to be issued later via PATCH.
+   */
+  status: z.enum(["DRAFT", "SENT"]).default("DRAFT"),
 });
 
 export const GET = withOrgAuth(async (request, { orgId }) => {
@@ -132,10 +144,19 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
   }
 });
 
-export const POST = withOrgAuth(async (request, { orgId }) => {
+export const POST = withOrgAuth(async (request, { orgId, userId, orgUser }) => {
   try {
     const body = await request.json();
     const validatedData = createInvoiceSchema.parse(body);
+
+    // Creating an invoice as SENT books it straight to the ledger, so it
+    // needs the same approve-class permission as issuing one later.
+    const issueNow = validatedData.status === "SENT";
+    if (issueNow && !hasPermission(orgUser, "sales", "invoices", "approve")) {
+      return forbidden(
+        "You don't have permission to issue invoices. Save it as a draft instead."
+      );
+    }
 
     // FY label for the invoice number prefix. India fiscal year starts April.
     const currentFY =
@@ -267,7 +288,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
           discountAmount: totalDiscount,
           totalAmount: grandTotal,
           amountDue: grandTotal,
-          status: "DRAFT",
+          status: issueNow ? "SENT" : "DRAFT",
           // GST audit trail — locked at write time so reports are stable.
           placeOfSupply: party.billingState ?? null,
           supplyType,
@@ -301,6 +322,33 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
               item: true,
             },
           },
+        },
+      });
+
+      // Issued at create — book it to the ledger now, the same way bills
+      // POST posts a bill created as APPROVED. Posting failure aborts the
+      // whole transaction, so the books never carry an invoice that is
+      // marked issued but was never journalled.
+      if (issueNow) {
+        await postInvoiceToGl(tx, {
+          invoiceId: newInvoice.id,
+          organizationId: orgId,
+          userId,
+        });
+      }
+
+      await writeAudit(tx, {
+        organizationId: orgId,
+        userId,
+        action: issueNow ? "POST" : "CREATE",
+        entityType: "Invoice",
+        entityId: newInvoice.id,
+        newData: {
+          invoiceNumber,
+          partyId: validatedData.partyId,
+          totalAmount: grandTotal.toString(),
+          status: issueNow ? "SENT" : "DRAFT",
+          supplyType,
         },
       });
 

@@ -7,12 +7,22 @@ test.describe("public surface", () => {
     await expect(page).toHaveTitle(/AccuBook/i);
   });
 
-  test("login page loads + demo creds visible on SSR", async ({ page }) => {
+  test("login page loads", async ({ page }) => {
     await page.goto("/login");
     await expect(page.getByText(/welcome back/i).first()).toBeVisible();
-    await expect(page.getByText(/demo credentials/i)).toBeVisible();
-    await expect(page.getByText("admin@accubook.com")).toBeVisible();
-    await expect(page.getByText(/password123!?/)).toBeVisible();
+  });
+
+  // Regression guard. The demo-credentials card was once rendered
+  // unconditionally, which published a working super-admin account on
+  // the public login page. It is now gated behind NEXT_PUBLIC_DEMO plus
+  // env-supplied credentials; this asserts the gate is shut on whatever
+  // deployment the suite is pointed at. Flip the expectation only for a
+  // deliberately-throwaway demo target.
+  test("login page does not publish credentials", async ({ page }) => {
+    await page.goto("/login");
+    await expect(page.getByText(/demo credentials/i)).toHaveCount(0);
+    const html = await page.content();
+    expect(html).not.toMatch(/password\s*123/i);
   });
 
   test("/api/health responds 200 with ok=true", async ({ request }) => {

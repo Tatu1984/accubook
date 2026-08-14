@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -18,13 +19,13 @@ export const dynamic = "force-dynamic";
 
 const querySchema = z.object({
   fy: z.string().regex(/^\d{4}-\d{2}$/, 'fy must be in form "YYYY-YY"'),
-  download: z.enum(["true", "false"]).optional(),
+  download: optional(z.enum(["true", "false"])),
   /**
    * Aggregate turnover of the preceding FY (the GSTN portal asks for
    * this at filing time). Optional — when omitted we emit `gt: 0` and
    * the user fills it in on the portal before submitting.
    */
-  precedingFyTurnover: z.string().optional(),
+  precedingFyTurnover: optional(z.string()),
 });
 
 /**

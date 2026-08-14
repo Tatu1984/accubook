@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -32,22 +33,22 @@ export const dynamic = "force-dynamic";
 // Kept as TDS_SECTIONS_ALL (the union) for backward compatibility.
 const createPaymentSchema = z.object({
   partyId: z.string().min(1, "Party is required"),
-  billId: z.string().optional(),
+  billId: optional(z.string()),
   date: z.string().transform((val) => new Date(val)),
   amount: z.union([z.number().positive(), z.string()]).transform((v) => D(v)),
   paymentMode: z.enum(["CASH", "BANK_TRANSFER", "CHEQUE", "NEFT", "RTGS", "UPI"]),
-  bankAccountId: z.string().optional(),
-  chequeNo: z.string().optional(),
-  chequeDate: z.string().optional().transform((val) => (val ? new Date(val) : undefined)),
-  transactionRef: z.string().optional(),
-  notes: z.string().optional(),
+  bankAccountId: optional(z.string()),
+  chequeNo: optional(z.string()),
+  chequeDate: optional(z.string()).transform((val) => (val ? new Date(val) : undefined)),
+  transactionRef: optional(z.string()),
+  notes: optional(z.string()),
   // Optional TDS deduction at payment time. When `tdsSection` is set, we
   // compute TDS via computeTds() against the party's YTD aggregate for
   // this section, then post a 3-line voucher (Dr Vendor / Cr Bank net /
   // Cr TDS Payable) instead of the usual 2-line one.
-  tdsSection: z.enum(TDS_SECTIONS_ALL).optional(),
-  deducteeType: z.enum(["INDIVIDUAL_HUF", "COMPANY_OTHER"]).optional(),
-  noPan: z.boolean().optional(),
+  tdsSection: optional(z.enum(TDS_SECTIONS_ALL)),
+  deducteeType: optional(z.enum(["INDIVIDUAL_HUF", "COMPANY_OTHER"])),
+  noPan: optional(z.boolean()),
 });
 
 export const GET = withOrgAuth(async (request, { orgId }) => {
@@ -267,7 +268,7 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
           creditAmount: tdsAmount,
         });
       }
-      await applyLedgerEntries(tx, balanceEntries);
+      await applyLedgerEntries(tx, orgId, balanceEntries);
 
       // 7. Update BankAccount.currentBalance — net of TDS withheld.
       if (bankAccount) {

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -10,16 +11,16 @@ export const dynamic = "force-dynamic";
 
 const createWarehouseSchema = z.object({
   name: z.string().min(1, "Name is required"),
-  code: z.string().optional(),
-  branchId: z.string().optional(),
-  address: z.string().optional(),
-  city: z.string().optional(),
-  state: z.string().optional(),
-  country: z.string().optional(),
-  postalCode: z.string().optional(),
-  contactPerson: z.string().optional(),
-  phone: z.string().optional(),
-  isDefault: z.boolean().optional(),
+  code: optional(z.string()),
+  branchId: optional(z.string()),
+  address: optional(z.string()),
+  city: optional(z.string()),
+  state: optional(z.string()),
+  country: optional(z.string()),
+  postalCode: optional(z.string()),
+  contactPerson: optional(z.string()),
+  phone: optional(z.string()),
+  isDefault: optional(z.boolean()),
 });
 
 export const GET = withOrgAuth(async (request, { orgId }) => {

@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export const GET = withOrgAuth(async (request, { orgId, orgUser }) => {
   try {
-    if (!hasPermission(orgUser, "audit-logs", "read")) {
+    if (!hasPermission(orgUser, "organization", "audit-logs", "read")) {
       return forbidden("You don't have permission to view audit logs");
     }
 

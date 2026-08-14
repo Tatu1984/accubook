@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -13,10 +14,10 @@ export const dynamic = "force-dynamic";
 const createWorkOrderSchema = z.object({
   bomId: z.string().min(1, "bomId is required"),
   plannedQuantity: z.union([z.number().positive(), z.string()]).transform((v) => D(v)),
-  warehouseId: z.string().optional(),
-  startDate: z.string().optional().transform((v) => (v ? new Date(v) : undefined)),
-  endDate: z.string().optional().transform((v) => (v ? new Date(v) : undefined)),
-  notes: z.string().optional(),
+  warehouseId: optional(z.string()),
+  startDate: optional(z.string()).transform((v) => (v ? new Date(v) : undefined)),
+  endDate: optional(z.string()).transform((v) => (v ? new Date(v) : undefined)),
+  notes: optional(z.string()),
 });
 
 export const GET = withOrgAuth(async (request, { orgId }) => {

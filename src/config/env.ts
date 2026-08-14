@@ -28,7 +28,13 @@ const envSchema = z.object({
 
   // Operational toggles
   ALLOW_PROD_SEED: z.enum(["true", "false"]).optional(),
+  // Demo mode. Set to "true" ONLY on a throwaway deployment with no
+  // customer books — it makes the login page display the credentials
+  // below. The credentials themselves live here rather than in source
+  // so the repository never carries a working password.
   NEXT_PUBLIC_DEMO: z.enum(["true", "false"]).optional(),
+  NEXT_PUBLIC_DEMO_EMAIL: z.string().email().optional(),
+  NEXT_PUBLIC_DEMO_PASSWORD: z.string().optional(),
 
   // Email — optional. When unset, the email service is a no-op
   // (logs a warning per intended send). Resend is the default

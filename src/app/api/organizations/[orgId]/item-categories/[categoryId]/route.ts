@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -9,12 +10,12 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const updateCategorySchema = z.object({
-  name: z.string().min(1).optional(),
+  name: optional(z.string().min(1)),
   description: z.string().optional().nullable(),
   hsnCode: z.string().optional().nullable(),
   sacCode: z.string().optional().nullable(),
   parentId: z.string().optional().nullable(),
-  isActive: z.boolean().optional(),
+  isActive: optional(z.boolean()),
 }).strict();
 
 export const GET = withOrgAuth<{ categoryId: string }>(async (_request, { orgId, params }) => {

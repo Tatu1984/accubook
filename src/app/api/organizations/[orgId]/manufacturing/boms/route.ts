@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -14,15 +15,15 @@ const bomComponentSchema = z.object({
   itemId: z.string().min(1, "Component itemId is required"),
   quantity: z.union([z.number().positive(), z.string()]).transform((v) => D(v)),
   unitId: z.string().min(1, "Component unit is required"),
-  unitCost: z.union([z.number().min(0), z.string()]).optional().transform((v) => (v === undefined ? null : D(v))),
-  notes: z.string().optional(),
+  unitCost: optional(z.union([z.number().min(0), z.string()])).transform((v) => (v === undefined ? null : D(v))),
+  notes: optional(z.string()),
 });
 
 const createBomSchema = z.object({
   itemId: z.string().min(1, "Finished-good itemId is required"),
   outputQuantity: z.union([z.number().positive(), z.string()]).transform((v) => D(v)),
   outputUnitId: z.string().min(1, "Output unit is required"),
-  description: z.string().optional(),
+  description: optional(z.string()),
   components: z.array(bomComponentSchema).min(1, "At least one component is required"),
 });
 

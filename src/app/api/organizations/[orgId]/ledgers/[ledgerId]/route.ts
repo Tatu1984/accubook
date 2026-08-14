@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -9,13 +10,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const updateLedgerSchema = z.object({
-  name: z.string().min(1).optional(),
-  groupId: z.string().optional(),
-  code: z.string().optional(),
-  description: z.string().optional(),
-  openingBalance: z.number().optional(),
-  openingBalanceType: z.enum(["DEBIT", "CREDIT"]).optional(),
-  isActive: z.boolean().optional(),
+  name: optional(z.string().min(1)),
+  groupId: optional(z.string()),
+  code: optional(z.string()),
+  description: optional(z.string()),
+  openingBalance: optional(z.number()),
+  openingBalanceType: optional(z.enum(["DEBIT", "CREDIT"])),
+  isActive: optional(z.boolean()),
 }).strict();
 
 export const GET = withOrgAuth<{ ledgerId: string }>(async (_request, { orgId, params }) => {

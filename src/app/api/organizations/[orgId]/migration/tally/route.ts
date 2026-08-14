@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
  * (matched by name). Reports a per-section summary of created/skipped/errors.
  */
 export const POST = withOrgAuth(async (request, { orgId, orgUser, userId }) => {
-  if (!hasPermission(orgUser, "settings", "create")) {
+  if (!hasPermission(orgUser, "organization", "migration", "write")) {
     return forbidden("You don't have permission to import data");
   }
 

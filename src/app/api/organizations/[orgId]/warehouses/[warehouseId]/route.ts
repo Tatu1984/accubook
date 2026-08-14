@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -9,7 +10,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const updateWarehouseSchema = z.object({
-  name: z.string().min(1).optional(),
+  name: optional(z.string().min(1)),
   code: z.string().optional().nullable(),
   branchId: z.string().optional().nullable(),
   address: z.string().optional().nullable(),
@@ -19,8 +20,8 @@ const updateWarehouseSchema = z.object({
   postalCode: z.string().optional().nullable(),
   contactPerson: z.string().optional().nullable(),
   phone: z.string().optional().nullable(),
-  isDefault: z.boolean().optional(),
-  isActive: z.boolean().optional(),
+  isDefault: optional(z.boolean()),
+  isActive: optional(z.boolean()),
 }).strict();
 
 export const GET = withOrgAuth<{ warehouseId: string }>(async (_request, { orgId, params }) => {

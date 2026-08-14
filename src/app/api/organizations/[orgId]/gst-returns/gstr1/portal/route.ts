@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -24,7 +25,7 @@ export const dynamic = "force-dynamic";
 const querySchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "from must be YYYY-MM-DD"),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "to must be YYYY-MM-DD"),
-  download: z.enum(["true", "false"]).optional(),
+  download: optional(z.enum(["true", "false"])),
 });
 
 export const GET = withOrgAuth(async (request, { orgId }) => {

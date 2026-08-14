@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, forbidden, notFound, hasPermission } from "@/backend/utils/with-org-auth";
@@ -31,8 +32,8 @@ const inviteUserSchema = z.object({
 
 const updateUserSchema = z.object({
   userId: z.string().min(1, "User ID is required"),
-  roleId: z.string().optional(),
-  isActive: z.boolean().optional(),
+  roleId: optional(z.string()),
+  isActive: optional(z.boolean()),
 }).strict();
 
 export const GET = withOrgAuth(async (request, { orgId }) => {
@@ -113,7 +114,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
 
 export const POST = withOrgAuth(async (request, { orgId, orgUser }) => {
   try {
-    if (!hasPermission(orgUser, "users", "create")) {
+    if (!hasPermission(orgUser, "organization", "users", "write")) {
       return forbidden("You don't have permission to invite users");
     }
 
@@ -197,7 +198,7 @@ export const POST = withOrgAuth(async (request, { orgId, orgUser }) => {
 
 export const PATCH = withOrgAuth(async (request, { orgId, orgUser: currentOrgUser }) => {
   try {
-    if (!hasPermission(currentOrgUser, "users", "update")) {
+    if (!hasPermission(currentOrgUser, "organization", "users", "write")) {
       return forbidden("You don't have permission to manage users");
     }
 
@@ -278,7 +279,7 @@ export const PATCH = withOrgAuth(async (request, { orgId, orgUser: currentOrgUse
 
 export const DELETE = withOrgAuth(async (request, { orgId, orgUser: currentOrgUser, userId }) => {
   try {
-    if (!hasPermission(currentOrgUser, "users", "delete")) {
+    if (!hasPermission(currentOrgUser, "organization", "users", "delete")) {
       return forbidden("You don't have permission to remove users");
     }
 

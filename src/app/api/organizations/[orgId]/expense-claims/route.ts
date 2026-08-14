@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -14,8 +15,8 @@ const createExpenseClaimSchema = z.object({
   category: z.enum(["TRAVEL", "FOOD", "ACCOMMODATION", "OFFICE_SUPPLIES", "OTHER"]),
   description: z.string().min(1, "Description is required"),
   amount: z.number().min(0.01, "Amount must be greater than 0"),
-  attachments: z.array(z.string()).optional(),
-  notes: z.string().optional(),
+  attachments: optional(z.array(z.string())),
+  notes: optional(z.string()),
 });
 
 export const GET = withOrgAuth(async (request, { orgId }) => {

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -11,20 +12,20 @@ export const dynamic = "force-dynamic";
 const createSalesOrderSchema = z.object({
   partyId: z.string().min(1, "Customer is required"),
   date: z.string().transform((val) => new Date(val)),
-  expectedDate: z.string().optional().transform((val) => val ? new Date(val) : undefined),
-  referenceNo: z.string().optional(),
+  expectedDate: optional(z.string()).transform((val) => val ? new Date(val) : undefined),
+  referenceNo: optional(z.string()),
   status: z.enum(["DRAFT", "CONFIRMED", "PARTIAL", "FULFILLED", "CANCELLED"]).default("DRAFT"),
-  billingAddress: z.string().optional(),
-  shippingAddress: z.string().optional(),
-  notes: z.string().optional(),
-  terms: z.string().optional(),
+  billingAddress: optional(z.string()),
+  shippingAddress: optional(z.string()),
+  notes: optional(z.string()),
+  terms: optional(z.string()),
   items: z.array(z.object({
     itemId: z.string().min(1),
     quantity: z.number().min(1),
     unitPrice: z.number().min(0),
     discountPercent: z.number().min(0).default(0),
-    taxId: z.string().optional(),
-    description: z.string().optional(),
+    taxId: optional(z.string()),
+    description: optional(z.string()),
   })).min(1, "At least one item is required"),
 });
 

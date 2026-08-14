@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound, hasPermission, forbidden } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -13,18 +14,18 @@ const itemSchema = z.object({
   quantity: z.number().min(0.0001),
   unitPrice: z.number().min(0),
   discountPercent: z.number().min(0).max(100).default(0),
-  taxId: z.string().optional(),
-  description: z.string().optional(),
+  taxId: optional(z.string()),
+  description: optional(z.string()),
 });
 
 const createSchema = z.object({
   partyId: z.string().min(1),
   frequency: z.enum(FREQUENCIES as readonly [Frequency, ...Frequency[]]),
   startDate: z.string().transform((s) => new Date(s)),
-  endDate: z.string().optional().transform((s) => (s ? new Date(s) : undefined)),
+  endDate: optional(z.string()).transform((s) => (s ? new Date(s) : undefined)),
   dueDays: z.number().int().min(0).max(365).default(15),
   items: z.array(itemSchema).min(1, "At least one item is required"),
-  meta: z.record(z.string(), z.unknown()).optional(),
+  meta: optional(z.record(z.string(), z.unknown())),
   isActive: z.boolean().default(true),
 });
 
@@ -68,7 +69,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
  * caps the run window if set.
  */
 export const POST = withOrgAuth(async (request, { orgId, orgUser }) => {
-  if (!hasPermission(orgUser, "invoices", "create")) {
+  if (!hasPermission(orgUser, "sales", "recurring", "write")) {
     return forbidden("You don't have permission to create recurring invoice templates");
   }
   try {

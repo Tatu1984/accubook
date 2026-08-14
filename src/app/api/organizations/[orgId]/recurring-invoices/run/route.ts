@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
  * underlying helper.
  */
 export const POST = withOrgAuth(async (_request, { orgId, orgUser }) => {
-  if (!hasPermission(orgUser, "invoices", "create")) {
+  if (!hasPermission(orgUser, "sales", "recurring", "write")) {
     return forbidden(
       "You don't have permission to spawn invoices from recurring templates"
     );

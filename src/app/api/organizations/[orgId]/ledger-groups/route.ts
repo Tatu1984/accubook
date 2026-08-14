@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -11,8 +12,8 @@ export const dynamic = "force-dynamic";
 const createLedgerGroupSchema = z.object({
   name: z.string().min(1, "Name is required"),
   nature: z.enum(["ASSETS", "LIABILITIES", "INCOME", "EXPENSES", "EQUITY"]),
-  parentId: z.string().optional(),
-  description: z.string().optional(),
+  parentId: optional(z.string()),
+  description: optional(z.string()),
 });
 
 export const GET = withOrgAuth(async (_request, { orgId }) => {

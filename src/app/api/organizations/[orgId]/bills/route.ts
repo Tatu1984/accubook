@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { D, sum } from "@/backend/utils/money";
@@ -26,24 +27,24 @@ const createBillSchema = z.object({
   partyId: z.string().min(1, "Vendor is required"),
   date: z.string().transform((val) => new Date(val)),
   dueDate: z.string().transform((val) => new Date(val)),
-  vendorBillNo: z.string().optional(),
-  purchaseOrderId: z.string().optional(),
+  vendorBillNo: optional(z.string()),
+  purchaseOrderId: optional(z.string()),
   status: z.enum(["DRAFT", "PENDING_APPROVAL", "APPROVED", "PARTIAL", "PAID", "OVERDUE", "CANCELLED"]).default("DRAFT"),
-  notes: z.string().optional(),
-  attachments: z.array(attachmentSchema).optional(),
+  notes: optional(z.string()),
+  attachments: optional(z.array(attachmentSchema)),
   /** RCM flag — when true, bill posts with Cr GST Output (RCM payable) instead of charging vendor for GST. */
   reverseCharge: z.boolean().default(false),
   /** TDS at bill time (accrual). When set, posting voucher gets a Cr TDS Payable line and a TdsDeduction row is persisted. */
-  tdsSection: z.enum(TDS_DEDUCTION_SECTIONS).optional(),
-  deducteeType: z.enum(["INDIVIDUAL_HUF", "COMPANY_OTHER"]).optional(),
-  noPan: z.boolean().optional(),
+  tdsSection: optional(z.enum(TDS_DEDUCTION_SECTIONS)),
+  deducteeType: optional(z.enum(["INDIVIDUAL_HUF", "COMPANY_OTHER"])),
+  noPan: optional(z.boolean()),
   items: z.array(z.object({
     itemId: z.string().min(1),
     quantity: z.number().min(1),
     unitPrice: z.number().min(0),
     discountPercent: z.number().min(0).default(0),
-    taxId: z.string().optional(),
-    description: z.string().optional(),
+    taxId: optional(z.string()),
+    description: optional(z.string()),
   })).min(1, "At least one item is required"),
 });
 
