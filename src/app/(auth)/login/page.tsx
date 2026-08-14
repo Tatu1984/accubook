@@ -174,28 +174,36 @@ function LoginForm() {
 /*
   Demo credentials card.
 
-  Two independent locks, both of which must be open before anything
-  renders:
+  Shown by default, because this deployment is a demo whose whole point is
+  that an evaluator can sign in without being handed credentials out of
+  band.
 
-    1. `NEXT_PUBLIC_DEMO === "true"` — set ONLY on a throwaway demo
-       deployment, never on a deployment holding customer books.
-    2. `NEXT_PUBLIC_DEMO_EMAIL` / `NEXT_PUBLIC_DEMO_PASSWORD` — the
-       credentials live in the environment, not in this file.
+  The defaults below are the seeded super admin from `prisma/seed.ts`,
+  which is committed in this (public) repository — so printing them here
+  discloses nothing that `prisma/seed.ts:140` does not already disclose.
+  That is a statement about this deployment, not a general endorsement:
+  BEFORE this instance holds real client books, either
 
-  The second lock is the important one: it means the repository no
-  longer carries a working password, so a mis-set flag leaks an empty
-  card rather than an administrator account. These are `NEXT_PUBLIC_*`
-  and therefore inlined at build time, so on a normal deployment the
-  whole card is dead code that never reaches the browser.
+    - set `NEXT_PUBLIC_DEMO=false` to remove the card entirely, or
+    - point `NEXT_PUBLIC_DEMO_EMAIL` / `NEXT_PUBLIC_DEMO_PASSWORD` at a
+      restricted demo account in a throwaway organization,
+
+  and rotate the seeded password, which anyone can read on GitHub.
+
+  All three are `NEXT_PUBLIC_*` and therefore inlined at build time, so
+  changing them requires a redeploy, not just an env edit.
 
   Rendered in BOTH the live form and the Suspense fallback because
   `useSearchParams()` in LoginForm forces dynamic rendering, so the
   fallback is what gets streamed before hydration.
 */
+const DEMO_EMAIL = process.env.NEXT_PUBLIC_DEMO_EMAIL || "admin@accubook.com";
+const DEMO_PASSWORD = process.env.NEXT_PUBLIC_DEMO_PASSWORD || "password123!";
+
 function DemoCredentialsCard() {
-  const enabled = process.env.NEXT_PUBLIC_DEMO === "true";
-  const email = process.env.NEXT_PUBLIC_DEMO_EMAIL;
-  const password = process.env.NEXT_PUBLIC_DEMO_PASSWORD;
+  const enabled = process.env.NEXT_PUBLIC_DEMO !== "false";
+  const email = DEMO_EMAIL;
+  const password = DEMO_PASSWORD;
 
   if (!enabled || !email || !password) return null;
 
