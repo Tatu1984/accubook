@@ -246,3 +246,74 @@ describe("seeded roles against the real resource map", () => {
     expect(hasPermission(acc, "hr", "payroll", "approve")).toBe(false);
   });
 });
+
+/**
+ * The production database carries role rows in the pre-object vocabulary,
+ * written by an older seed. `hasPermission` skipped them (strings are not
+ * objects), so every check returned false and the holder was locked out of
+ * their organization entirely once withOrgAuth began enforcing centrally.
+ */
+describe("legacy flat-string grants", () => {
+  // Verbatim from the production `Admin` role row.
+  const legacyAdmin = orgUserWithPerms([
+    "manage_organization",
+    "manage_users",
+    "manage_roles",
+    "view_all_data",
+    "create_vouchers",
+    "approve_vouchers",
+    "manage_parties",
+    "manage_inventory",
+    "manage_banking",
+    "view_reports",
+    "manage_hr",
+    "approve_leaves",
+    "approve_expenses",
+  ]);
+
+  it("keeps a legacy admin working across every module", () => {
+    expect(hasPermission(legacyAdmin, "sales", "invoices", "write")).toBe(true);
+    expect(hasPermission(legacyAdmin, "sales", "invoices", "approve")).toBe(true);
+    expect(hasPermission(legacyAdmin, "purchases", "bills", "write")).toBe(true);
+    expect(hasPermission(legacyAdmin, "accounting", "vouchers", "approve")).toBe(true);
+    expect(hasPermission(legacyAdmin, "organization", "users", "write")).toBe(true);
+    expect(hasPermission(legacyAdmin, "hr", "payroll", "approve")).toBe(true);
+    // Modules the old vocabulary has no word for must not be narrowed away.
+    expect(hasPermission(legacyAdmin, "taxation", "gst-returns", "write")).toBe(true);
+    expect(hasPermission(legacyAdmin, "manufacturing", "operations", "write")).toBe(true);
+  });
+
+  it("maps a non-admin legacy role to just what it named", () => {
+    const clerk = orgUserWithPerms(["view_reports", "manage_inventory", "approve_leaves"]);
+    expect(hasPermission(clerk, "reports", "reports", "read")).toBe(true);
+    expect(hasPermission(clerk, "reports", "reports", "export")).toBe(true);
+    expect(hasPermission(clerk, "inventory", "items", "delete")).toBe(true);
+    expect(hasPermission(clerk, "hr", "leaves", "approve")).toBe(true);
+    // Not named -> not granted. A legacy clerk is not an administrator.
+    expect(hasPermission(clerk, "organization", "users", "write")).toBe(false);
+    expect(hasPermission(clerk, "sales", "invoices", "write")).toBe(false);
+    expect(hasPermission(clerk, "hr", "payroll", "approve")).toBe(false);
+  });
+
+  it("grants read-only across modules for view_all_data", () => {
+    const viewer = orgUserWithPerms(["view_all_data"]);
+    expect(hasPermission(viewer, "sales", "invoices", "read")).toBe(true);
+    expect(hasPermission(viewer, "accounting", "ledgers", "read")).toBe(true);
+    expect(hasPermission(viewer, "sales", "invoices", "write")).toBe(false);
+    expect(hasPermission(viewer, "sales", "invoices", "delete")).toBe(false);
+  });
+
+  it("denies unknown legacy capability strings rather than erroring", () => {
+    const odd = orgUserWithPerms(["something_we_never_shipped"]);
+    expect(hasPermission(odd, "sales", "invoices", "read")).toBe(false);
+    expect(hasPermission(orgUserWithPerms([]), "sales", "invoices", "read")).toBe(false);
+  });
+
+  it("still handles the current object vocabulary unchanged", () => {
+    const admin = orgUserWithPerms([
+      { module: "*", actions: ["create", "read", "update", "delete", "approve", "export"] },
+    ]);
+    expect(hasPermission(admin, "sales", "invoices", "write")).toBe(true);
+    expect(hasPermission(admin, "sales", "invoices", "approve")).toBe(true);
+  });
+});
