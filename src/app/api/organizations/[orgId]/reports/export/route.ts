@@ -306,8 +306,13 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
           return badRequest("Ledger ID required");
         }
 
-        const ledger = await prisma.ledger.findUnique({
-          where: { id: ledgerId },
+        // Scoped by organizationId, not just id. `withOrgAuth` proves the
+        // caller belongs to the org in the URL; it says nothing about ids
+        // arriving in the request body. Without this, any member of any
+        // organization could pass another tenant's ledgerId and export that
+        // ledger's opening balance and full voucher history.
+        const ledger = await prisma.ledger.findFirst({
+          where: { id: ledgerId, organizationId: orgId },
           include: { group: { select: { name: true, nature: true } } },
         });
 
@@ -324,7 +329,15 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
         const entries = await prisma.voucherEntry.findMany({
           where: {
             ledgerId,
-            voucher: { date: { gte: startDate, lte: endDate }, status: "APPROVED" },
+            // Defence in depth: the ledger above is already proven to belong
+            // to this organization, so this cannot change the result set —
+            // it keeps the entry query correct on its own terms, the same way
+            // the trial-balance branch scopes its vouchers.
+            voucher: {
+              organizationId: orgId,
+              date: { gte: startDate, lte: endDate },
+              status: "APPROVED",
+            },
           },
           include: {
             voucher: {
