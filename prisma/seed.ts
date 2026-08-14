@@ -2,6 +2,8 @@ import { PrismaClient } from "../src/generated/prisma";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 import { hash } from "bcryptjs";
+import { ensureSystemRoles } from "../src/backend/services/organization/roles";
+import { provisionOrganization } from "../src/backend/services/organization/provision";
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || "postgresql://postgres:postgres@localhost:5432/accounting_db?schema=public",
@@ -38,50 +40,11 @@ async function main() {
 
   console.log("Currencies created");
 
-  // Create roles
-  const adminRole = await prisma.role.upsert({
-    where: { id: "admin-role" },
-    update: {},
-    create: {
-      id: "admin-role",
-      name: "ADMIN",
-      description: "Full access to all features",
-      permissions: [
-        { module: "*", actions: ["create", "read", "update", "delete", "approve", "export"] },
-      ],
-      isSystem: true,
-    },
-  });
-
-  const accountantRole = await prisma.role.upsert({
-    where: { id: "accountant-role" },
-    update: {},
-    create: {
-      id: "accountant-role",
-      name: "ACCOUNTANT",
-      description: "Access to accounting and finance modules",
-      permissions: [
-        { module: "accounting", actions: ["create", "read", "update", "delete"] },
-        { module: "banking", actions: ["create", "read", "update"] },
-        { module: "reports", actions: ["read", "export"] },
-      ],
-      isSystem: true,
-    },
-  });
-
-  const viewerRole = await prisma.role.upsert({
-    where: { id: "viewer-role" },
-    update: {},
-    create: {
-      id: "viewer-role",
-      name: "VIEWER",
-      description: "Read-only access",
-      permissions: [
-        { module: "*", actions: ["read"] },
-      ],
-      isSystem: true,
-    },
-  });
+  // Create roles. The definitions live in the app, not here, so the seed
+  // and the runtime enforcement can never describe permissions
+  // differently — see src/backend/services/organization/roles.ts.
+  const roleIds = await ensureSystemRoles(prisma);
+  const adminRole = { id: roleIds.ADMIN };
 
   console.log("Roles created");
 
@@ -260,117 +223,18 @@ async function main() {
 
   console.log("Admin linked to organization");
 
-  // Create fiscal year
-  const currentYear = new Date().getFullYear();
-  const fyStart = new Date(`${currentYear}-04-01`);
-  const fyEnd = new Date(`${currentYear + 1}-03-31`);
-
-  await prisma.fiscalYear.upsert({
-    where: {
-      organizationId_name: {
-        organizationId: organization.id,
-        name: `${currentYear}-${(currentYear + 1).toString().slice(-2)}`,
-      },
-    },
-    update: {},
-    create: {
-      organizationId: organization.id,
-      name: `${currentYear}-${(currentYear + 1).toString().slice(-2)}`,
-      startDate: fyStart,
-      endDate: fyEnd,
-    },
+  // Fiscal year, chart of accounts and default ledgers.
+  //
+  // These used to be spelled out here and, differently, in
+  // /api/auth/register. The register copy omitted every ledger group the
+  // posting layer looks up by name, so self-registered tenants could not
+  // record a transaction. One definition now serves both.
+  await provisionOrganization(prisma, {
+    organizationId: organization.id,
+    fiscalYearStartMonth: 4,
   });
 
-  console.log("Fiscal year created");
-
-  // Create default ledger groups
-  const ledgerGroups = [
-    { name: "Assets", nature: "ASSETS", isSystem: true },
-    { name: "Current Assets", nature: "ASSETS", parent: "Assets", isSystem: true },
-    { name: "Cash & Bank", nature: "ASSETS", parent: "Current Assets", isSystem: true },
-    { name: "Sundry Debtors", nature: "ASSETS", parent: "Current Assets", isSystem: true },
-    { name: "Stock-in-Hand", nature: "ASSETS", parent: "Current Assets", isSystem: true },
-    { name: "Fixed Assets", nature: "ASSETS", parent: "Assets", isSystem: true },
-    { name: "Liabilities", nature: "LIABILITIES", isSystem: true },
-    { name: "Current Liabilities", nature: "LIABILITIES", parent: "Liabilities", isSystem: true },
-    { name: "Sundry Creditors", nature: "LIABILITIES", parent: "Current Liabilities", isSystem: true },
-    { name: "Duties & Taxes", nature: "LIABILITIES", parent: "Current Liabilities", isSystem: true },
-    { name: "Loans (Liability)", nature: "LIABILITIES", parent: "Liabilities", isSystem: true },
-    { name: "Income", nature: "INCOME", isSystem: true },
-    { name: "Sales Accounts", nature: "INCOME", parent: "Income", isSystem: true },
-    { name: "Other Income", nature: "INCOME", parent: "Income", isSystem: true },
-    { name: "Expenses", nature: "EXPENSES", isSystem: true },
-    { name: "Direct Expenses", nature: "EXPENSES", parent: "Expenses", isSystem: true },
-    { name: "Indirect Expenses", nature: "EXPENSES", parent: "Expenses", isSystem: true },
-    { name: "Capital Account", nature: "EQUITY", isSystem: true },
-  ];
-
-  const groupMap: Record<string, string> = {};
-
-  for (const group of ledgerGroups) {
-    const created = await prisma.ledgerGroup.upsert({
-      where: {
-        organizationId_name: {
-          organizationId: organization.id,
-          name: group.name,
-        },
-      },
-      update: {},
-      create: {
-        organizationId: organization.id,
-        name: group.name,
-        nature: group.nature,
-        parentId: group.parent ? groupMap[group.parent] : null,
-        isSystem: group.isSystem,
-      },
-    });
-    groupMap[group.name] = created.id;
-  }
-
-  console.log("Ledger groups created");
-
-  // Create some default ledgers
-  const ledgers = [
-    { name: "Cash in Hand", group: "Cash & Bank" },
-    { name: "Stock-in-Hand", group: "Stock-in-Hand" },
-    { name: "Work in Progress", group: "Stock-in-Hand" },
-    { name: "GST Input", group: "Duties & Taxes" },
-    { name: "GST Output", group: "Duties & Taxes" },
-    { name: "TDS Payable", group: "Duties & Taxes" },
-    { name: "TCS Payable", group: "Duties & Taxes" },
-    { name: "PF Payable", group: "Duties & Taxes" },
-    { name: "ESI Payable", group: "Duties & Taxes" },
-    { name: "Professional Tax Payable", group: "Duties & Taxes" },
-    { name: "Salaries Payable", group: "Current Liabilities" },
-    { name: "Sales - Goods", group: "Sales Accounts" },
-    { name: "Sales - Services", group: "Sales Accounts" },
-    { name: "Purchase Accounts", group: "Direct Expenses" },
-    { name: "Salaries & Wages", group: "Indirect Expenses" },
-    { name: "Employer PF Contribution", group: "Indirect Expenses" },
-    { name: "Employer ESI Contribution", group: "Indirect Expenses" },
-    { name: "Rent", group: "Indirect Expenses" },
-    { name: "Electricity", group: "Indirect Expenses" },
-    { name: "Office Expenses", group: "Indirect Expenses" },
-  ];
-
-  for (const ledger of ledgers) {
-    await prisma.ledger.upsert({
-      where: {
-        organizationId_name: {
-          organizationId: organization.id,
-          name: ledger.name,
-        },
-      },
-      update: {},
-      create: {
-        organizationId: organization.id,
-        name: ledger.name,
-        groupId: groupMap[ledger.group],
-      },
-    });
-  }
-
-  console.log("Default ledgers created");
+  console.log("Fiscal year, ledger groups and default ledgers created");
 
   // Create warehouse
   await prisma.warehouse.upsert({

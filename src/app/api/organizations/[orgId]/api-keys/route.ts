@@ -40,7 +40,7 @@ const createSchema = z.object({
 export const GET = withOrgAuth(async (_req, { orgId, orgUser }) => {
   // Refuse to leak even prefixes to a request that came in via an API key —
   // session-only management surface.
-  if (!hasPermission(orgUser, "settings", "read") && !hasPermission(orgUser, "*", "*")) {
+  if (!hasPermission(orgUser, "organization", "api-keys", "read")) {
     return forbidden("Only admins can view API keys");
   }
   const keys = await prisma.apiKey.findMany({
@@ -80,7 +80,7 @@ export const POST = withOrgAuth(async (request, { orgId, userId, orgUser, apiKey
   if (apiKey) {
     return forbidden("API keys cannot create or manage other API keys");
   }
-  if (!hasPermission(orgUser, "settings", "update") && !hasPermission(orgUser, "*", "*")) {
+  if (!hasPermission(orgUser, "organization", "api-keys", "write")) {
     return forbidden("Only admins can create API keys");
   }
 

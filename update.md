@@ -261,8 +261,56 @@ Three sub-PRs. Tick boxes as they ship.
   - **GST returns UI** — `/taxation/gst` now wired to compute + portal-JSON download for GSTR-1/3B/9.
   - **Banking import UI** at `/banking/import` — upload statement → reconcile → match results.
   - **Marketing landing page** at `/` — reactbits-style hero/features/CTA, sign-in button → /login on same domain.
-- **Last updated:** 2026-05-11 by Claude (commit `ced6a25`)
-- **Production readiness audit (2026-05-11):** Deep audit run; 6 BLOCKERs identified, all 6 shipped this session. ~85% → ~93% production-ready. Remaining: HIGH-tier items (CSP, CSRF, integration tests, JWT revocation, status page) + npm audit transitive (waiting on next Next.js patch). Detailed verdict + tiered list in audit log section below.
+- **Last updated:** 2026-08-14 by Claude (working tree, not committed)
+
+### ⚠️ Read this before trusting anything below — 2026-08-11 audit + P0 fixes
+
+**The project is no longer solo.** `origin/main` had moved 16 commits ahead of the local
+checkout (branches `dev-ap`, `ui-fix`) and the local copy had never fetched. Production runs
+what is on origin. `src/middleware.ts` is now `src/proxy.ts` (Next 16 rename). A `bun.lock`
+was added alongside `package-lock.json` while `vercel.json` still builds with `npm install` —
+**pick one package manager.** Reconciled 2026-08-11; local is now at `7fc231e` plus the work
+below.
+
+**A deep end-to-end audit found the ~93% figure below to be wrong — the real number was
+closer to 60%.** Unit tests over pure helpers plus a green build cannot see an unwired route
+or an unreachable status transition, and that is where every blocker lived. All 7 P0
+blockers are now fixed in the working tree:
+
+| # | Blocker | Fix |
+|---|---|---|
+| P0-01 | **Sales invoices never reached the GL and could never leave DRAFT.** No `Invoice.voucherId`, no posting fn, and `/invoices/[id]` exported only GET — the UI's "Send Invoice" called a PATCH that 405'd. Revenue, AR, output GST all absent from the books; GSTR-1 and AR aging permanently empty. | Migration 13 adds `Invoice.voucherId`. New `postInvoiceToGl` + `decideInvoiceEntries` + `reverseInvoicePosting` (`services/billing/post-invoice.ts`), mirroring post-bill. New PATCH with DRAFT→SENT→CANCELLED and voucher reversal; new DELETE for drafts only. `invoices POST` accepts `status: "SENT"` to issue at create. +7 tests. |
+| P0-02 | **RBAC was decorative.** Only 16 of 71 mutating route files called `hasPermission`; a VIEWER could post journals, delete ledgers, run payroll. Four incompatible permission vocabularies — the seeded ACCOUNTANT shared *zero* module names with the gates that existed. | Enforcement moved into `withOrgAuth`, resolving (module, category, action) through the same `API_RESOURCE_MAP` API keys use. **Fails closed** on unmapped paths. `hasPermission` is now 4-arg (module, category, action). Roles defined once in `services/organization/roles.ts`. `roles` endpoint serves `SCOPE_TREE` instead of invented strings. +25 tests, plus `route-coverage.test.ts` which walks the real route tree so an unregistered segment fails in CI. |
+| P0-03 | **Production login page published working super-admin credentials** (verified live). | Card now needs `NEXT_PUBLIC_DEMO=true` **and** env-supplied `NEXT_PUBLIC_DEMO_EMAIL`/`_PASSWORD` — the repo no longer carries a password. Playwright assertion inverted to a regression guard. Also fixed: the file held literal NUL/control bytes in a regex, so git treated it as binary and it could not be reviewed. |
+| P0-04 | **A cancelled or bounced receipt left the invoice reading PAID.** Status recompute only moved forward. Same bug on bills. | New pure `deriveSettlementStatus` — total over every input, with lifecycle-locked states held separately. +10 tests. |
+| P0-05 | **Journal vouchers accepted ledger IDs from other tenants**; `applyLedgerEntries` updated balances by bare id and silently skipped unresolvable ledgers. | New `utils/tenant-scope.ts` (`findForeignReferences`) validates every client-supplied id up front. `applyLedgerEntries` now takes `organizationId` (all 14 call sites updated) and throws `LedgerScopeError` instead of skipping. |
+| P0-06 | **Self-serve signup produced an unusable tenant** — register created ledger groups but not the four the posting layer resolves by name, so the first payment 500'd. Also 500'd entirely if the seed had never run. | One `provisionOrganization` in `services/organization/provision.ts`, used by seed, register **and** `POST /api/organizations`. `getOrCreateAdminRoleId` self-heals a never-seeded environment. |
+| P0-07 | **Both Vercel crons were dead** — routes exported only POST (Vercel Cron sends GET) *and* `/api/cron` was missing from the proxy allowlist, so requests 307'd to `/login`. Recurring invoices and overdue sweeps had never run. | `/api/cron` added to `publicApiRoutes` (still `requireCronSecret`-gated); both routes export GET and POST. |
+
+**Deploy hazard, already mitigated — do not remove:** role rows in the production database
+were written with `create`/`update` actions, while a request now resolves to `write`.
+`LEGACY_ACTION_ALIASES` in `permissions.ts` accepts the old names so the deploy does not lock
+out every existing user. Re-seeding rewrites the system roles to the new vocabulary.
+
+**Still open after this session** (from the same audit, all P1 or below):
+- 20 dashboard pages render fabricated data or never fetch — including `/settings/users`,
+  `/settings/audit-logs` (invented people, March-2024 timestamps) and all four financial
+  statement pages, which show a hard-coded `formatCurrency(0)` and an empty state that will
+  never fill because they never call their (working) APIs.
+- **Zero integration tests.** 497 tests, all pure functions; vitest `coverage.include` is
+  scoped to `src/backend/**` so `src/app/api/**` is not merely untested but excluded from
+  the number. Every P0 above would have been caught by six DB-backed tests.
+- Reports load the org's entire history and scan it per ledger — O(ledgers × entries) per
+  request, unbounded date floor. Will time out at the first real year-end close.
+- Unauthenticated `/api/*` returns a 307 to HTML rather than a 401 JSON, so an expired
+  session surfaces as "Failed to load" everywhere instead of a re-login.
+- `npm audit`: 2 critical / 21 high. `@auth/core` critical is fixed by `next-auth@5.0.0-beta.32`.
+- `Role` and `VoucherType` are global tables with no `organizationId`.
+- Audit-log writes cover 24 of 71 mutating route files.
+- **Secret rotation is overdue** (D3/D12 deferred them while nothing was live — something is
+  live now): Neon password, `AUTH_SECRET`, and the demo admin password.
+
+- **Production readiness audit (2026-05-11, superseded by the 2026-08-11 audit above):** Deep audit run; 6 BLOCKERs identified, all 6 shipped this session. ~85% → ~93% production-ready. Remaining: HIGH-tier items (CSP, CSRF, integration tests, JWT revocation, status page) + npm audit transitive (waiting on next Next.js patch). Detailed verdict + tiered list in audit log section below.
 - **Production-readiness fixes this session (2026-05-11):**
   - **Sentry stub** (`ced6a25`). `@sentry/nextjs` installed; `src/instrumentation.ts` + `src/instrumentation-client.ts` initialize Sentry only when `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` are set (no-op otherwise, SDK not loaded). `error.tsx` + `global-error.tsx` swapped `console.error` → `Sentry.captureException` via dynamic import (also fixes H4 → stops leaking the rendered Error to Vercel stdout). To activate: paste DSN into Vercel env.
   - **next-auth pinned** (`5c6feeb`). `package.json` was `^5.0.0-beta.30` — caret on a pre-release matches any newer beta. beta.31 is already out and untested. Pinned exact `5.0.0-beta.30`. DEVELOPER_GUIDE stack table reflects "do not float". When v5 GA ships, deliberately upgrade.
@@ -384,6 +432,9 @@ Three sub-PRs. Tick boxes as they ship.
 
 | Date | What | Commit |
 |---|---|---|
+| 2026-08-14 | **Fixed the production invoice-creation 400 + the whole class behind it.** Root cause: every GET serialises an unset column as `null`, clients hand it straight back, and a bare `z.string().optional()` rejects `null` → opaque `400 Validation failed`. Reported case: the New Invoice page copied `shippingAddress` off the customer, and *every* invoice for a customer with no shipping address on file was refused. New `optional()` helper in `src/backend/validators/common.ts` (accepts null, normalises to `undefined`, leaves `""`/`0`/`false` alone); applied to 339 fields across 60 route files by codemod. Fields with an explicit `.nullable()` were deliberately left alone — there `null` means "clear the column". Guard test scans `src/app/api` so a bare `.optional()` fails CI. Also: items PATCH declared `taxConfigId`/`reorderQuantity` (no such columns → guaranteed 500), now correct names + `satisfies Prisma.ItemUncheckedUpdateInput` so drift is a build error; New Invoice page read `item.taxConfigId`/`item.code` instead of `salesTaxId`/`sku`, which silently left every line at 0% GST. 505 tests (+8), tsc + lint + build clean. | _(working tree)_ |
+| 2026-08-11 | **All 7 P0 blockers from the end-to-end audit fixed.** Invoice→GL posting + lifecycle (migration 13); RBAC enforced centrally in `withOrgAuth`, fail-closed, one vocabulary; demo credentials re-gated + moved to env; settlement status made bidirectional; voucher ledger refs tenant-scoped; one org-provisioning service for seed/register/create-org; crons un-broken. 497 tests (+104), tsc + lint + build clean. Full detail in §8. | _(working tree)_ |
+| 2026-08-11 | **Reconciled with `origin/main` `7fc231e`** — local was 16 commits behind and had never fetched. `middleware.ts`→`proxy.ts`, `withDbRetry`, theme provider, voucher detail/edit pages, `bun.lock`. | n/a |
 | 2026-05-04 | **Printable Form 16A / 27D cert** at `/taxation/tds-tcs/cert/[partyId]`. Per-party quarterly certificate; print-friendly layout mirroring official forms; "📄 Cert" pill links from the Form 16A/27D tabs. | `c8ec993` |
 | 2026-05-04 | **Ops closure** — `/api/health` migration-drift check, `docs/RUNBOOK.md`, DEVELOPER_GUIDE endpoint refresh. | `8af5117` |
 | 2026-05-04 | **Push to 95%** — super admin (`admin@accubook.com`/`password123!`), 3 cancel-* UIs wired, TDS monthly-challan tab, `CRON_SECRET` cron path, security mediums (GET org gate, bills DELETE gate, pino redact, NextAuth explicit secret). | `9c46d36` |
@@ -489,6 +540,8 @@ Three sub-PRs. Tick boxes as they ship.
 - **Don't add `prisma db push` to deploy.** Migrations only.
 - **Don't commit `.env`.** Already gitignored — keep it that way.
 - **Don't delete `src/generated/prisma/`** — it's the Prisma client output. Gitignored, regenerated on `prisma generate`.
+- **Never write a bare `z.string().optional()` in a request schema.** Use `optional(z.string())` from `@/backend/validators/common`, because clients send `null` for unset fields and a bare `.optional()` 400s the whole request. Use an explicit `.nullable()` only when `null` should *clear* the stored column. Enforced by `src/backend/validators/__tests__/common.test.ts`.
+- **Don't spread a parsed body into a Prisma `data:`.** A schema key that isn't a column compiles fine and throws at runtime; write the literal out with `satisfies Prisma.XUncheckedUpdateInput` (see items PATCH).
 - **Always run `npx tsc --noEmit && npm run build` before committing.** The build is the only smoke test we have until Vitest lands.
 
 ## 12. Environment / runtime notes

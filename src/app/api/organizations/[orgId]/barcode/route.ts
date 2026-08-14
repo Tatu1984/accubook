@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import * as bwipjs from "bwip-js";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
@@ -35,9 +36,9 @@ const generateBarcodeSchema = z.object({
 
 const bulkGenerateSchema = z.object({
   items: z.array(z.object({
-    id: z.string().optional(),
+    id: optional(z.string()),
     text: z.string().min(1),
-    label: z.string().optional(),
+    label: optional(z.string()),
   })),
   format: z.enum(BARCODE_FORMATS).default("code128"),
   width: z.number().min(50).max(500).default(200),

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
@@ -27,9 +28,9 @@ const budgetLineSchema = z.object({
 const createBudgetSchema = z.object({
   fiscalYearId: z.string().min(1, "Fiscal year is required"),
   name: z.string().min(1, "Name is required"),
-  description: z.string().optional(),
+  description: optional(z.string()),
   status: z.enum(["DRAFT", "ACTIVE", "CLOSED"]).default("DRAFT"),
-  lines: z.array(budgetLineSchema).optional(),
+  lines: optional(z.array(budgetLineSchema)),
 });
 
 export const GET = withOrgAuth(async (request, { orgId }) => {

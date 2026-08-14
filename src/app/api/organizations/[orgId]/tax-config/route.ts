@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
@@ -13,8 +14,8 @@ const createTaxConfigSchema = z.object({
   code: z.string().min(1, "Code is required"),
   taxType: z.enum(["GST", "IGST", "CGST", "SGST", "VAT", "TDS", "TCS", "CESS"]),
   rate: z.number().min(0).max(100),
-  accountId: z.string().optional(),
-  description: z.string().optional(),
+  accountId: optional(z.string()),
+  description: optional(z.string()),
   isActive: z.boolean().default(true),
 });
 

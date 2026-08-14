@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -12,9 +13,9 @@ export const dynamic = "force-dynamic";
 
 const issueSchema = z.object({
   /** Optional override of the WO's default warehouse for component issue. */
-  warehouseId: z.string().optional(),
+  warehouseId: optional(z.string()),
   /** Optional override of the issue date (defaults to today). */
-  date: z.string().optional().transform((v) => (v ? new Date(v) : new Date())),
+  date: optional(z.string()).transform((v) => (v ? new Date(v) : new Date())),
 });
 
 class InsufficientStockError extends Error {

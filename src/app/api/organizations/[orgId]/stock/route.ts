@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
 import { D, mul, toNumber } from "@/backend/utils/money";
@@ -14,13 +15,13 @@ const stockMovementSchema = z.object({
   movementType: z.enum(["PURCHASE", "SALE", "TRANSFER", "ADJUSTMENT", "RETURN", "GRN", "ISSUE"]),
   quantity: z.union([z.number().positive(), z.string()]).transform((v) => D(v)),
   rate: z.union([z.number().min(0), z.string()]).default(0).transform((v) => D(v)),
-  fromWarehouseId: z.string().optional(),
-  toWarehouseId: z.string().optional(),
+  fromWarehouseId: optional(z.string()),
+  toWarehouseId: optional(z.string()),
   unitId: z.string().min(1, "Unit is required"),
-  batchId: z.string().optional(),
-  referenceType: z.string().optional(),
-  referenceId: z.string().optional(),
-  narration: z.string().optional(),
+  batchId: optional(z.string()),
+  referenceType: optional(z.string()),
+  referenceId: optional(z.string()),
+  narration: optional(z.string()),
   date: z.string().transform((val) => new Date(val)),
 });
 

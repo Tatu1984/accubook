@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { searchHsn } from "@/backend/services/india/hsn-library";
 
 export const runtime = "nodejs";
@@ -7,8 +8,8 @@ export const dynamic = "force-dynamic";
 
 const querySchema = z.object({
   q: z.string().min(1, "q is required"),
-  type: z.enum(["HSN", "SAC"]).optional(),
-  limit: z.coerce.number().int().positive().max(50).optional(),
+  type: optional(z.enum(["HSN", "SAC"])),
+  limit: optional(z.coerce.number().int().positive().max(50)),
 });
 
 /**

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
@@ -11,11 +12,11 @@ export const dynamic = "force-dynamic";
 const createProjectSchema = z
   .object({
     name: z.string().min(1, "Name is required"),
-    code: z.string().optional(),
-    description: z.string().optional(),
-    startDate: z.string().optional().transform((val) => (val ? new Date(val) : undefined)),
-    endDate: z.string().optional().transform((val) => (val ? new Date(val) : undefined)),
-    budget: z.number().optional(),
+    code: optional(z.string()),
+    description: optional(z.string()),
+    startDate: optional(z.string()).transform((val) => (val ? new Date(val) : undefined)),
+    endDate: optional(z.string()).transform((val) => (val ? new Date(val) : undefined)),
+    budget: optional(z.number()),
     status: z.enum(["ACTIVE", "COMPLETED", "ON_HOLD", "CANCELLED"]).default("ACTIVE"),
     isActive: z.boolean().default(true),
   })
@@ -24,7 +25,7 @@ const createProjectSchema = z
 const updateProjectSchema = z
   .object({
     id: z.string().min(1, "Project ID is required"),
-    name: z.string().min(1).optional(),
+    name: optional(z.string().min(1)),
     code: z.string().nullable().optional(),
     description: z.string().nullable().optional(),
     startDate: z
@@ -38,8 +39,8 @@ const updateProjectSchema = z
       .optional()
       .transform((val) => (val ? new Date(val) : val === null ? null : undefined)),
     budget: z.number().nullable().optional(),
-    status: z.enum(["ACTIVE", "COMPLETED", "ON_HOLD", "CANCELLED"]).optional(),
-    isActive: z.boolean().optional(),
+    status: optional(z.enum(["ACTIVE", "COMPLETED", "ON_HOLD", "CANCELLED"])),
+    isActive: optional(z.boolean()),
   })
   .strict();
 

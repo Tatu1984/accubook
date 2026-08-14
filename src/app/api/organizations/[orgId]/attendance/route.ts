@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -11,10 +12,10 @@ export const dynamic = "force-dynamic";
 const createAttendanceSchema = z.object({
   employeeId: z.string().min(1, "Employee is required"),
   date: z.string().transform((val) => new Date(val)),
-  checkIn: z.string().optional(),
-  checkOut: z.string().optional(),
+  checkIn: optional(z.string()),
+  checkOut: optional(z.string()),
   status: z.enum(["PRESENT", "ABSENT", "HALF_DAY", "LATE", "ON_LEAVE", "HOLIDAY", "WEEK_OFF"]).default("PRESENT"),
-  notes: z.string().optional(),
+  notes: optional(z.string()),
 });
 
 const bulkAttendanceSchema = z.object({
@@ -22,9 +23,9 @@ const bulkAttendanceSchema = z.object({
   attendances: z.array(z.object({
     employeeId: z.string().min(1),
     status: z.enum(["PRESENT", "ABSENT", "HALF_DAY", "LATE", "ON_LEAVE", "HOLIDAY", "WEEK_OFF"]),
-    checkIn: z.string().optional(),
-    checkOut: z.string().optional(),
-    notes: z.string().optional(),
+    checkIn: optional(z.string()),
+    checkOut: optional(z.string()),
+    notes: optional(z.string()),
   })),
 });
 

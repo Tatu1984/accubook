@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import {
@@ -22,25 +23,27 @@ const calculatePayslipSchema = z.object({
   employeeId: z.string(),
   month: z.number().min(1).max(12),
   year: z.number(),
-  workingDays: z.number().optional(),
-  presentDays: z.number().optional(),
+  workingDays: optional(z.number()),
+  presentDays: optional(z.number()),
   lopDays: z.number().default(0),
   overtimePay: z.number().default(0),
   bonus: z.number().default(0),
   otherDeductions: z.number().default(0),
   taxRegime: z.enum(["new", "old"]).default("new"),
-  declarations: z.object({
-    section80C: z.number().optional(),
-    section80D: z.number().optional(),
-    hra: z.number().optional(),
-    otherDeductions: z.number().optional(),
-  }).optional(),
+  declarations: optional(
+    z.object({
+      section80C: optional(z.number()),
+      section80D: optional(z.number()),
+      hra: optional(z.number()),
+      otherDeductions: optional(z.number()),
+    })
+  ),
 });
 
 const bulkCalculateSchema = z.object({
   month: z.number().min(1).max(12),
   year: z.number(),
-  employeeIds: z.array(z.string()).optional(),
+  employeeIds: optional(z.array(z.string())),
 });
 
 export const GET = withOrgAuth(async (request) => {

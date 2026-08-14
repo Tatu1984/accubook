@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound, hasPermission, forbidden } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -13,15 +14,17 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const updateBillSchema = z.object({
-  status: z.enum([
-    "DRAFT",
-    "PENDING_APPROVAL",
-    "APPROVED",
-    "PARTIAL",
-    "PAID",
-    "OVERDUE",
-    "CANCELLED",
-  ]).optional(),
+  status: optional(
+    z.enum([
+      "DRAFT",
+      "PENDING_APPROVAL",
+      "APPROVED",
+      "PARTIAL",
+      "PAID",
+      "OVERDUE",
+      "CANCELLED",
+    ])
+  ),
   notes: z.string().nullable().optional(),
   vendorBillNo: z.string().nullable().optional(),
 }).strict();
@@ -85,7 +88,7 @@ export const PATCH = withOrgAuth<{ billId: string }>(async (request, { orgId, pa
       validated.status !== "OVERDUE";
     const isStatusChange = willApprove || willReverse || (validated.status && validated.status !== existing.status);
 
-    if ((willApprove || willReverse) && !hasPermission(orgUser, "bills", "approve")) {
+    if ((willApprove || willReverse) && !hasPermission(orgUser, "purchases", "bills", "approve")) {
       return forbidden("You don't have permission to approve or reverse bills");
     }
 
@@ -133,7 +136,7 @@ export const PATCH = withOrgAuth<{ billId: string }>(async (request, { orgId, pa
           // Voucher exists but was previously reversed — re-apply the
           // ledger entries (forward post). Mirrors the voucher PATCH
           // forward-post path.
-          await applyLedgerEntries(tx, existing.voucher.entries);
+          await applyLedgerEntries(tx, orgId, existing.voucher.entries);
           await tx.voucher.update({
             where: { id: existing.voucher.id },
             data: {
@@ -156,7 +159,7 @@ export const PATCH = withOrgAuth<{ billId: string }>(async (request, { orgId, pa
             debitAmount: D(e.creditAmount),
             creditAmount: D(e.debitAmount),
           }));
-          await applyLedgerEntries(tx, reversed);
+          await applyLedgerEntries(tx, orgId, reversed);
           await tx.voucher.update({
             where: { id: existing.voucher.id },
             data: {
@@ -231,7 +234,7 @@ export const PATCH = withOrgAuth<{ billId: string }>(async (request, { orgId, pa
  *     voucherId: hard delete OK.
  */
 export const DELETE = withOrgAuth<{ billId: string }>(async (_request, { orgId, params, orgUser }) => {
-  if (!hasPermission(orgUser, "bills", "delete")) {
+  if (!hasPermission(orgUser, "purchases", "bills", "delete")) {
     return forbidden("You don't have permission to delete bills");
   }
   try {

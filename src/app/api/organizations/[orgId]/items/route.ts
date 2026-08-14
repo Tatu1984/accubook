@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -10,23 +11,23 @@ export const dynamic = "force-dynamic";
 
 const createItemSchema = z.object({
   name: z.string().min(1, "Name is required"),
-  sku: z.string().optional(),
-  barcode: z.string().optional(),
-  description: z.string().optional(),
-  categoryId: z.string().optional(),
+  sku: optional(z.string()),
+  barcode: optional(z.string()),
+  description: optional(z.string()),
+  categoryId: optional(z.string()),
   primaryUnitId: z.string().min(1, "Unit is required"),
   type: z.string().default("GOODS"),
-  purchasePrice: z.number().min(0).optional(),
-  sellingPrice: z.number().min(0).optional(),
-  mrp: z.number().min(0).optional(),
-  minStock: z.number().min(0).optional(),
-  maxStock: z.number().min(0).optional(),
-  reorderLevel: z.number().min(0).optional(),
-  reorderQty: z.number().min(0).optional(),
-  hsnCode: z.string().optional(),
-  sacCode: z.string().optional(),
-  purchaseTaxId: z.string().optional(),
-  salesTaxId: z.string().optional(),
+  purchasePrice: optional(z.number().min(0)),
+  sellingPrice: optional(z.number().min(0)),
+  mrp: optional(z.number().min(0)),
+  minStock: optional(z.number().min(0)),
+  maxStock: optional(z.number().min(0)),
+  reorderLevel: optional(z.number().min(0)),
+  reorderQty: optional(z.number().min(0)),
+  hsnCode: optional(z.string()),
+  sacCode: optional(z.string()),
+  purchaseTaxId: optional(z.string()),
+  salesTaxId: optional(z.string()),
   valuationMethod: z.string().default("FIFO"),
   trackBatch: z.boolean().default(false),
   trackSerial: z.boolean().default(false),

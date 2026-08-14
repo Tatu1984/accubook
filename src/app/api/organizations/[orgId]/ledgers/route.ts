@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -10,25 +11,25 @@ export const dynamic = "force-dynamic";
 
 const createLedgerSchema = z.object({
   name: z.string().min(1, "Name is required"),
-  code: z.string().optional(),
+  code: optional(z.string()),
   groupId: z.string().min(1, "Group is required"),
-  description: z.string().optional(),
+  description: optional(z.string()),
   openingBalance: z.number().default(0),
   openingBalanceType: z.enum(["DEBIT", "CREDIT"]).default("DEBIT"),
-  gstNo: z.string().optional(),
-  panNo: z.string().optional(),
-  address: z.string().optional(),
-  city: z.string().optional(),
-  state: z.string().optional(),
-  country: z.string().optional(),
-  contactPerson: z.string().optional(),
-  phone: z.string().optional(),
-  email: z.string().email().optional().or(z.literal("")),
-  creditLimit: z.number().optional(),
-  creditDays: z.number().optional(),
-  bankAccountNo: z.string().optional(),
-  bankName: z.string().optional(),
-  ifscCode: z.string().optional(),
+  gstNo: optional(z.string()),
+  panNo: optional(z.string()),
+  address: optional(z.string()),
+  city: optional(z.string()),
+  state: optional(z.string()),
+  country: optional(z.string()),
+  contactPerson: optional(z.string()),
+  phone: optional(z.string()),
+  email: optional(z.string().email()).or(z.literal("")),
+  creditLimit: optional(z.number()),
+  creditDays: optional(z.number()),
+  bankAccountNo: optional(z.string()),
+  bankName: optional(z.string()),
+  ifscCode: optional(z.string()),
 });
 
 export const GET = withOrgAuth(async (request, { orgId }) => {

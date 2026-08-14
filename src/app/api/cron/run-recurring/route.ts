@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * POST /api/cron/run-recurring
+ * GET | POST /api/cron/run-recurring
  *
  * Cross-org cron sweep — invoked by an external scheduler with a Bearer
  * CRON_SECRET header. Iterates every active organization and runs the
@@ -22,8 +22,13 @@ export const dynamic = "force-dynamic";
  * its `nextRunDate` inside the same transaction that spawns the invoice,
  * so a stuck cron that retries within the same minute will see the
  * advanced state and skip.
+ *
+ * Exposed on BOTH verbs on purpose: Vercel Cron issues a GET (and
+ * attaches `Authorization: Bearer $CRON_SECRET` itself), while
+ * external schedulers and manual `curl` runs tend to POST. Shipping
+ * POST alone meant every scheduled invocation 405'd silently.
  */
-export const POST = async (request: NextRequest) => {
+const handler = async (request: NextRequest) => {
   const denied = requireCronSecret(request);
   if (denied) return denied;
 
@@ -70,3 +75,6 @@ export const POST = async (request: NextRequest) => {
     );
   }
 };
+
+export const GET = handler;
+export const POST = handler;

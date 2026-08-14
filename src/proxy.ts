@@ -84,10 +84,18 @@ export function proxy(request: NextRequest) {
   const publicRoutes = ["/login", "/register", "/forgot-password", "/reset-password"];
   const isPublicRoute = publicRoutes.some(route => pathname.startsWith(route));
 
-  // API routes that don't require authentication.
-  // /api/health: public ops probe (uptime checks, deploy-readiness gates).
-  // /api/hsn-search: public lookup helper used pre-login on quoting flows.
-  const publicApiRoutes = ["/api/auth", "/api/health", "/api/hsn-search"];
+  // API routes that don't require a *session*. Each still enforces its
+  // own authentication at the handler; letting them past the proxy only
+  // means "don't bounce this to /login".
+  //   /api/health     — public ops probe (uptime checks, deploy gates).
+  //   /api/hsn-search — public lookup helper used pre-login on quoting flows.
+  //   /api/cron       — service-account endpoints gated by requireCronSecret
+  //                     (constant-time Bearer compare; 503 when CRON_SECRET
+  //                     is unset). Without this entry every scheduled
+  //                     invocation was 307'd to /login and silently did
+  //                     nothing, so recurring invoices and overdue sweeps
+  //                     never ran in production.
+  const publicApiRoutes = ["/api/auth", "/api/health", "/api/hsn-search", "/api/cron"];
   const isPublicApiRoute = publicApiRoutes.some(route => pathname.startsWith(route));
 
   // Static files - skip proxy

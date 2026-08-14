@@ -154,6 +154,7 @@ export async function maybePromoteEntity(
         });
         await applyLedgerEntries(
           tx,
+          organizationId,
           entries.map((e) => ({
             ledgerId: e.ledgerId,
             debitAmount: D(e.debitAmount),

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import bcrypt from "bcryptjs";
 import { logger } from "@/backend/utils/logger";
 import {
@@ -8,18 +9,23 @@ import {
   clientIpFromHeaders,
   rateLimited,
 } from "@/backend/utils/rate-limit";
+import {
+  provisionOrganization,
+  ensureBaseCurrency,
+} from "@/backend/services/organization/provision";
+import { getOrCreateAdminRoleId } from "@/backend/services/organization/roles";
 
 const registerSchema = z.object({
   // User details
   firstName: z.string().min(1, "First name is required"),
   lastName: z.string().min(1, "Last name is required"),
   email: z.string().email("Invalid email"),
-  phone: z.string().optional(),
+  phone: optional(z.string()),
   password: z.string().min(8, "Password must be at least 8 characters"),
 
   // Organization details
   companyName: z.string().min(1, "Company name is required"),
-  gstin: z.string().optional(),
+  gstin: optional(z.string()),
   country: z.string().default("IN"),
 });
 
@@ -58,20 +64,14 @@ export async function POST(request: NextRequest) {
     // Hash password
     const hashedPassword = await bcrypt.hash(validatedData.password, 12);
 
-    // Get the admin role (system role)
-    const adminRole = await prisma.role.findFirst({
-      where: { name: "ADMIN", isSystem: true },
-    });
-
-    if (!adminRole) {
-      return NextResponse.json(
-        { error: "System not configured. Please contact administrator." },
-        { status: 500 }
-      );
-    }
-
     // Create user, organization in a transaction
     const result = await prisma.$transaction(async (tx) => {
+      // The system roles are normally created by the seed, which refuses
+      // to run against production — so on a fresh production database
+      // this used to 500 with "System not configured" and there was no
+      // way to register the first account. Create them on demand instead.
+      const adminRoleId = await getOrCreateAdminRoleId(tx);
+
       // Create user
       const user = await tx.user.create({
         data: {
@@ -97,70 +97,27 @@ export async function POST(request: NextRequest) {
         data: {
           organizationId: organization.id,
           userId: user.id,
-          roleId: adminRole.id,
+          roleId: adminRoleId,
           isActive: true,
         },
       });
 
-      // Create default fiscal year
-      const currentDate = new Date();
-      const currentYear = currentDate.getFullYear();
-      const currentMonth = currentDate.getMonth() + 1;
-      const fiscalStartYear = currentMonth >= 4 ? currentYear : currentYear - 1;
-
-      await tx.fiscalYear.create({
-        data: {
-          organizationId: organization.id,
-          name: `FY ${fiscalStartYear}-${(fiscalStartYear + 1).toString().slice(-2)}`,
-          startDate: new Date(`${fiscalStartYear}-04-01`),
-          endDate: new Date(`${fiscalStartYear + 1}-03-31`),
-          isClosed: false,
-        },
+      // Chart of accounts, default ledgers, fiscal year, head-office
+      // branch and default warehouse — the same definition the seed uses.
+      //
+      // This used to be a hand-rolled list of ledger groups that omitted
+      // "Cash & Bank", "Sundry Debtors", "Sundry Creditors" and "Duties &
+      // Taxes", all of which the posting layer resolves by name. The
+      // result was a tenant that looked fine until the first payment,
+      // which failed with a 500. Both paths now share one definition so
+      // they cannot drift again.
+      await provisionOrganization(tx, {
+        organizationId: organization.id,
+        fiscalYearStartMonth: 4,
       });
 
-      // Create default ledger groups for the organization
-      const ledgerGroups = [
-        { name: "Assets", nature: "ASSETS" },
-        { name: "Current Assets", nature: "ASSETS", parentName: "Assets" },
-        { name: "Fixed Assets", nature: "ASSETS", parentName: "Assets" },
-        { name: "Liabilities", nature: "LIABILITIES" },
-        { name: "Current Liabilities", nature: "LIABILITIES", parentName: "Liabilities" },
-        { name: "Long-term Liabilities", nature: "LIABILITIES", parentName: "Liabilities" },
-        { name: "Equity", nature: "EQUITY" },
-        { name: "Income", nature: "INCOME" },
-        { name: "Sales Income", nature: "INCOME", parentName: "Income" },
-        { name: "Other Income", nature: "INCOME", parentName: "Income" },
-        { name: "Expenses", nature: "EXPENSES" },
-        { name: "Direct Expenses", nature: "EXPENSES", parentName: "Expenses" },
-        { name: "Indirect Expenses", nature: "EXPENSES", parentName: "Expenses" },
-      ];
-
-      const createdGroups: Record<string, string> = {};
-
-      for (const group of ledgerGroups) {
-        const parentId = group.parentName ? createdGroups[group.parentName] : null;
-        const created = await tx.ledgerGroup.create({
-          data: {
-            organizationId: organization.id,
-            name: group.name,
-            nature: group.nature,
-            parentId,
-            isSystem: true,
-          },
-        });
-        createdGroups[group.name] = created.id;
-      }
-
-      // Create default warehouse
-      await tx.warehouse.create({
-        data: {
-          organizationId: organization.id,
-          name: "Main Warehouse",
-          code: "WH-001",
-          isDefault: true,
-          isActive: true,
-        },
-      });
+      // Base currency, so amounts render and reports have a unit.
+      await ensureBaseCurrency(tx, organization.id, "INR");
 
       return { user, organization };
     });

@@ -30,6 +30,12 @@ model User {
   lastLoginIp        String?
   failedLoginAttempts Int      @default(0)
   lockedUntil        DateTime?
+  // JWT revocation: bumping this past a token's `issuedAt` invalidates
+  // that token on next session refresh. Lets ops force-logout a user
+  // (lost device, deactivation) without waiting for the 30-day JWT to
+  // expire. NextAuth's jwt callback re-checks at most once per 60s per
+  // active session.
+  tokensRevokedAt    DateTime?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
@@ -422,6 +428,7 @@ model Voucher {
   tdsDeductions TdsDeduction[] @relation("TdsVoucher")
   tcsCollections TcsCollection[] @relation("TcsVoucher")
   bill          Bill?          @relation("BillVoucher")
+  invoice       Invoice?       @relation("InvoiceVoucher")
   payments      Payment[]      @relation("PaymentVoucher")
   receipts      Receipt[]      @relation("ReceiptVoucher")
 
@@ -1115,6 +1122,14 @@ model Invoice {
   placeOfSupply    String?
   supplyType       String?   // INTRASTATE | INTERSTATE | EXPORT
   reverseCharge    Boolean   @default(false)
+  // The SALES voucher this invoice booked to the general ledger, set when
+  // the invoice leaves DRAFT. Null while the invoice is still a draft
+  // document with no accounting effect. Mirrors Bill.voucherId.
+  //
+  // Before this existed, invoices never reached the ledger at all: revenue
+  // and receivables were absent from the P&L and balance sheet, while the
+  // purchase side booked correctly.
+  voucherId        String?   @unique
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -1122,6 +1137,7 @@ model Invoice {
   party               Party             @relation(fields: [partyId], references: [id])
   salesOrder          SalesOrder?       @relation(fields: [salesOrderId], references: [id])
   currency            Currency?         @relation(fields: [currencyId], references: [id])
+  voucher             Voucher?          @relation("InvoiceVoucher", fields: [voucherId], references: [id])
   items               InvoiceItem[]
   taxes               InvoiceTax[]
   payments            InvoicePayment[]

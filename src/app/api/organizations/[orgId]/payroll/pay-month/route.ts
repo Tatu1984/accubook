@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound, hasPermission, forbidden } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -22,11 +23,11 @@ const payMonthSchema = z.object({
   month: z.number().int().min(1).max(12),
   year: z.number().int().min(2000).max(2100),
   /** Optional — if omitted, the JV credits "Cash in Hand". */
-  bankAccountId: z.string().optional(),
+  bankAccountId: optional(z.string()),
   /** Optional disbursement date; defaults to today. */
-  paidAt: z.string().optional().transform((v) => (v ? new Date(v) : new Date())),
-  paidVia: z.string().optional(),
-  transactionRef: z.string().optional(),
+  paidAt: optional(z.string()).transform((v) => (v ? new Date(v) : new Date())),
+  paidVia: optional(z.string()),
+  transactionRef: optional(z.string()),
 });
 
 /**
@@ -51,7 +52,7 @@ const payMonthSchema = z.object({
  * netSalary sum.
  */
 export const POST = withOrgAuth(async (request, { orgId, userId, orgUser }) => {
-  if (!hasPermission(orgUser, "payroll", "approve")) {
+  if (!hasPermission(orgUser, "hr", "payroll", "approve")) {
     return forbidden("You don't have permission to disburse payroll");
   }
   try {
@@ -175,7 +176,7 @@ export const POST = withOrgAuth(async (request, { orgId, userId, orgUser }) => {
         ],
       });
 
-      await applyLedgerEntries(tx, [
+      await applyLedgerEntries(tx, orgId, [
         { ledgerId: salariesPayable.id, debitAmount: totalNet, creditAmount: D(0) },
         { ledgerId: bankLedger.id, debitAmount: D(0), creditAmount: totalNet },
       ]);

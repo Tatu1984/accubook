@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
@@ -11,8 +12,8 @@ export const dynamic = "force-dynamic";
 const createCostCenterSchema = z
   .object({
     name: z.string().min(1, "Name is required"),
-    code: z.string().optional(),
-    parentId: z.string().optional(),
+    code: optional(z.string()),
+    parentId: optional(z.string()),
     isActive: z.boolean().default(true),
   })
   .strict();
@@ -20,10 +21,10 @@ const createCostCenterSchema = z
 const updateCostCenterSchema = z
   .object({
     id: z.string().min(1, "Cost center ID is required"),
-    name: z.string().min(1).optional(),
+    name: optional(z.string().min(1)),
     code: z.string().nullable().optional(),
     parentId: z.string().nullable().optional(),
-    isActive: z.boolean().optional(),
+    isActive: optional(z.boolean()),
   })
   .strict();
 

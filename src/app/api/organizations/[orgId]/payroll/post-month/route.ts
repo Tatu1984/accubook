@@ -45,7 +45,7 @@ export const POST = withOrgAuth(async (request, { orgId, userId, orgUser }) => {
   // Permission gate — anomaly: every other GL-posting POST gates on
   // approve-class permission; payroll was missing it. Closes audit
   // HIGH from the v2 production-readiness review.
-  if (!hasPermission(orgUser, "payroll", "approve")) {
+  if (!hasPermission(orgUser, "hr", "payroll", "approve")) {
     return forbidden("You don't have permission to post payroll to GL");
   }
   try {
@@ -198,6 +198,7 @@ export const POST = withOrgAuth(async (request, { orgId, userId, orgUser }) => {
       // 5. Apply ledger balance impact in the same tx.
       await applyLedgerEntries(
         tx,
+        orgId,
         ledgerEntries.map((e) => ({
           ledgerId: e.ledgerId,
           debitAmount: e.debit,

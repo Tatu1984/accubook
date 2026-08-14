@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -10,8 +11,8 @@ export const dynamic = "force-dynamic";
 
 const patchSchema = z
   .object({
-    name: z.string().min(1).optional(),
-    nature: z.enum(["ASSETS", "LIABILITIES", "INCOME", "EXPENSES", "EQUITY"]).optional(),
+    name: optional(z.string().min(1)),
+    nature: optional(z.enum(["ASSETS", "LIABILITIES", "INCOME", "EXPENSES", "EQUITY"])),
     parentId: z.string().nullable().optional(),
   })
   .strict();

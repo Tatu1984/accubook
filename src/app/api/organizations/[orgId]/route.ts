@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, hasPermission, forbidden } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -18,7 +19,7 @@ export const dynamic = "force-dynamic";
  * Permission: settings:update.
  */
 const patchSchema = z.object({
-  name: z.string().min(1).max(200).optional(),
+  name: optional(z.string().min(1).max(200)),
   legalName: z.string().max(300).nullable().optional(),
   registrationNo: z.string().max(100).nullable().optional(),
   taxId: z.string().max(100).nullable().optional(),
@@ -31,11 +32,11 @@ const patchSchema = z.object({
   address: z.string().max(500).nullable().optional(),
   city: z.string().max(100).nullable().optional(),
   state: z.string().max(100).nullable().optional(),
-  country: z.string().max(2).optional(),
+  country: optional(z.string().max(2)),
   postalCode: z.string().max(20).nullable().optional(),
   // India composition scheme controls — see schema docstring on
   // Organization.compositionScheme.
-  compositionScheme: z.boolean().optional(),
+  compositionScheme: optional(z.boolean()),
   compositionRate: z
     .union([z.number(), z.string()])
     .nullable()
@@ -51,7 +52,7 @@ const patchSchema = z.object({
 export const GET = withOrgAuth(async (_, { orgId, orgUser }) => {
   // GST/PAN/TAN are legally identifying and shouldn't leak to every
   // org member. Gate the read on the same permission as PATCH.
-  if (!hasPermission(orgUser, "settings", "read")) {
+  if (!hasPermission(orgUser, "organization", "profile", "read")) {
     return forbidden("You don't have permission to read organization settings");
   }
   try {
@@ -92,7 +93,7 @@ export const GET = withOrgAuth(async (_, { orgId, orgUser }) => {
 });
 
 export const PATCH = withOrgAuth(async (request, { orgId, orgUser, userId }) => {
-  if (!hasPermission(orgUser, "settings", "update")) {
+  if (!hasPermission(orgUser, "organization", "profile", "write")) {
     return forbidden("You don't have permission to edit organization settings");
   }
   try {

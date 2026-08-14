@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound, hasPermission, forbidden } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -11,7 +12,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const updateReceiptSchema = z.object({
-  status: z.enum(["COMPLETED", "CANCELLED", "BOUNCED"]).optional(),
+  status: optional(z.enum(["COMPLETED", "CANCELLED", "BOUNCED"])),
   /** Optional cancellation reason — surfaced in the audit log + receipt notes. */
   cancellationReason: z.string().max(500).nullable().optional(),
 }).strict();
@@ -57,7 +58,7 @@ export const PATCH = withOrgAuth<{ receiptId: string }>(async (request, { orgId,
     if (!receipt) return notFound("Receipt not found");
 
     if (validated.status === "CANCELLED" || validated.status === "BOUNCED") {
-      if (!hasPermission(orgUser, "receipts", "approve")) {
+      if (!hasPermission(orgUser, "sales", "receipts", "approve")) {
         return forbidden("You don't have permission to cancel receipts");
       }
       if (receipt.status === validated.status) {
@@ -75,7 +76,7 @@ export const PATCH = withOrgAuth<{ receiptId: string }>(async (request, { orgId,
             debitAmount: D(e.creditAmount),
             creditAmount: D(e.debitAmount),
           }));
-          await applyLedgerEntries(tx, reversed);
+          await applyLedgerEntries(tx, orgId, reversed);
           await tx.voucher.update({
             where: { id: receipt.voucher.id },
             data: {

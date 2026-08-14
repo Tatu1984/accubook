@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -11,14 +12,14 @@ export const dynamic = "force-dynamic";
 const createBranchSchema = z.object({
   name: z.string().min(1, "Name is required"),
   code: z.string().min(1, "Code is required"),
-  address: z.string().optional(),
-  city: z.string().optional(),
-  state: z.string().optional(),
+  address: optional(z.string()),
+  city: optional(z.string()),
+  state: optional(z.string()),
   country: z.string().default("IN"),
-  postalCode: z.string().optional(),
-  phone: z.string().optional(),
-  email: z.string().email().optional().or(z.literal("")),
-  gstNo: z.string().optional(),
+  postalCode: optional(z.string()),
+  phone: optional(z.string()),
+  email: optional(z.string().email()).or(z.literal("")),
+  gstNo: optional(z.string()),
   isHeadOffice: z.boolean().default(false),
 });
 

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -16,16 +17,16 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const transportSchema = z.object({
-  transMode: z.enum(["1", "2", "3", "4"]).optional(),
+  transMode: optional(z.enum(["1", "2", "3", "4"])),
   transDistance: z.number().int().min(0).max(4000),
-  transporterId: z.string().optional(),
-  transporterName: z.string().optional(),
-  vehicleNo: z.string().optional(),
-  vehicleType: z.enum(["R", "O"]).optional(),
-  transDocNo: z.string().optional(),
-  transDocDate: z.string().regex(/^\d{2}\/\d{2}\/\d{4}$/).optional(),
-  subSupplyType: z.number().int().min(1).max(11).optional(),
-  transactionType: z.number().int().min(1).max(4).optional(),
+  transporterId: optional(z.string()),
+  transporterName: optional(z.string()),
+  vehicleNo: optional(z.string()),
+  vehicleType: optional(z.enum(["R", "O"])),
+  transDocNo: optional(z.string()),
+  transDocDate: optional(z.string().regex(/^\d{2}\/\d{2}\/\d{4}$/)),
+  subSupplyType: optional(z.number().int().min(1).max(11)),
+  transactionType: optional(z.number().int().min(1).max(4)),
 });
 
 /**

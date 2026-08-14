@@ -124,7 +124,7 @@ export async function postWorkOrderJv(
     ],
   });
 
-  await applyLedgerEntries(tx, [
+  await applyLedgerEntries(tx, orgId, [
     { ledgerId: debitLedger.id, debitAmount: amount, creditAmount: D(0) },
     { ledgerId: creditLedger.id, debitAmount: D(0), creditAmount: amount },
   ]);

@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { D, sum, closeEnough } from "@/backend/utils/money";
 import { applyLedgerEntries, generateVoucherNumber } from "@/backend/utils/posting";
 import { writeAudit } from "@/backend/utils/audit";
+import { findForeignReferences } from "@/backend/utils/tenant-scope";
 import { logger } from "@/backend/utils/logger";
 import { routeEntityForApproval, notifyNewApprovers } from "@/backend/services/approvals/route-entity";
 
@@ -16,18 +18,18 @@ const voucherEntrySchema = z.object({
   ledgerId: z.string().min(1, "Ledger is required"),
   debitAmount: z.union([z.number().min(0), z.string()]).default(0).transform((v) => D(v)),
   creditAmount: z.union([z.number().min(0), z.string()]).default(0).transform((v) => D(v)),
-  narration: z.string().optional(),
-  costCenterId: z.string().optional(),
-  projectId: z.string().optional(),
+  narration: optional(z.string()),
+  costCenterId: optional(z.string()),
+  projectId: optional(z.string()),
 }).strict();
 
 const createVoucherSchema = z.object({
   voucherTypeId: z.string().min(1, "Voucher type is required"),
   fiscalYearId: z.string().min(1, "Fiscal year is required"),
   date: z.string().min(1, "Date is required"),
-  narration: z.string().optional(),
-  referenceNo: z.string().optional(),
-  branchId: z.string().optional(),
+  narration: optional(z.string()),
+  referenceNo: optional(z.string()),
+  branchId: optional(z.string()),
   entries: z.array(voucherEntrySchema).min(2, "At least 2 entries required"),
 }).strict();
 
@@ -141,12 +143,26 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
     });
     if (!voucherType) return badRequest("Invalid voucher type");
 
-    // Confirm fiscal year belongs to this organization (prevents cross-tenant leak via fiscalYearId).
-    const fyOk = await prisma.fiscalYear.findFirst({
-      where: { id: validatedData.fiscalYearId, organizationId: orgId },
-      select: { id: true },
+    // Every id in the body is attacker-controlled. Confirm each one belongs
+    // to this organization before any of it reaches the database.
+    //
+    // The fiscal year was already checked here; the entry-level ids were
+    // not — which meant a member of org A could post a journal whose lines
+    // referenced org B's ledgers, writing VoucherEntry rows into B's
+    // reports and moving B's ledger balances.
+    const foreign = await findForeignReferences(prisma, orgId, {
+      fiscalYearIds: [validatedData.fiscalYearId],
+      branchIds: [validatedData.branchId],
+      ledgerIds: validatedData.entries.map((e) => e.ledgerId),
+      costCenterIds: validatedData.entries.map((e) => e.costCenterId),
+      projectIds: validatedData.entries.map((e) => e.projectId),
     });
-    if (!fyOk) return badRequest("Fiscal year not found in this organization");
+    if (foreign.length > 0) {
+      return badRequest(
+        "One or more referenced records do not exist in this organization",
+        foreign
+      );
+    }
 
     const date = new Date(validatedData.date);
     const requiresApproval = voucherType.requiresApproval;
@@ -206,6 +222,7 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
       if (!requiresApproval) {
         await applyLedgerEntries(
           tx,
+          orgId,
           validatedData.entries.map((e) => ({
             ledgerId: e.ledgerId,
             debitAmount: e.debitAmount,

@@ -2,72 +2,23 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
+import { SCOPE_TREE } from "@/backend/utils/api-scope";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Available permissions for display
-export const AVAILABLE_PERMISSIONS = [
-  // Dashboard
-  "view_dashboard",
-
-  // Accounting
-  "view_accounting",
-  "manage_chart_of_accounts",
-  "manage_ledgers",
-  "create_vouchers",
-  "approve_vouchers",
-  "delete_vouchers",
-
-  // Sales
-  "view_sales",
-  "create_quotations",
-  "create_sales_orders",
-  "create_invoices",
-  "approve_sales",
-  "manage_receipts",
-
-  // Purchases
-  "view_purchases",
-  "create_purchase_orders",
-  "create_bills",
-  "approve_purchases",
-  "manage_payments",
-
-  // Inventory
-  "view_inventory",
-  "manage_items",
-  "manage_warehouses",
-  "manage_stock",
-  "view_stock_reports",
-
-  // Banking
-  "view_banking",
-  "manage_bank_accounts",
-  "perform_reconciliation",
-
-  // HR & Payroll
-  "view_hr",
-  "manage_employees",
-  "manage_attendance",
-  "manage_leaves",
-  "approve_leaves",
-  "manage_payroll",
-  "approve_payroll",
-
-  // Reports
-  "view_reports",
-  "export_reports",
-
-  // Settings
-  "view_settings",
-  "manage_organization",
-  "manage_users",
-  "manage_roles",
-  "manage_taxes",
-  "manage_workflows",
-];
+/**
+ * The permission vocabulary, for anything that renders a role editor.
+ *
+ * This used to be a flat list of invented strings ("approve_vouchers",
+ * "manage_taxes", …) that nothing enforced — a UI could offer them, a
+ * role could store them, and no check would ever consult them. It is now
+ * the same `SCOPE_TREE` the API-key scope picker uses, which is derived
+ * from `API_RESOURCE_MAP`, which is what request URLs resolve through.
+ * One vocabulary end to end.
+ */
+export const AVAILABLE_ACTIONS = ["read", "write", "delete", "approve", "export"] as const;
 
 export const GET = withOrgAuth(async (request, { orgId }) => {
   try {
@@ -98,13 +49,15 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
 
       return NextResponse.json({
         data: rolesWithCount,
-        availablePermissions: AVAILABLE_PERMISSIONS,
+        availablePermissions: SCOPE_TREE,
+        availableActions: AVAILABLE_ACTIONS,
       });
     }
 
     return NextResponse.json({
       data: roles,
-      availablePermissions: AVAILABLE_PERMISSIONS,
+      availablePermissions: SCOPE_TREE,
+      availableActions: AVAILABLE_ACTIONS,
     });
   } catch (error) {
     logger.error({ err: error }, "Error fetching roles");

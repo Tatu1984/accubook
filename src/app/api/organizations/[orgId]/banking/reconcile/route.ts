@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -11,8 +12,8 @@ export const dynamic = "force-dynamic";
 
 const querySchema = z.object({
   bankAccountId: z.string().min(1, "bankAccountId is required"),
-  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  from: optional(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)),
+  to: optional(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)),
 });
 
 /**

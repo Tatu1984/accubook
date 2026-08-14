@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { logger } from "@/backend/utils/logger";
 
 // Force Node.js runtime for this route
@@ -12,11 +13,11 @@ const createGSTReturnSchema = z.object({
   returnType: z.enum(["GSTR1", "GSTR3B", "GSTR9"]),
   period: z.string().min(1, "Period is required"),
   dueDate: z.string().transform((val) => new Date(val)),
-  filingDate: z.string().optional().transform((val) => val ? new Date(val) : undefined),
-  totalTaxLiability: z.number().optional(),
-  totalItcClaimed: z.number().optional(),
-  netPayable: z.number().optional(),
-  arn: z.string().optional(),
+  filingDate: optional(z.string()).transform((val) => val ? new Date(val) : undefined),
+  totalTaxLiability: optional(z.number()),
+  totalItcClaimed: optional(z.number()),
+  netPayable: optional(z.number()),
+  arn: optional(z.string()),
   status: z.enum(["PENDING", "FILED", "REVISED"]).default("PENDING"),
 });
 

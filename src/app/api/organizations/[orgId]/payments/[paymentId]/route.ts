@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound, hasPermission, forbidden } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -11,7 +12,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const updatePaymentSchema = z.object({
-  status: z.enum(["COMPLETED", "CANCELLED"]).optional(),
+  status: optional(z.enum(["COMPLETED", "CANCELLED"])),
   /** Optional cancellation reason — surfaced in the audit log. */
   cancellationReason: z.string().max(500).nullable().optional(),
 }).strict();
@@ -59,7 +60,7 @@ export const PATCH = withOrgAuth<{ paymentId: string }>(async (request, { orgId,
     // status flips (PENDING → COMPLETED, etc.) aren't part of the
     // user-facing flow today.
     if (validated.status === "CANCELLED") {
-      if (!hasPermission(orgUser, "payments", "approve")) {
+      if (!hasPermission(orgUser, "purchases", "payments", "approve")) {
         return forbidden("You don't have permission to cancel payments");
       }
       if (payment.status === "CANCELLED") {
@@ -77,7 +78,7 @@ export const PATCH = withOrgAuth<{ paymentId: string }>(async (request, { orgId,
             debitAmount: D(e.creditAmount),
             creditAmount: D(e.debitAmount),
           }));
-          await applyLedgerEntries(tx, reversed);
+          await applyLedgerEntries(tx, orgId, reversed);
           await tx.voucher.update({
             where: { id: payment.voucher.id },
             data: {

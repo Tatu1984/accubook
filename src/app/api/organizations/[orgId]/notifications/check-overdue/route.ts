@@ -24,7 +24,7 @@ export const dynamic = "force-dynamic";
  * endpoint via a service-account session.
  */
 export const POST = withOrgAuth(async (_request, { orgId, orgUser }) => {
-  if (!hasPermission(orgUser, "settings", "read")) {
+  if (!hasPermission(orgUser, "organization", "notifications", "write")) {
     return forbidden("You don't have permission to trigger overdue notifications");
   }
   try {

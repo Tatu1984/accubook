@@ -3,25 +3,28 @@ import { auth } from "@/backend/services/auth.service";
 import { prisma } from "@/backend/database/client";
 import { cookies } from "next/headers";
 import { logger } from "@/backend/utils/logger";
+import { provisionOrganization } from "@/backend/services/organization/provision";
+import { getOrCreateAdminRoleId } from "@/backend/services/organization/roles";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 
 const createOrganizationSchema = z.object({
   name: z.string().min(1, "Name is required"),
-  legalName: z.string().optional(),
-  email: z.string().email().optional(),
-  phone: z.string().optional(),
-  address: z.string().optional(),
-  city: z.string().optional(),
-  state: z.string().optional(),
+  legalName: optional(z.string()),
+  email: optional(z.string().email()),
+  phone: optional(z.string()),
+  address: optional(z.string()),
+  city: optional(z.string()),
+  state: optional(z.string()),
   country: z.string().default("IN"),
-  postalCode: z.string().optional(),
-  gstNo: z.string().optional(),
-  panNo: z.string().optional(),
-  tanNo: z.string().optional(),
+  postalCode: optional(z.string()),
+  gstNo: optional(z.string()),
+  panNo: optional(z.string()),
+  tanNo: optional(z.string()),
   baseCurrencyId: z.string(),
   fiscalYearStart: z.number().min(1).max(12).default(4),
 });
@@ -80,49 +83,37 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const validatedData = createOrganizationSchema.parse(body);
 
-    // Find or create the admin role
-    let adminRole = await prisma.role.findFirst({
-      where: { name: "Admin" },
-    });
+    // One transaction: the organization, its creator as ADMIN, and the
+    // chart of accounts / fiscal year / branch / warehouse that make it
+    // usable. Previously this created a role named "Admin" whose
+    // permissions were a flat list of strings — a shape `hasPermission`
+    // has never understood — so the person who created the organization
+    // could not approve anything in it. It also skipped provisioning
+    // entirely, so the first payment failed on a missing ledger group.
+    const organization = await prisma.$transaction(async (tx) => {
+      const adminRoleId = await getOrCreateAdminRoleId(tx);
 
-    if (!adminRole) {
-      adminRole = await prisma.role.create({
+      const org = await tx.organization.create({
         data: {
-          name: "Admin",
-          description: "Full administrative access",
-          permissions: [
-            "manage_organization",
-            "manage_users",
-            "manage_roles",
-            "view_all_data",
-            "create_vouchers",
-            "approve_vouchers",
-            "manage_parties",
-            "manage_inventory",
-            "manage_banking",
-            "view_reports",
-            "manage_hr",
-            "approve_leaves",
-            "approve_expenses",
-          ],
-          isSystem: true,
-        },
-      });
-    }
-
-    const organization = await prisma.organization.create({
-      data: {
-        ...validatedData,
-        users: {
-          create: {
-            userId: session.user.id,
-            roleId: adminRole.id,
+          ...validatedData,
+          users: {
+            create: {
+              userId: session.user.id,
+              roleId: adminRoleId,
+            },
           },
         },
-      },
-      include: {
-        baseCurrency: true,
-      },
+        include: {
+          baseCurrency: true,
+        },
+      });
+
+      await provisionOrganization(tx, {
+        organizationId: org.id,
+        fiscalYearStartMonth: validatedData.fiscalYearStart,
+      });
+
+      return org;
     });
 
     return NextResponse.json(organization, { status: 201 });

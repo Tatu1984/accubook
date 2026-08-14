@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -13,12 +14,12 @@ const createLeaveSchema = z.object({
   leaveTypeId: z.string().min(1, "Leave type is required"),
   fromDate: z.string().transform((val) => new Date(val)),
   toDate: z.string().transform((val) => new Date(val)),
-  reason: z.string().optional(),
+  reason: optional(z.string()),
 });
 
 const approveLeaveSchema = z.object({
   status: z.enum(["APPROVED", "REJECTED"]),
-  notes: z.string().optional(),
+  notes: optional(z.string()),
 }).strict();
 
 export const GET = withOrgAuth(async (request, { orgId }) => {

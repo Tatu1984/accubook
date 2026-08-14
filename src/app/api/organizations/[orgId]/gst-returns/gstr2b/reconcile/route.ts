@@ -27,7 +27,7 @@ export const dynamic = "force-dynamic";
 export const POST = withOrgAuth(async (request, { orgId, orgUser }) => {
   // Permission gate — and incidental rate-limit (a 50 MB JSON upload
   // is non-trivial to parse + match against the purchase register).
-  if (!hasPermission(orgUser, "tax", "read")) {
+  if (!hasPermission(orgUser, "taxation", "gst-returns", "write")) {
     return forbidden("You don't have permission to run GSTR-2B reconciliation");
   }
   let json: string;
