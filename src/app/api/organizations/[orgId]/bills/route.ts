@@ -310,7 +310,18 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
             : {}),
         },
       });
-      return created;
+
+      /**
+       * `created` was read before `postBillToGl` stamped `voucherId` onto
+       * the row, so returning it described the bill as unposted even
+       * though it had just been booked. Re-read inside the transaction so
+       * the response matches what the caller can query back.
+       */
+      if (!postingResult) return created;
+      return tx.bill.findUniqueOrThrow({
+        where: { id: created.id },
+        include: { party: true, items: { include: { item: true } } },
+      });
     });
 
     if (bill.status === "PENDING_APPROVAL") {

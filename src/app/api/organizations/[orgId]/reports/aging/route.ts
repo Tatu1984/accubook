@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
-import { withOrgAuth } from "@/backend/utils/with-org-auth";
+import { withOrgAuth, badRequest } from "@/backend/utils/with-org-auth";
 import { D, sum, toNumber } from "@/backend/utils/money";
 import { Prisma } from "@/generated/prisma";
 import { logger } from "@/backend/utils/logger";
@@ -47,7 +47,34 @@ interface PartyAging {
 export const GET = withOrgAuth(async (request, { orgId }) => {
   try {
     const { searchParams } = new URL(request.url);
-    const type = searchParams.get("type") || "receivables"; // receivables or payables
+
+    /**
+     * Which side of the ledger to age.
+     *
+     * The `type` parameter used to fall through to payables for anything
+     * that was not exactly "receivables", so `?type=receivable` — the
+     * singular, the obvious guess — silently returned the creditors
+     * statement. Handing someone a supplier balance when they asked for a
+     * customer one is the kind of error that survives all the way into a
+     * filing, so an unrecognised value is now refused outright.
+     *
+     * The singular is accepted as an alias because it resolves to the
+     * report the caller clearly wanted; only genuinely ambiguous input is
+     * rejected.
+     */
+    const rawType = searchParams.get("type") ?? "receivables";
+    const AGING_TYPES: Record<string, "receivables" | "payables"> = {
+      receivables: "receivables",
+      receivable: "receivables",
+      payables: "payables",
+      payable: "payables",
+    };
+    const type = AGING_TYPES[rawType.trim().toLowerCase()];
+    if (!type) {
+      return badRequest(
+        `Unknown aging type "${rawType}". Use "receivables" or "payables".`
+      );
+    }
     const asOfDate = searchParams.get("asOfDate")
       ? new Date(searchParams.get("asOfDate")!)
       : new Date();

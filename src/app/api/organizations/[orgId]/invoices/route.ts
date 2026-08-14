@@ -337,6 +337,7 @@ export const POST = withOrgAuth(async (request, { orgId, userId, orgUser }) => {
         });
       }
 
+
       await writeAudit(tx, {
         organizationId: orgId,
         userId,
@@ -352,7 +353,18 @@ export const POST = withOrgAuth(async (request, { orgId, userId, orgUser }) => {
         },
       });
 
-      return newInvoice;
+      /**
+       * `newInvoice` was read before `postInvoiceToGl` stamped `voucherId`
+       * onto the row, so returning it handed the caller an invoice that
+       * looked unposted — no link to the voucher that had just booked it.
+       * Re-read inside the same transaction so the response describes the
+       * invoice as it now stands.
+       */
+      if (!issueNow) return newInvoice;
+      return tx.invoice.findUniqueOrThrow({
+        where: { id: newInvoice.id },
+        include: { party: true, items: { include: { item: true } } },
+      });
     });
 
     return NextResponse.json(invoice, { status: 201 });
