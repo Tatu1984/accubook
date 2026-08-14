@@ -195,9 +195,22 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       _entries: typeof voucherEntries
     ): BSGroup[] => {
       const natureLedgers = ledgers.filter((l) => l.group.nature === nature);
-      const natureGroups = ledgerGroups.filter((g) => g.nature === nature && !g.parentId);
 
-      return natureGroups.map((group) => {
+      /**
+       * Walk the group tree to its full depth.
+       *
+       * This previously collected root groups and exactly one level of
+       * children, hard-coding `subGroups: []` below that. The default chart
+       * of accounts nests three deep — Assets > Current Assets > Cash & Bank
+       * — so every ledger sat one level past where the walk stopped and the
+       * statement reported zero assets and zero liabilities against a trial
+       * balance that agreed perfectly. The response even carried
+       * `isBalanced: false` and still returned 200.
+       *
+       * Recursing means the statement is correct for any depth a user
+       * builds, rather than only for a chart flatter than the one shipped.
+       */
+      const buildGroup = (group: (typeof ledgerGroups)[number]): BSGroup => {
         const groupLedgers = natureLedgers.filter((l) => l.group.id === group.id);
 
         const items: BSLineItem[] = groupLedgers
@@ -214,46 +227,9 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
           })
           .filter((item) => !item.balance.isZero() || (item.previousBalance && !item.previousBalance.isZero()));
 
-        // Get child groups
-        const childGroups = ledgerGroups.filter((g) => g.parentId === group.id);
-        const subGroups: BSGroup[] = childGroups.map((childGroup) => {
-          const childLedgers = natureLedgers.filter((l) => l.group.id === childGroup.id);
-          const childItems: BSLineItem[] = childLedgers
-            .map((ledger) => {
-              const bal = balances.get(ledger.id) || { current: D(0), previous: D(0) };
-              return {
-                ledgerId: ledger.id,
-                ledgerName: ledger.name,
-                groupId: childGroup.id,
-                groupName: childGroup.name,
-                balance: bal.current,
-                previousBalance: compareWithPrevious ? bal.previous : undefined,
-              };
-            })
-            .filter((item) => !item.balance.isZero() || (item.previousBalance && !item.previousBalance.isZero()));
-
-          return {
-            groupId: childGroup.id,
-            groupName: childGroup.name,
-            parentId: childGroup.parentId,
-            items: childItems,
-            subGroups: [],
-            total: sum(childItems.map((i) => i.balance)),
-            previousTotal: compareWithPrevious
-              ? sum(childItems.map((i) => i.previousBalance ?? D(0)))
-              : undefined,
-          };
-        });
-
-        const total = sum(items.map((i) => i.balance)).plus(
-          sum(subGroups.map((g) => g.total))
-        );
-
-        const previousTotal = compareWithPrevious
-          ? sum(items.map((i) => i.previousBalance ?? D(0))).plus(
-              sum(subGroups.map((g) => g.previousTotal ?? D(0)))
-            )
-          : undefined;
+        const subGroups: BSGroup[] = ledgerGroups
+          .filter((g) => g.parentId === group.id)
+          .map(buildGroup);
 
         return {
           groupId: group.id,
@@ -261,10 +237,18 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
           parentId: group.parentId,
           items,
           subGroups,
-          total,
-          previousTotal,
+          total: sum(items.map((i) => i.balance)).plus(sum(subGroups.map((g) => g.total))),
+          previousTotal: compareWithPrevious
+            ? sum(items.map((i) => i.previousBalance ?? D(0))).plus(
+                sum(subGroups.map((g) => g.previousTotal ?? D(0)))
+              )
+            : undefined,
         };
-      });
+      };
+
+      return ledgerGroups
+        .filter((g) => g.nature === nature && !g.parentId)
+        .map(buildGroup);
     };
 
     const assets = buildGroupStructure("ASSETS", voucherEntries);

@@ -36,6 +36,16 @@ export const DEFAULT_LEDGER_GROUPS: {
   name: string;
   nature: string;
   parent?: string;
+  /**
+   * Whether balances in this group are deducted before gross profit.
+   *
+   * Only Direct Expenses (cost of sales) are. Without this the P&L put
+   * purchases below the gross profit line, so a trader buying at 15,000
+   * and selling at 70,000 showed a 100% gross margin instead of 78.6%.
+   * Net profit was right either way — it is the gross margin, the number
+   * a reviewer reads first, that was wrong.
+   */
+  affectsGrossProfit?: boolean;
 }[] = [
   { name: "Assets", nature: "ASSETS" },
   { name: "Current Assets", nature: "ASSETS", parent: "Assets" },
@@ -52,7 +62,7 @@ export const DEFAULT_LEDGER_GROUPS: {
   { name: "Sales Accounts", nature: "INCOME", parent: "Income" },
   { name: "Other Income", nature: "INCOME", parent: "Income" },
   { name: "Expenses", nature: "EXPENSES" },
-  { name: "Direct Expenses", nature: "EXPENSES", parent: "Expenses" },
+  { name: "Direct Expenses", nature: "EXPENSES", parent: "Expenses", affectsGrossProfit: true },
   { name: "Indirect Expenses", nature: "EXPENSES", parent: "Expenses" },
   { name: "Capital Account", nature: "EQUITY" },
 ];
@@ -155,6 +165,7 @@ export async function provisionOrganization(
         name: group.name,
         nature: group.nature,
         parentId: group.parent ? groupIds[group.parent] ?? null : null,
+        affectsGrossProfit: group.affectsGrossProfit ?? false,
         isSystem: true,
       },
       select: { id: true },
