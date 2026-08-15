@@ -25,16 +25,54 @@ import {
 } from "@/frontend/components/ui/select";
 import { useOrganization } from "@/frontend/hooks/use-organization";
 
+/** India's fiscal year runs April to March. */
+function fyRange() {
+  const now = new Date();
+  const startYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+  return { startDate: `${startYear}-04-01`, endDate: `${startYear + 1}-03-31` };
+}
+
 export default function ProfitLossPage() {
   const { organizationId, isLoading: orgLoading } = useOrganization();
   const [isLoading, setIsLoading] = React.useState(true);
   const [period, setPeriod] = React.useState("current-fy");
 
+  const [data, setData] = React.useState<{ income?: { total?: string }; directExpenses?: { total?: string }; indirectExpenses?: { total?: string }; netProfit?: { amount?: string } } | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+
+  /**
+   * This page showed zeros regardless of what was in the ledger — it never
+   * called the endpoint that had been producing the statement correctly.
+   */
   React.useEffect(() => {
-    if (organizationId) {
-      setIsLoading(false);
-    }
+    if (!organizationId) return;
+    const controller = new AbortController();
+    (async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const { startDate, endDate } = fyRange();
+        const res = await fetch(
+          `/api/organizations/${organizationId}/reports/profit-loss?startDate=${startDate}&endDate=${endDate}`,
+          { signal: controller.signal }
+        );
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to load report");
+        setData(await res.json());
+      } catch (e) {
+        if ((e as Error).name === "AbortError") return;
+        setError((e as Error).message);
+      } finally {
+        setIsLoading(false);
+      }
+    })();
+    return () => controller.abort();
   }, [organizationId]);
+
+  const num = (v: unknown) => Number(v ?? 0);
+  const revenue = num(data?.income?.total);
+  const expenses = num(data?.directExpenses?.total) + num(data?.indirectExpenses?.total);
+  const netProfit = num(data?.netProfit?.amount);
+
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-IN", {
@@ -47,6 +85,14 @@ export default function ProfitLossPage() {
     return (
       <div className="flex items-center justify-center h-96">
         <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <p className="text-muted-foreground">{error}</p>
       </div>
     );
   }
@@ -99,7 +145,7 @@ export default function ProfitLossPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">{formatCurrency(0)}</div>
+            <div className="text-2xl font-bold text-green-600">{formatCurrency(revenue)}</div>
           </CardContent>
         </Card>
         <Card>
@@ -110,7 +156,7 @@ export default function ProfitLossPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-600">{formatCurrency(0)}</div>
+            <div className="text-2xl font-bold text-red-600">{formatCurrency(expenses)}</div>
           </CardContent>
         </Card>
         <Card>
@@ -118,7 +164,7 @@ export default function ProfitLossPage() {
             <CardTitle className="text-sm font-medium">Net Profit/Loss</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(0)}</div>
+            <div className="text-2xl font-bold">{formatCurrency(netProfit)}</div>
           </CardContent>
         </Card>
       </div>

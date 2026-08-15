@@ -212,6 +212,24 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
       }
     }
 
+    /**
+     * A movement has to move stock somewhere.
+     *
+     * Both warehouse fields are optional, and a movement naming neither
+     * was accepted with a 201 while changing no balance at all: the
+     * decrement is guarded by `fromWarehouseId` and the increment by
+     * `toWarehouseId`, so with both absent the record was written and the
+     * stock ledger left untouched. A goods receipt entered that way looked
+     * successful and put nothing into stores.
+     */
+    if (!validatedData.fromWarehouseId && !validatedData.toWarehouseId) {
+      return badRequest(
+        "A stock movement needs a source or destination warehouse — " +
+          "receipts need toWarehouseId, issues need fromWarehouseId, " +
+          "transfers need both."
+      );
+    }
+
     const qty = D(validatedData.quantity);
     const rate = D(validatedData.rate);
     const totalValue = qty.times(rate);

@@ -69,6 +69,12 @@ export const DEFAULT_LEDGER_GROUPS: {
 
 export const DEFAULT_LEDGERS: { name: string; group: string }[] = [
   { name: "Cash in Hand", group: "Cash & Bank" }, // getCashLedger
+  // Contra for balances that exist before the books begin — a bank account
+  // opened with money already in it, for instance. Without somewhere to put
+  // the other half, an opening balance would leave the trial balance out by
+  // its own amount. An accountant reclassifies this to real capital or
+  // retained earnings once the opening position is agreed.
+  { name: "Opening Balance Equity", group: "Capital Account" },
   { name: "Stock-in-Hand", group: "Stock-in-Hand" }, // manufacturing JV
   { name: "Work in Progress", group: "Stock-in-Hand" }, // manufacturing JV
   { name: "GST Input", group: "Duties & Taxes" }, // postBillToGl

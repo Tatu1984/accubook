@@ -213,6 +213,30 @@ export const POST = withOrgAuth(async (request, { orgId, userId, orgUser }) => {
       : [];
     const taxById = new Map(taxes.map((t) => [t.id, t]));
 
+    /**
+     * HSN/SAC falls back to the item master.
+     *
+     * A caller that does not repeat the code on every line — the New
+     * Invoice screen among them — used to produce an invoice with no HSN
+     * at all, and `POST /invoices/[id]/e-invoice` then refused it with
+     * "Line 1: HSN/SAC code is required". The classification lives on the
+     * item and does not need restating per line; taking it from there
+     * means an invoice raised through the UI is e-invoice ready.
+     *
+     * An explicitly supplied code still wins, so a one-off line can
+     * override the master.
+     */
+    const lineItemIds = [...new Set(validatedData.items.map((i) => i.itemId).filter(Boolean) as string[])];
+    const itemMasters = lineItemIds.length
+      ? await prisma.item.findMany({
+          where: { id: { in: lineItemIds }, organizationId: orgId },
+          select: { id: true, hsnCode: true, sacCode: true },
+        })
+      : [];
+    const hsnByItemId = new Map(
+      itemMasters.map((i) => [i.id, i.hsnCode ?? i.sacCode ?? undefined])
+    );
+
     // All money math via Decimal — never via JS floats.
     // For each line, compute the correct CGST/SGST/IGST split based on
     // place of supply, persisted to the InvoiceTax junction.
@@ -242,6 +266,7 @@ export const POST = withOrgAuth(async (request, { orgId, userId, orgUser }) => {
 
       return {
         ...item,
+        hsnCode: item.hsnCode ?? (item.itemId ? hsnByItemId.get(item.itemId) : undefined),
         quantity: D(item.quantity),
         unitPrice: D(item.unitPrice),
         discountPercent: D(item.discountPercent),

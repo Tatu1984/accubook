@@ -4,6 +4,8 @@ import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
+import { getOrCreateBankLedger, getOrCreateNamedLedger } from "@/backend/utils/posting";
+import { D } from "@/backend/utils/money";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -79,19 +81,80 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
     const data = createBankAccountSchema.parse(await request.json());
     const opening = data.openingBalance ?? 0;
 
-    const bankAccount = await prisma.bankAccount.create({
-      data: {
-        organizationId: orgId,
-        name: data.name,
-        bankName: data.bankName,
-        branch: data.branch,
-        accountNumber: data.accountNumber,
-        ifscCode: data.ifscCode,
-        swiftCode: data.swiftCode,
-        accountType: data.accountType,
-        openingBalance: opening,
-        currentBalance: opening,
-      },
+    /**
+     * An opening balance has to reach the ledger, not just this table.
+     *
+     * Previously it was written to `bank_accounts` alone. The general
+     * ledger knew nothing about it, so an account opened with 5,00,000
+     * showed 4,66,300 in the bank register and a 33,700 *credit* in the
+     * books — the company appeared overdrawn while holding cash, the
+     * balance sheet reported negative assets, and reconciling the account
+     * was impossible because the two sides disagreed by the opening
+     * amount from the first day.
+     *
+     * The reporting stack already reads `Ledger.openingBalance`
+     * (trial balance, balance sheet and cash flow all honour it), so the
+     * fix is to populate it — together with its other half in Opening
+     * Balance Equity, without which the trial balance would simply be out
+     * by the same amount in the other direction.
+     */
+    const bankAccount = await prisma.$transaction(async (tx) => {
+      const created = await tx.bankAccount.create({
+        data: {
+          organizationId: orgId,
+          name: data.name,
+          bankName: data.bankName,
+          branch: data.branch,
+          accountNumber: data.accountNumber,
+          ifscCode: data.ifscCode,
+          swiftCode: data.swiftCode,
+          accountType: data.accountType,
+          openingBalance: opening,
+          currentBalance: opening,
+        },
+      });
+
+      // The ledger is created either way, so the account is visible in the
+      // chart of accounts before it has been transacted on.
+      const bankLedger = await getOrCreateBankLedger(tx, orgId, created.id, created.name);
+
+      if (opening !== 0) {
+        const magnitude = D(Math.abs(opening));
+        await tx.ledger.update({
+          where: { id: bankLedger.id },
+          data: {
+            openingBalance: magnitude,
+            // A negative opening balance is an overdraft: a credit balance
+            // on what is otherwise an asset.
+            openingBalanceType: opening > 0 ? "DR" : "CR",
+            currentBalance: D(opening),
+          },
+        });
+
+        const equity = await getOrCreateNamedLedger(
+          tx,
+          orgId,
+          "Opening Balance Equity",
+          "Capital Account"
+        );
+        // Accumulated across every account opened with a balance, so the
+        // signed total is recovered before being re-expressed as DR or CR.
+        const current = await tx.ledger.findUniqueOrThrow({
+          where: { id: equity.id },
+          select: { openingBalance: true, openingBalanceType: true },
+        });
+        const held = D(current.openingBalance ?? 0);
+        const signedCredit = (current.openingBalanceType === "DR" ? held.negated() : held).plus(D(opening));
+        await tx.ledger.update({
+          where: { id: equity.id },
+          data: {
+            openingBalance: signedCredit.abs(),
+            openingBalanceType: signedCredit.isNegative() ? "DR" : "CR",
+          },
+        });
+      }
+
+      return created;
     });
 
     return NextResponse.json(bankAccount, { status: 201 });

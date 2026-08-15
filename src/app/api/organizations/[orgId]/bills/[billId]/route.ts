@@ -56,6 +56,53 @@ const updateBillSchema = z.object({
  * references the vendor bill number; editing it would desync the
  * audit trail.
  */
+/**
+ * Read one bill.
+ *
+ * The route exported only PATCH and DELETE, so fetching a single bill
+ * answered 405 — a bill could be amended or deleted but never read back,
+ * and nothing could follow the `voucherId` on a posted bill to its ledger
+ * entry. Invoices have had this since the start; bills now match.
+ */
+export const GET = withOrgAuth<{ billId: string }>(async (_req, { orgId, params }) => {
+  try {
+    const bill = await prisma.bill.findFirst({
+      where: { id: params.billId, organizationId: orgId },
+      include: {
+        party: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true,
+            gstNo: true,
+            panNo: true,
+            billingAddress: true,
+            billingCity: true,
+            billingState: true,
+            billingCountry: true,
+            billingPostal: true,
+          },
+        },
+        items: {
+          include: {
+            item: { select: { id: true, name: true, sku: true, hsnCode: true } },
+            tax: { select: { id: true, name: true, rate: true, taxType: true } },
+          },
+          orderBy: { sequence: "asc" },
+        },
+        payments: true,
+      },
+    });
+
+    if (!bill) return notFound("Bill not found");
+    return NextResponse.json(bill);
+  } catch (error) {
+    logger.error({ err: error }, "Error fetching bill");
+    return NextResponse.json({ error: "Failed to fetch bill" }, { status: 500 });
+  }
+});
+
 export const PATCH = withOrgAuth<{ billId: string }>(async (request, { orgId, params, orgUser, userId }) => {
   try {
     const { billId } = params;
