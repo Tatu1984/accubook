@@ -1,6 +1,9 @@
 "use client";
 
+import * as React from "react";
 import { useState } from "react";
+import { toast } from "sonner";
+import { useOrganization } from "@/frontend/hooks/use-organization";
 import { Button } from "@/frontend/components/ui/button";
 import { Input } from "@/frontend/components/ui/input";
 import {
@@ -25,7 +28,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/frontend/components/ui/dialog";
 import {
   Select,
@@ -56,85 +58,33 @@ import {
   DropdownMenuTrigger,
 } from "@/frontend/components/ui/dropdown-menu";
 
-const taxRates = [
-  {
-    id: "TAX001",
-    name: "GST 18%",
-    type: "GST",
-    rate: 18,
-    cgst: 9,
-    sgst: 9,
-    igst: 18,
-    isActive: true,
-    isDefault: true,
-  },
-  {
-    id: "TAX002",
-    name: "GST 12%",
-    type: "GST",
-    rate: 12,
-    cgst: 6,
-    sgst: 6,
-    igst: 12,
-    isActive: true,
-    isDefault: false,
-  },
-  {
-    id: "TAX003",
-    name: "GST 5%",
-    type: "GST",
-    rate: 5,
-    cgst: 2.5,
-    sgst: 2.5,
-    igst: 5,
-    isActive: true,
-    isDefault: false,
-  },
-  {
-    id: "TAX004",
-    name: "GST 28%",
-    type: "GST",
-    rate: 28,
-    cgst: 14,
-    sgst: 14,
-    igst: 28,
-    isActive: true,
-    isDefault: false,
-  },
-  {
-    id: "TAX005",
-    name: "GST Exempt",
-    type: "GST",
-    rate: 0,
-    cgst: 0,
-    sgst: 0,
-    igst: 0,
-    isActive: true,
-    isDefault: false,
-  },
-  {
-    id: "TAX006",
-    name: "TDS 10%",
-    type: "TDS",
-    rate: 10,
-    cgst: null,
-    sgst: null,
-    igst: null,
-    isActive: true,
-    isDefault: false,
-  },
-  {
-    id: "TAX007",
-    name: "TDS 2%",
-    type: "TDS",
-    rate: 2,
-    cgst: null,
-    sgst: null,
-    igst: null,
-    isActive: true,
-    isDefault: false,
-  },
-];
+/**
+ * A tax rate as the API stores it. CGST/SGST/IGST are not columns — the
+ * split is derived from the combined rate at the point of invoicing
+ * (see computeLineGst), so it is derived here too rather than stored
+ * twice and allowed to drift.
+ */
+interface TaxConfig {
+  id: string;
+  name: string;
+  code: string;
+  taxType: string;
+  rate: string | number;
+  description?: string | null;
+  isActive: boolean;
+}
+
+const TAX_TYPES = ["GST", "IGST", "CGST", "SGST", "VAT", "TDS", "TCS", "CESS"] as const;
+
+/** How an intra-state supply at this rate splits, for display only. */
+function splitOf(tax: TaxConfig) {
+  const rate = Number(tax.rate);
+  if (tax.taxType === "GST") return { cgst: rate / 2, sgst: rate / 2, igst: rate };
+  if (tax.taxType === "IGST") return { cgst: null, sgst: null, igst: rate };
+  if (tax.taxType === "CGST") return { cgst: rate, sgst: null, igst: null };
+  if (tax.taxType === "SGST") return { cgst: null, sgst: rate, igst: null };
+  return { cgst: null, sgst: null, igst: null };
+}
 
 const hsnCodes = [
   {
@@ -196,9 +146,102 @@ const sacCodes = [
   },
 ];
 
+const EMPTY_FORM = { name: "", code: "", taxType: "GST", rate: "", description: "", isActive: true };
+
 export default function TaxesPage() {
+  const { organizationId } = useOrganization();
   const [searchTerm, setSearchTerm] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+
+  const [taxRates, setTaxRates] = useState<TaxConfig[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  /** The row being edited, or null when the dialog is creating a new rate. */
+  const [editing, setEditing] = useState<TaxConfig | null>(null);
+  const [form, setForm] = useState(EMPTY_FORM);
+
+  /**
+   * This page used to render a hardcoded list of seven invented rates and
+   * a Save button that only closed the dialog, so the real tax masters
+   * were neither shown nor editable. The API behind it was complete all
+   * along.
+   */
+  const load = React.useCallback(async () => {
+    if (!organizationId) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/organizations/${organizationId}/tax-config?limit=200`);
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to load tax rates");
+      const json = await res.json();
+      setTaxRates(json.data ?? json);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to load tax rates");
+    } finally {
+      setLoading(false);
+    }
+  }, [organizationId]);
+
+  React.useEffect(() => { load(); }, [load]);
+
+  const openCreate = () => { setEditing(null); setForm(EMPTY_FORM); setIsDialogOpen(true); };
+  const openEdit = (tax: TaxConfig) => {
+    setEditing(tax);
+    setForm({
+      name: tax.name, code: tax.code, taxType: tax.taxType,
+      rate: String(tax.rate), description: tax.description ?? "", isActive: tax.isActive,
+    });
+    setIsDialogOpen(true);
+  };
+
+  const save = async () => {
+    if (!organizationId) return;
+    if (!form.name.trim() || !form.code.trim()) return toast.error("Name and code are required");
+    const rate = Number(form.rate);
+    if (!Number.isFinite(rate) || rate < 0 || rate > 100) return toast.error("Rate must be between 0 and 100");
+
+    setSaving(true);
+    try {
+      const payload = {
+        name: form.name.trim(), code: form.code.trim(), taxType: form.taxType,
+        rate, description: form.description.trim() || undefined, isActive: form.isActive,
+      };
+      // PATCH takes the id in the body as `taxId`; the rest is a partial update.
+      const res = await fetch(`/api/organizations/${organizationId}/tax-config`, {
+        method: editing ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editing ? { taxId: editing.id, ...payload } : payload),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to save tax rate");
+      toast.success(editing ? "Tax rate updated" : "Tax rate created");
+      setIsDialogOpen(false);
+      setEditing(null);
+      setForm(EMPTY_FORM);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save tax rate");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (tax: TaxConfig) => {
+    if (!organizationId) return;
+    if (!confirm(`Delete "${tax.name}"? Rates already used on documents are deactivated rather than removed.`)) return;
+    try {
+      const res = await fetch(`/api/organizations/${organizationId}/tax-config?taxId=${tax.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to delete tax rate");
+      const body = await res.json().catch(() => ({}));
+      toast.success(body.softDeleted ? "Tax rate is in use — deactivated instead" : "Tax rate deleted");
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete tax rate");
+    }
+  };
+
+  const visibleRates = taxRates.filter((t) => {
+    const q = searchTerm.trim().toLowerCase();
+    return !q || t.name.toLowerCase().includes(q) || t.code.toLowerCase().includes(q) || t.taxType.toLowerCase().includes(q);
+  });
 
   return (
     <div className="space-y-6">
@@ -209,70 +252,96 @@ export default function TaxesPage() {
             Configure GST, TDS, and other tax rates
           </p>
         </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="mr-2 h-4 w-4" />
-              Add Tax Rate
-            </Button>
-          </DialogTrigger>
+        <Dialog open={isDialogOpen} onOpenChange={(o) => { setIsDialogOpen(o); if (!o) setEditing(null); }}>
+          <Button onClick={openCreate}>
+            <Plus className="mr-2 h-4 w-4" />
+            Add Tax Rate
+          </Button>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Add Tax Rate</DialogTitle>
+              <DialogTitle>{editing ? "Edit Tax Rate" : "Add Tax Rate"}</DialogTitle>
               <DialogDescription>
-                Create a new tax rate configuration
+                {editing
+                  ? `Update "${editing.name}". Documents already raised keep the rate they were issued with.`
+                  : "Create a new tax rate configuration"}
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
-              <div className="space-y-2">
-                <Label>Tax Name</Label>
-                <Input placeholder="e.g., GST 18%" />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Tax Name</Label>
+                  <Input
+                    placeholder="e.g., GST 18%"
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Code</Label>
+                  <Input
+                    placeholder="e.g., GST18"
+                    value={form.code}
+                    onChange={(e) => setForm({ ...form, code: e.target.value })}
+                  />
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Tax Type</Label>
-                  <Select>
+                  <Select value={form.taxType} onValueChange={(v) => setForm({ ...form, taxType: v })}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select type" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="gst">GST</SelectItem>
-                      <SelectItem value="vat">VAT</SelectItem>
-                      <SelectItem value="tds">TDS</SelectItem>
-                      <SelectItem value="tcs">TCS</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
+                      {TAX_TYPES.map((t) => (
+                        <SelectItem key={t} value={t}>{t}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
                   <Label>Rate (%)</Label>
-                  <Input type="number" placeholder="0" />
+                  <Input
+                    type="number" min="0" max="100" step="0.01" placeholder="0"
+                    value={form.rate}
+                    onChange={(e) => setForm({ ...form, rate: e.target.value })}
+                  />
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label>CGST (%)</Label>
-                  <Input type="number" placeholder="0" />
-                </div>
-                <div className="space-y-2">
-                  <Label>SGST (%)</Label>
-                  <Input type="number" placeholder="0" />
-                </div>
-                <div className="space-y-2">
-                  <Label>IGST (%)</Label>
-                  <Input type="number" placeholder="0" />
-                </div>
+              {/* CGST/SGST/IGST are derived from the rate, not stored, so
+                  they are shown rather than typed — that is what keeps the
+                  split on an invoice consistent with the master. */}
+              {["GST", "IGST", "CGST", "SGST"].includes(form.taxType) && Number(form.rate) > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {form.taxType === "GST"
+                    ? `Intra-state: CGST ${(Number(form.rate) / 2).toFixed(2)}% + SGST ${(Number(form.rate) / 2).toFixed(2)}%. Inter-state: IGST ${Number(form.rate).toFixed(2)}%.`
+                    : `Applied as ${form.taxType} ${Number(form.rate).toFixed(2)}%.`}
+                </p>
+              )}
+              <div className="space-y-2">
+                <Label>Description</Label>
+                <Input
+                  placeholder="Optional"
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                />
               </div>
               <div className="flex items-center space-x-2">
-                <Switch id="default" />
-                <Label htmlFor="default">Set as default tax rate</Label>
+                <Switch
+                  id="isActive"
+                  checked={form.isActive}
+                  onCheckedChange={(v) => setForm({ ...form, isActive: v })}
+                />
+                <Label htmlFor="isActive">Active</Label>
               </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button onClick={() => setIsDialogOpen(false)}>Save Tax Rate</Button>
+              <Button onClick={save} disabled={saving}>
+                {saving ? "Saving..." : editing ? "Save Changes" : "Save Tax Rate"}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -286,8 +355,10 @@ export default function TaxesPage() {
             <Percent className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">7</div>
-            <p className="text-xs text-muted-foreground">GST, TDS, TCS</p>
+            <div className="text-2xl font-bold">{taxRates.filter((t) => t.isActive).length}</div>
+            <p className="text-xs text-muted-foreground">
+              {[...new Set(taxRates.filter((t) => t.isActive).map((t) => t.taxType))].join(", ") || "None configured"}
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -366,32 +437,44 @@ export default function TaxesPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {taxRates.map((tax) => (
+                  {loading && (
+                    <TableRow>
+                      <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
+                        Loading tax rates...
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {!loading && visibleRates.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
+                        {searchTerm ? "No tax rates match your search." : "No tax rates yet. Add one to get started."}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {!loading && visibleRates.map((tax) => {
+                    const split = splitOf(tax);
+                    return (
                     <TableRow key={tax.id}>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <span className="font-medium">{tax.name}</span>
-                          {tax.isDefault && (
-                            <Badge variant="secondary" className="text-xs">
-                              Default
-                            </Badge>
-                          )}
+                          <Badge variant="secondary" className="text-xs">{tax.code}</Badge>
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline">{tax.type}</Badge>
+                        <Badge variant="outline">{tax.taxType}</Badge>
                       </TableCell>
                       <TableCell className="text-right font-medium">
-                        {tax.rate}%
+                        {Number(tax.rate)}%
                       </TableCell>
                       <TableCell className="text-right">
-                        {tax.cgst !== null ? `${tax.cgst}%` : "-"}
+                        {split.cgst !== null ? `${split.cgst}%` : "-"}
                       </TableCell>
                       <TableCell className="text-right">
-                        {tax.sgst !== null ? `${tax.sgst}%` : "-"}
+                        {split.sgst !== null ? `${split.sgst}%` : "-"}
                       </TableCell>
                       <TableCell className="text-right">
-                        {tax.igst !== null ? `${tax.igst}%` : "-"}
+                        {split.igst !== null ? `${split.igst}%` : "-"}
                       </TableCell>
                       <TableCell>
                         <Badge
@@ -412,11 +495,11 @@ export default function TaxesPage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => openEdit(tax)}>
                               <Edit className="mr-2 h-4 w-4" />
                               Edit
                             </DropdownMenuItem>
-                            <DropdownMenuItem className="text-red-600">
+                            <DropdownMenuItem className="text-red-600" onClick={() => remove(tax)}>
                               <Trash2 className="mr-2 h-4 w-4" />
                               Delete
                             </DropdownMenuItem>
@@ -424,7 +507,8 @@ export default function TaxesPage() {
                         </DropdownMenu>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
             </CardContent>
