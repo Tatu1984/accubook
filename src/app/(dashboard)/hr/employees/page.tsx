@@ -85,125 +85,13 @@ interface Employee {
   avatar?: string;
 }
 
-// Mock data
-const employees: Employee[] = [
-  {
-    id: "1",
-    employeeCode: "EMP001",
-    firstName: "John",
-    lastName: "Doe",
-    email: "john.doe@company.com",
-    phone: "+91 98765 43210",
-    department: "Engineering",
-    designation: "Senior Software Engineer",
-    joiningDate: "2022-03-15",
-    employmentType: "FULL_TIME",
-    status: "ACTIVE",
-    ctc: 1800000,
-    reportingTo: "Jane Smith",
-  },
-  {
-    id: "2",
-    employeeCode: "EMP002",
-    firstName: "Jane",
-    lastName: "Smith",
-    email: "jane.smith@company.com",
-    phone: "+91 98765 43211",
-    department: "Engineering",
-    designation: "Engineering Manager",
-    joiningDate: "2021-06-01",
-    employmentType: "FULL_TIME",
-    status: "ACTIVE",
-    ctc: 2800000,
-  },
-  {
-    id: "3",
-    employeeCode: "EMP003",
-    firstName: "Rahul",
-    lastName: "Kumar",
-    email: "rahul.kumar@company.com",
-    phone: "+91 98765 43212",
-    department: "Finance",
-    designation: "Accountant",
-    joiningDate: "2023-01-10",
-    employmentType: "FULL_TIME",
-    status: "ACTIVE",
-    ctc: 900000,
-    reportingTo: "Priya Sharma",
-  },
-  {
-    id: "4",
-    employeeCode: "EMP004",
-    firstName: "Priya",
-    lastName: "Sharma",
-    email: "priya.sharma@company.com",
-    phone: "+91 98765 43213",
-    department: "Finance",
-    designation: "Finance Manager",
-    joiningDate: "2020-08-20",
-    employmentType: "FULL_TIME",
-    status: "ACTIVE",
-    ctc: 2200000,
-  },
-  {
-    id: "5",
-    employeeCode: "EMP005",
-    firstName: "Amit",
-    lastName: "Patel",
-    email: "amit.patel@company.com",
-    phone: "+91 98765 43214",
-    department: "Sales",
-    designation: "Sales Executive",
-    joiningDate: "2023-06-01",
-    employmentType: "FULL_TIME",
-    status: "ON_NOTICE",
-    ctc: 600000,
-    reportingTo: "Neha Gupta",
-  },
-  {
-    id: "6",
-    employeeCode: "EMP006",
-    firstName: "Neha",
-    lastName: "Gupta",
-    email: "neha.gupta@company.com",
-    phone: "+91 98765 43215",
-    department: "Sales",
-    designation: "Sales Manager",
-    joiningDate: "2021-02-15",
-    employmentType: "FULL_TIME",
-    status: "ACTIVE",
-    ctc: 1500000,
-  },
-  {
-    id: "7",
-    employeeCode: "INT001",
-    firstName: "Vikram",
-    lastName: "Singh",
-    email: "vikram.singh@company.com",
-    phone: "+91 98765 43216",
-    department: "Engineering",
-    designation: "Software Engineer Intern",
-    joiningDate: "2024-07-01",
-    employmentType: "INTERN",
-    status: "ACTIVE",
-    ctc: 300000,
-    reportingTo: "John Doe",
-  },
-  {
-    id: "8",
-    employeeCode: "CON001",
-    firstName: "Lisa",
-    lastName: "Johnson",
-    email: "lisa.johnson@company.com",
-    phone: "+91 98765 43217",
-    department: "HR",
-    designation: "HR Consultant",
-    joiningDate: "2024-01-15",
-    employmentType: "CONTRACT",
-    status: "ACTIVE",
-    ctc: 1200000,
-  },
-];
+/**
+ * The list starts empty and is filled from the API.
+ *
+ * It used to be seeded with a hardcoded roster, so invented employees
+ * appeared on first paint and — if the fetch failed — stayed on screen as
+ * though they were real staff.
+ */
 
 const statusConfig = {
   ACTIVE: { color: "bg-green-100 text-green-800", label: "Active" },
@@ -422,7 +310,7 @@ export default function EmployeesPage() {
   const { organizationId, isLoading: orgLoading } = useOrganization();
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
   const [selectedStatus, setSelectedStatus] = React.useState<string>("all");
-  const [employeesData, setEmployeesData] = React.useState<Employee[]>(employees);
+  const [employeesData, setEmployeesData] = React.useState<Employee[]>([]);
   const [isLoading, setIsLoading] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
   const [formData, setFormData] = React.useState(initialFormData);

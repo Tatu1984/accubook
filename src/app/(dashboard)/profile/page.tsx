@@ -22,63 +22,33 @@ import { Input } from "@/frontend/components/ui/input";
 import { Label } from "@/frontend/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/frontend/components/ui/avatar";
 import { useOrganization } from "@/frontend/hooks/use-organization";
-import { toast } from "sonner";
 
+/**
+ * The signed-in user's profile.
+ *
+ * This page used to display a hardcoded "User / user@example.com"
+ * regardless of who was signed in, and its Save button waited 500ms,
+ * wrote to localStorage and reported "Profile updated successfully" —
+ * so a user could change their name, be told it saved, and find it
+ * reverted on any other device.
+ *
+ * The identity now comes from the session. There is no endpoint for a
+ * user to edit their own profile — `PATCH /users` only sets another
+ * member's role and active flag — so the fields are presented read-only
+ * rather than pretending to accept changes.
+ */
 export default function ProfilePage() {
-  const { organizationId, isLoading: orgLoading } = useOrganization();
+  const { organizationId, isLoading: orgLoading, role, organizationName, session } = useOrganization();
   const [isLoading, setIsLoading] = React.useState(true);
-  const [isSaving, setIsSaving] = React.useState(false);
 
-  const [profile, setProfile] = React.useState({
-    name: "",
-    email: "",
-    phone: "",
-    avatar: "",
-  });
-
-  React.useEffect(() => {
-    if (organizationId) {
-      setIsLoading(false);
-      // In real implementation, fetch user profile
-      setProfile({
-        name: "User",
-        email: "user@example.com",
-        phone: "",
-        avatar: "",
-      });
-    }
-  }, [organizationId]);
-
-  const handleSave = async () => {
-    setIsSaving(true);
-    try {
-      // In a real implementation, this would call an API endpoint
-      // For now, we simulate a successful save since user profile updates
-      // would typically go to a dedicated user settings API
-      await new Promise((resolve) => setTimeout(resolve, 500));
-
-      // Store in localStorage as a fallback for demo purposes
-      localStorage.setItem("userProfile", JSON.stringify(profile));
-
-      toast.success("Profile updated successfully");
-    } catch {
-      toast.error("Failed to update profile");
-    } finally {
-      setIsSaving(false);
-    }
+  const profile = {
+    name: session?.user?.name ?? "",
+    email: session?.user?.email ?? "",
   };
 
-  // Load saved profile on mount
   React.useEffect(() => {
-    const savedProfile = localStorage.getItem("userProfile");
-    if (savedProfile) {
-      try {
-        setProfile(JSON.parse(savedProfile));
-      } catch {
-        // Ignore parse errors
-      }
-    }
-  }, []);
+    if (organizationId || session) setIsLoading(false);
+  }, [organizationId, session]);
 
   if (orgLoading || isLoading) {
     return (
@@ -97,12 +67,8 @@ export default function ProfilePage() {
             Manage your account settings
           </p>
         </div>
-        <Button onClick={handleSave} disabled={isSaving}>
-          {isSaving ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <Save className="mr-2 h-4 w-4" />
-          )}
+        <Button disabled title="Editing your own profile is not supported yet">
+          <Save className="mr-2 h-4 w-4" />
           Save Changes
         </Button>
       </div>
@@ -111,67 +77,53 @@ export default function ProfilePage() {
         <Card>
           <CardHeader>
             <CardTitle>Personal Information</CardTitle>
-            <CardDescription>Update your personal details</CardDescription>
+            <CardDescription>
+              Your signed-in account. Editing these is not available yet — ask an
+              administrator to change them.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="flex items-center gap-6">
               <Avatar className="h-24 w-24">
-                <AvatarImage src={profile.avatar} />
+                <AvatarImage src={session?.user?.image ?? undefined} />
                 <AvatarFallback className="text-2xl">
                   {profile.name?.charAt(0) || "U"}
                 </AvatarFallback>
               </Avatar>
               <div>
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" disabled title="Photo upload is not available yet">
                   <Camera className="mr-2 h-4 w-4" />
                   Change Photo
                 </Button>
                 <p className="text-xs text-muted-foreground mt-2">
-                  JPG, PNG or GIF. Max 2MB.
+                  Signed in as {profile.email || "—"}
                 </p>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="name">Full Name</Label>
-                <Input
-                  id="name"
-                  value={profile.name}
-                  onChange={(e) =>
-                    setProfile({ ...profile, name: e.target.value })
-                  }
-                />
+                <Input id="name" value={profile.name} readOnly />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="email"
-                    type="email"
-                    className="pl-10"
-                    value={profile.email}
-                    onChange={(e) =>
-                      setProfile({ ...profile, email: e.target.value })
-                    }
-                  />
+                  <Input id="email" type="email" className="pl-10" value={profile.email} readOnly />
                 </div>
               </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="phone">Phone Number</Label>
-              <div className="relative">
-                <Phone className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="phone"
-                  type="tel"
-                  className="pl-10"
-                  placeholder="+91 98765 43210"
-                  value={profile.phone}
-                  onChange={(e) =>
-                    setProfile({ ...profile, phone: e.target.value })
-                  }
-                />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="org">Organization</Label>
+                <Input id="org" value={organizationName ?? ""} readOnly />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="role">Role</Label>
+                <div className="relative">
+                  <Phone className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground opacity-0" />
+                  <Input id="role" value={role ?? ""} readOnly />
+                </div>
               </div>
             </div>
           </CardContent>

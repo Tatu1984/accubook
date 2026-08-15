@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useOrganization } from "@/frontend/hooks/use-organization";
 import { ColumnDef } from "@tanstack/react-table";
 import {
   Plus,
@@ -14,6 +15,8 @@ import {
   Clock,
   RefreshCw,
   AlertTriangle,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/frontend/components/ui/button";
 import {
@@ -66,72 +69,13 @@ interface GSTReturn {
   status: "PENDING" | "FILED" | "REVISED";
 }
 
-const gstReturns: GSTReturn[] = [
-  {
-    id: "1",
-    returnType: "GSTR3B",
-    period: "Nov-2024",
-    dueDate: "2024-12-20",
-    totalTaxLiability: 450000,
-    totalItcClaimed: 380000,
-    netPayable: 70000,
-    status: "PENDING",
-  },
-  {
-    id: "2",
-    returnType: "GSTR1",
-    period: "Nov-2024",
-    dueDate: "2024-12-11",
-    filingDate: "2024-12-10",
-    totalTaxLiability: 450000,
-    arn: "AA2711243516789",
-    status: "FILED",
-  },
-  {
-    id: "3",
-    returnType: "GSTR3B",
-    period: "Oct-2024",
-    dueDate: "2024-11-20",
-    filingDate: "2024-11-18",
-    totalTaxLiability: 520000,
-    totalItcClaimed: 410000,
-    netPayable: 110000,
-    arn: "AA2710243245678",
-    status: "FILED",
-  },
-  {
-    id: "4",
-    returnType: "GSTR1",
-    period: "Oct-2024",
-    dueDate: "2024-11-11",
-    filingDate: "2024-11-10",
-    totalTaxLiability: 520000,
-    arn: "AA2710243123456",
-    status: "FILED",
-  },
-  {
-    id: "5",
-    returnType: "GSTR3B",
-    period: "Sep-2024",
-    dueDate: "2024-10-20",
-    filingDate: "2024-10-22",
-    totalTaxLiability: 480000,
-    totalItcClaimed: 390000,
-    netPayable: 90000,
-    arn: "AA2709243567890",
-    status: "REVISED",
-  },
-  {
-    id: "6",
-    returnType: "GSTR9",
-    period: "FY 2023-24",
-    dueDate: "2024-12-31",
-    totalTaxLiability: 5500000,
-    totalItcClaimed: 4200000,
-    netPayable: 1300000,
-    status: "PENDING",
-  },
-];
+/**
+ * Filing history comes from the GSTReturn table.
+ *
+ * This list used to be a hardcoded set of Nov-2024 filings with invented
+ * ARNs and tax liabilities, so the page reported returns as FILED that had
+ * never been filed and showed a liability unrelated to the books.
+ */
 
 const statusConfig = {
   PENDING: { color: "bg-yellow-100 text-yellow-800", icon: Clock },
@@ -315,13 +259,51 @@ const columns: ColumnDef<GSTReturn>[] = [
 ];
 
 export default function GSTReturnsPage() {
+  const { organizationId, isLoading: orgLoading } = useOrganization();
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
   const [selectedType, setSelectedType] = React.useState<string>("all");
+  const [gstReturns, setGstReturns] = React.useState<GSTReturn[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!organizationId) return;
+    const controller = new AbortController();
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/organizations/${organizationId}/gst-returns?limit=200`, { signal: controller.signal });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to load GST returns");
+        const json = await res.json();
+        setGstReturns(
+          (json.data ?? []).map((r: Record<string, unknown>) => ({
+            id: String(r.id),
+            returnType: r.returnType as GSTReturn["returnType"],
+            period: String(r.period),
+            dueDate: String(r.dueDate),
+            filingDate: r.filingDate ? String(r.filingDate) : undefined,
+            totalTaxLiability: r.totalTaxLiability != null ? Number(r.totalTaxLiability) : undefined,
+            totalItcClaimed: r.totalItcClaimed != null ? Number(r.totalItcClaimed) : undefined,
+            netPayable: r.netPayable != null ? Number(r.netPayable) : undefined,
+            arn: r.arn ? String(r.arn) : undefined,
+            status: r.status as GSTReturn["status"],
+          }))
+        );
+      } catch (e) {
+        if ((e as Error).name === "AbortError") return;
+        setError((e as Error).message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [organizationId]);
 
   const filteredReturns = React.useMemo(() => {
     if (selectedType === "all") return gstReturns;
     return gstReturns.filter((r) => r.returnType === selectedType);
-  }, [selectedType]);
+  }, [selectedType, gstReturns]);
 
   const stats = React.useMemo(() => {
     const pending = gstReturns.filter((r) => r.status === "PENDING");
@@ -333,7 +315,23 @@ export default function GSTReturnsPage() {
       overdue: overdue.length,
       totalPayable: pending.reduce((sum, r) => sum + (r.netPayable || 0), 0),
     };
-  }, []);
+  }, [gstReturns]);
+
+  if (orgLoading || loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-96 gap-3">
+        <AlertCircle className="h-10 w-10 text-muted-foreground" />
+        <p className="text-muted-foreground">{error}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
