@@ -86,6 +86,10 @@ function splitOf(tax: TaxConfig) {
   return { cgst: null, sgst: null, igst: null };
 }
 
+/**
+ * A short reference list of common codes, not the organization's own data
+ * and not the full HSN/SAC schedule. `/api/hsn-search` is the live lookup.
+ */
 const hsnCodes = [
   {
     code: "8471",
@@ -367,8 +371,8 @@ export default function TaxesPage() {
             <Receipt className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">156</div>
-            <p className="text-xs text-muted-foreground">For goods</p>
+            <div className="text-2xl font-bold">{hsnCodes.length}</div>
+            <p className="text-xs text-muted-foreground">Reference list, for goods</p>
           </CardContent>
         </Card>
         <Card>
@@ -377,8 +381,8 @@ export default function TaxesPage() {
             <FileText className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">89</div>
-            <p className="text-xs text-muted-foreground">For services</p>
+            <div className="text-2xl font-bold">{sacCodes.length}</div>
+            <p className="text-xs text-muted-foreground">Reference list, for services</p>
           </CardContent>
         </Card>
         <Card>
@@ -388,7 +392,7 @@ export default function TaxesPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">GSTR-3B</div>
-            <p className="text-xs text-muted-foreground">Due: 20th Mar</p>
+            <p className="text-xs text-muted-foreground">Due 20th of next month</p>
           </CardContent>
         </Card>
       </div>

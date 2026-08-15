@@ -96,7 +96,8 @@ export default function HelpPage() {
             <Button
               variant="outline"
               className="w-full"
-              onClick={() => window.open("https://docs.example.com", "_blank")}
+              disabled
+              title="Documentation site is not published yet"
             >
               <ExternalLink className="mr-2 h-4 w-4" />
               View Docs

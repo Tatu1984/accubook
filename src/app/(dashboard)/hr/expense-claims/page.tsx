@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { ColumnDef } from "@tanstack/react-table";
+import { useOrganization } from "@/frontend/hooks/use-organization";
 import {
   Plus,
   MoreHorizontal,
@@ -17,6 +18,8 @@ import {
   Hotel,
   Package,
   HelpCircle,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/frontend/components/ui/button";
 import {
@@ -70,66 +73,13 @@ interface ExpenseClaim {
   approvedBy?: string;
 }
 
-const expenseClaims: ExpenseClaim[] = [
-  {
-    id: "1",
-    claimNumber: "EXP-000001",
-    date: "2024-12-09",
-    employeeName: "Rahul Sharma",
-    employeeCode: "EMP001",
-    category: "TRAVEL",
-    description: "Client visit - Delhi to Mumbai flight tickets",
-    amount: 12500,
-    status: "PENDING",
-  },
-  {
-    id: "2",
-    claimNumber: "EXP-000002",
-    date: "2024-12-08",
-    employeeName: "Priya Patel",
-    employeeCode: "EMP002",
-    category: "FOOD",
-    description: "Team lunch for project completion",
-    amount: 5600,
-    status: "APPROVED",
-    approvedBy: "Manager",
-  },
-  {
-    id: "3",
-    claimNumber: "EXP-000003",
-    date: "2024-12-07",
-    employeeName: "Amit Kumar",
-    employeeCode: "EMP003",
-    category: "ACCOMMODATION",
-    description: "Hotel stay for 2 nights during training",
-    amount: 8000,
-    status: "REIMBURSED",
-    approvedBy: "HR Manager",
-  },
-  {
-    id: "4",
-    claimNumber: "EXP-000004",
-    date: "2024-12-06",
-    employeeName: "Sneha Gupta",
-    employeeCode: "EMP004",
-    category: "OFFICE_SUPPLIES",
-    description: "Stationery and office supplies",
-    amount: 2500,
-    status: "REJECTED",
-    approvedBy: "Admin",
-  },
-  {
-    id: "5",
-    claimNumber: "EXP-000005",
-    date: "2024-12-05",
-    employeeName: "Vikram Singh",
-    employeeCode: "EMP005",
-    category: "OTHER",
-    description: "Certification exam fees",
-    amount: 15000,
-    status: "PENDING",
-  },
-];
+/**
+ * Claims come from the expense-claims endpoint.
+ *
+ * The list was hardcoded — invented claims from invented employees with
+ * invented amounts — so an approver reviewing reimbursements was looking
+ * at data that had nothing to do with what anyone had actually submitted.
+ */
 
 const statusConfig = {
   PENDING: { color: "bg-yellow-100 text-yellow-800", icon: Clock },
@@ -297,13 +247,56 @@ const columns: ColumnDef<ExpenseClaim>[] = [
 ];
 
 export default function ExpenseClaimsPage() {
+  const { organizationId, isLoading: orgLoading } = useOrganization();
+  const [expenseClaims, setExpenseClaims] = React.useState<ExpenseClaim[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!organizationId) return;
+    const controller = new AbortController();
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/organizations/${organizationId}/expense-claims?limit=200`, { signal: controller.signal });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to load expense claims");
+        const json = await res.json();
+        type Row = {
+          id: string; claimNumber?: string; date: string; category: string; description: string;
+          amount: string | number; status: string;
+          employee?: { firstName?: string; lastName?: string | null; employeeCode?: string } | null;
+          approver?: { name?: string | null } | null;
+        };
+        setExpenseClaims(((json.data ?? []) as Row[]).map((c) => ({
+          id: c.id,
+          claimNumber: c.claimNumber ?? c.id.slice(0, 8),
+          date: c.date,
+          employeeName: [c.employee?.firstName, c.employee?.lastName].filter(Boolean).join(" ") || "—",
+          employeeCode: c.employee?.employeeCode ?? "—",
+          category: c.category as ExpenseClaim["category"],
+          description: c.description,
+          amount: Number(c.amount),
+          status: c.status as ExpenseClaim["status"],
+          approvedBy: c.approver?.name ?? undefined,
+        })));
+      } catch (e) {
+        if ((e as Error).name === "AbortError") return;
+        setError((e as Error).message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [organizationId]);
+
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
   const [selectedStatus, setSelectedStatus] = React.useState<string>("all");
 
   const filteredClaims = React.useMemo(() => {
     if (selectedStatus === "all") return expenseClaims;
     return expenseClaims.filter((c) => c.status === selectedStatus);
-  }, [selectedStatus]);
+  }, [selectedStatus, expenseClaims]);
 
   const stats = React.useMemo(() => {
     return {
@@ -316,7 +309,23 @@ export default function ExpenseClaimsPage() {
       reimbursed: expenseClaims.filter((c) => c.status === "REIMBURSED").length,
       totalAmount: expenseClaims.reduce((sum, c) => sum + c.amount, 0),
     };
-  }, []);
+  }, [expenseClaims]);
+
+  if (orgLoading || loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-96 gap-3">
+        <AlertCircle className="h-10 w-10 text-muted-foreground" />
+        <p className="text-muted-foreground">{error}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

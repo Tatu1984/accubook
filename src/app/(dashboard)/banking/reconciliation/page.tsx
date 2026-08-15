@@ -1,6 +1,9 @@
 "use client";
 
+import * as React from "react";
 import { useState } from "react";
+import { useOrganization } from "@/frontend/hooks/use-organization";
+import { cn } from "@/shared/utils/common.util";
 import { Button } from "@/frontend/components/ui/button";
 import { Input } from "@/frontend/components/ui/input";
 import {
@@ -51,126 +54,115 @@ import {
   ArrowRightLeft,
   TrendingUp,
   TrendingDown,
+  Loader2,
 } from "lucide-react";
 
-const bankTransactions = [
-  {
-    id: "BT001",
-    date: "2024-03-15",
-    description: "NEFT-ABC TECH-PAYMENT",
-    reference: "NEFT123456",
-    debit: 0,
-    credit: 125000,
-    balance: 1250000,
-    matched: true,
-    matchedWith: "REC-2024-045",
-  },
-  {
-    id: "BT002",
-    date: "2024-03-14",
-    description: "IMPS-VENDOR PAYMENT",
-    reference: "IMPS789012",
-    debit: 85000,
-    credit: 0,
-    balance: 1125000,
-    matched: true,
-    matchedWith: "PAY-2024-032",
-  },
-  {
-    id: "BT003",
-    date: "2024-03-14",
-    description: "NEFT-CUSTOMER CREDIT",
-    reference: "NEFT345678",
-    debit: 0,
-    credit: 250000,
-    balance: 1210000,
-    matched: false,
-    matchedWith: null,
-  },
-  {
-    id: "BT004",
-    date: "2024-03-13",
-    description: "CHQ DEP-456789",
-    reference: "CHQ456789",
-    debit: 0,
-    credit: 75000,
-    balance: 960000,
-    matched: false,
-    matchedWith: null,
-  },
-  {
-    id: "BT005",
-    date: "2024-03-13",
-    description: "SALARY-MARCH 2024",
-    reference: "SAL032024",
-    debit: 285000,
-    credit: 0,
-    balance: 885000,
-    matched: true,
-    matchedWith: "PAY-2024-031",
-  },
-  {
-    id: "BT006",
-    date: "2024-03-12",
-    description: "BANK CHARGES",
-    reference: "CHRG001",
-    debit: 1500,
-    credit: 0,
-    balance: 1170000,
-    matched: false,
-    matchedWith: null,
-  },
-];
 
-const bookTransactions = [
-  {
-    id: "REC-2024-045",
-    date: "2024-03-15",
-    description: "Receipt from ABC Technologies",
-    debit: 0,
-    credit: 125000,
-    matched: true,
-    voucherType: "Receipt",
-  },
-  {
-    id: "PAY-2024-032",
-    date: "2024-03-14",
-    description: "Payment to Steel Suppliers",
-    debit: 85000,
-    credit: 0,
-    matched: true,
-    voucherType: "Payment",
-  },
-  {
-    id: "REC-2024-046",
-    date: "2024-03-14",
-    description: "Receipt from Global Traders",
-    debit: 0,
-    credit: 250000,
-    matched: false,
-    voucherType: "Receipt",
-  },
-  {
-    id: "PAY-2024-031",
-    date: "2024-03-13",
-    description: "March Salary Payment",
-    debit: 285000,
-    credit: 0,
-    matched: true,
-    voucherType: "Payment",
-  },
-  {
-    id: "REC-2024-044",
-    date: "2024-03-12",
-    description: "Receipt from XYZ Industries",
-    debit: 0,
-    credit: 75000,
-    matched: false,
-    voucherType: "Receipt",
-  },
-];
+
+
+
+/**
+ * Bank reconciliation against the selected account.
+ *
+ * Both columns were hardcoded — invented statement lines (BT001
+ * "NEFT-ABC TECH-PAYMENT") against invented book entries — with tiles
+ * reading ₹12,50,000 and ₹12,48,500. Someone reconciling a real account
+ * was matching one fiction against another.
+ */
+interface BankTxn {
+  id: string;
+  date: string;
+  description: string | null;
+  reference: string | null;
+  debit: number;
+  credit: number;
+  balance: number;
+  matched: boolean;
+  matchedWith?: string;
+}
+
+interface BookTxn {
+  id: string;
+  date: string;
+  description: string;
+  debit: number;
+  credit: number;
+  matched: boolean;
+  voucherType: string;
+}
+
+interface BankAccountOption {
+  id: string;
+  name: string;
+  currentBalance: number;
+}
 
 export default function ReconciliationPage() {
+  const { organizationId, isLoading: orgLoading } = useOrganization();
+  const [accounts, setAccounts] = React.useState<BankAccountOption[]>([]);
+  const [accountId, setAccountId] = React.useState<string>("");
+  const [bankTransactions, setBankTransactions] = React.useState<BankTxn[]>([]);
+  const [bookTransactions, setBookTransactions] = React.useState<BookTxn[]>([]);
+  const [bookBalance, setBookBalance] = React.useState(0);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!organizationId) return;
+    (async () => {
+      try {
+        const r = await fetch(`/api/organizations/${organizationId}/bank-accounts`);
+        if (!r.ok) throw new Error("Failed to load bank accounts");
+        const rows = await r.json();
+        const list = (Array.isArray(rows) ? rows : rows.data ?? []) as Array<Record<string, unknown>>;
+        const opts = list.map((a) => ({
+          id: String(a.id), name: String(a.name), currentBalance: Number(a.currentBalance ?? 0),
+        }));
+        setAccounts(opts);
+        setAccountId((cur) => cur || opts[0]?.id || "");
+        if (opts.length === 0) setLoading(false);
+      } catch (e) {
+        setError((e as Error).message);
+        setLoading(false);
+      }
+    })();
+  }, [organizationId]);
+
+  React.useEffect(() => {
+    if (!organizationId || !accountId) return;
+    const controller = new AbortController();
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const r = await fetch(
+          `/api/organizations/${organizationId}/bank-reconciliation?bankAccountId=${accountId}&view=unreconciled`,
+          { signal: controller.signal }
+        );
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Failed to load reconciliation");
+        const json = await r.json();
+        type BT = { id: string; date: string; description: string | null; referenceNo: string | null; debitAmount: number; creditAmount: number; balance: number };
+        type BE = { id: string; voucherNumber: string; date: string; narration?: string | null; debitAmount?: number; creditAmount?: number; voucherType?: string };
+        setBankTransactions(((json.bankTransactions ?? []) as BT[]).map((t) => ({
+          id: t.id, date: t.date, description: t.description, reference: t.referenceNo,
+          debit: t.debitAmount, credit: t.creditAmount, balance: t.balance, matched: false,
+        })));
+        setBookTransactions(((json.bookEntries ?? []) as BE[]).map((b) => ({
+          id: b.id, date: b.date, description: b.narration ?? b.voucherNumber,
+          debit: Number(b.debitAmount ?? 0), credit: Number(b.creditAmount ?? 0),
+          matched: false, voucherType: b.voucherType ?? "Voucher",
+        })));
+        setBookBalance(Number(json.bankAccount?.currentBalance ?? 0));
+      } catch (e) {
+        if ((e as Error).name === "AbortError") return;
+        setError((e as Error).message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [organizationId, accountId]);
+
   const [selectedBank, setSelectedBank] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedBankTxns, setSelectedBankTxns] = useState<string[]>([]);
@@ -178,7 +170,38 @@ export default function ReconciliationPage() {
 
   const matchedCount = bankTransactions.filter((t) => t.matched).length;
   const totalCount = bankTransactions.length;
-  const matchPercentage = (matchedCount / totalCount) * 100;
+  // No statement lines left to match is a fully reconciled account, not 0%.
+  const matchPercentage = totalCount === 0 ? 100 : (matchedCount / totalCount) * 100;
+  const statementBalance = bankTransactions[0]?.balance ?? bookBalance;
+  const difference = statementBalance - bookBalance;
+  const inr = (n: number) =>
+    new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(n);
+
+  if (orgLoading || loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-96 gap-3">
+        <AlertCircle className="h-10 w-10 text-muted-foreground" />
+        <p className="text-muted-foreground">{error}</p>
+      </div>
+    );
+  }
+  if (accounts.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-96 gap-3">
+        <AlertCircle className="h-10 w-10 text-muted-foreground" />
+        <p className="text-muted-foreground">
+          No bank accounts yet. Add one under Banking → Accounts to reconcile it.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -264,8 +287,8 @@ export default function ReconciliationPage() {
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">₹12,50,000</div>
-            <p className="text-xs text-muted-foreground">As per bank statement</p>
+            <div className="text-2xl font-bold">{inr(statementBalance)}</div>
+            <p className="text-xs text-muted-foreground">Latest statement line</p>
           </CardContent>
         </Card>
         <Card>
@@ -274,7 +297,7 @@ export default function ReconciliationPage() {
             <TrendingDown className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">₹12,48,500</div>
+            <div className="text-2xl font-bold">{inr(bookBalance)}</div>
             <p className="text-xs text-muted-foreground">As per books</p>
           </CardContent>
         </Card>
@@ -284,8 +307,12 @@ export default function ReconciliationPage() {
             <AlertCircle className="h-4 w-4 text-yellow-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-yellow-600">₹1,500</div>
-            <p className="text-xs text-muted-foreground">Unreconciled amount</p>
+            <div className={cn("text-2xl font-bold", difference !== 0 && "text-yellow-600")}>
+              {inr(difference)}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {bankTransactions.length} statement lines unreconciled
+            </p>
           </CardContent>
         </Card>
         <Card>

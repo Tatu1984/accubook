@@ -1,6 +1,8 @@
 "use client";
 
+import * as React from "react";
 import { useState } from "react";
+import { useOrganization } from "@/frontend/hooks/use-organization";
 import { Button } from "@/frontend/components/ui/button";
 import { Input } from "@/frontend/components/ui/input";
 import {
@@ -53,6 +55,7 @@ import {
   AlertCircle,
   Timer,
   Coffee,
+  Loader2,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -61,138 +64,11 @@ import {
   DropdownMenuTrigger,
 } from "@/frontend/components/ui/dropdown-menu";
 
-const attendanceData = [
-  {
-    id: "ATT001",
-    employee: "Rahul Sharma",
-    empId: "EMP001",
-    date: "2024-03-15",
-    checkIn: "09:05",
-    checkOut: "18:30",
-    workHours: "9h 25m",
-    status: "PRESENT",
-    overtime: "1h 25m",
-  },
-  {
-    id: "ATT002",
-    employee: "Priya Patel",
-    empId: "EMP002",
-    date: "2024-03-15",
-    checkIn: "09:45",
-    checkOut: "17:00",
-    workHours: "7h 15m",
-    status: "LATE",
-    overtime: null,
-  },
-  {
-    id: "ATT003",
-    employee: "Amit Kumar",
-    empId: "EMP003",
-    date: "2024-03-15",
-    checkIn: null,
-    checkOut: null,
-    workHours: null,
-    status: "ABSENT",
-    overtime: null,
-  },
-  {
-    id: "ATT004",
-    employee: "Sneha Reddy",
-    empId: "EMP004",
-    date: "2024-03-15",
-    checkIn: "08:55",
-    checkOut: "18:00",
-    workHours: "9h 5m",
-    status: "PRESENT",
-    overtime: "1h 5m",
-  },
-  {
-    id: "ATT005",
-    employee: "Vikram Singh",
-    empId: "EMP005",
-    date: "2024-03-15",
-    checkIn: "10:30",
-    checkOut: null,
-    workHours: "Working...",
-    status: "HALF_DAY",
-    overtime: null,
-  },
-];
 
-const leaveRequests = [
-  {
-    id: "LV001",
-    employee: "Rahul Sharma",
-    empId: "EMP001",
-    type: "Casual Leave",
-    startDate: "2024-03-20",
-    endDate: "2024-03-21",
-    days: 2,
-    reason: "Personal work",
-    status: "PENDING",
-    appliedOn: "2024-03-14",
-  },
-  {
-    id: "LV002",
-    employee: "Priya Patel",
-    empId: "EMP002",
-    type: "Sick Leave",
-    startDate: "2024-03-18",
-    endDate: "2024-03-18",
-    days: 1,
-    reason: "Not feeling well",
-    status: "APPROVED",
-    appliedOn: "2024-03-15",
-  },
-  {
-    id: "LV003",
-    employee: "Amit Kumar",
-    empId: "EMP003",
-    type: "Earned Leave",
-    startDate: "2024-04-01",
-    endDate: "2024-04-05",
-    days: 5,
-    reason: "Family vacation",
-    status: "PENDING",
-    appliedOn: "2024-03-10",
-  },
-  {
-    id: "LV004",
-    employee: "Sneha Reddy",
-    empId: "EMP004",
-    type: "Casual Leave",
-    startDate: "2024-03-12",
-    endDate: "2024-03-12",
-    days: 1,
-    reason: "Doctor appointment",
-    status: "REJECTED",
-    appliedOn: "2024-03-11",
-  },
-];
 
-const leaveBalances = [
-  {
-    employee: "Rahul Sharma",
-    empId: "EMP001",
-    casual: { total: 12, used: 3, balance: 9 },
-    sick: { total: 12, used: 1, balance: 11 },
-    earned: { total: 15, used: 5, balance: 10 },
-  },
-  {
-    employee: "Priya Patel",
-    empId: "EMP002",
-    casual: { total: 12, used: 5, balance: 7 },
-    sick: { total: 12, used: 2, balance: 10 },
-    earned: { total: 15, used: 0, balance: 15 },
-  },
-  {
-    employee: "Amit Kumar",
-    empId: "EMP003",
-    casual: { total: 12, used: 8, balance: 4 },
-    sick: { total: 12, used: 3, balance: 9 },
-    earned: { total: 15, used: 10, balance: 5 },
-  },
-];
+
+
+
 
 const attendanceStatusColors: Record<string, string> = {
   PRESENT: "bg-green-100 text-green-800",
@@ -210,10 +86,142 @@ const leaveStatusColors: Record<string, string> = {
   CANCELLED: "bg-gray-100 text-gray-800",
 };
 
+/**
+ * Attendance and leave, read from the HR endpoints.
+ *
+ * All three tables here were hardcoded — invented attendance for invented
+ * staff (ATT001 "Rahul Sharma"), invented leave requests, and invented
+ * leave balances — alongside five tiles reading 42 / 2 / 1 / 3 / 5. A
+ * manager approving leave or checking who was in was reading fiction.
+ *
+ * Leave balances have no endpoint behind them, so that tab now says so
+ * rather than showing numbers nobody computed.
+ */
+/** Hours between check-in and check-out, when both were recorded. */
+function workedHours(checkIn: string | null, checkOut: string | null) {
+  if (!checkIn || !checkOut) return "-";
+  const [inH, inM] = checkIn.split(":").map(Number);
+  const [outH, outM] = checkOut.split(":").map(Number);
+  if ([inH, inM, outH, outM].some((n) => Number.isNaN(n))) return "-";
+  let mins = outH * 60 + outM - (inH * 60 + inM);
+  if (mins < 0) mins += 24 * 60;
+  return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, "0")}m`;
+}
+
+interface AttendanceRow {
+  id: string;
+  employee: string;
+  empId: string;
+  date: string;
+  checkIn: string | null;
+  checkOut: string | null;
+  status: string;
+}
+
+interface LeaveRow {
+  id: string;
+  employee: string;
+  empId: string;
+  type: string;
+  startDate: string;
+  endDate: string;
+  days: number;
+  reason: string;
+  status: string;
+}
+
 export default function AttendancePage() {
+  const { organizationId, isLoading: orgLoading } = useOrganization();
+  const [attendanceData, setAttendanceData] = React.useState<AttendanceRow[]>([]);
+  const [leaveRequests, setLeaveRequests] = React.useState<LeaveRow[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!organizationId) return;
+    const controller = new AbortController();
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const get = async (path: string) => {
+          const r = await fetch(`/api/organizations/${organizationId}/${path}`, { signal: controller.signal });
+          if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Failed to load ${path}`);
+          return r.json();
+        };
+        type Emp = { employeeCode?: string; firstName?: string; lastName?: string | null } | null;
+        const name = (e: Emp | undefined) => [e?.firstName, e?.lastName].filter(Boolean).join(" ") || "—";
+        const [att, lv] = await Promise.all([get("attendance?limit=200"), get("leaves?limit=200")]);
+
+        type AttRow = { id: string; date: string; checkIn?: string | null; checkOut?: string | null; status: string; employee?: Emp };
+        setAttendanceData(((att.data ?? []) as AttRow[]).map((r) => ({
+          id: r.id,
+          employee: name(r.employee),
+          empId: r.employee?.employeeCode ?? "—",
+          date: r.date,
+          checkIn: r.checkIn ?? null,
+          checkOut: r.checkOut ?? null,
+          status: r.status,
+        })));
+
+        type LvRow = {
+          id: string; fromDate: string; toDate: string; days?: number; reason?: string | null;
+          status: string; employee?: Emp; leaveType?: { name?: string } | null;
+        };
+        setLeaveRequests(((lv.data ?? []) as LvRow[]).map((r) => {
+          const from = new Date(r.fromDate), to = new Date(r.toDate);
+          return {
+            id: r.id,
+            employee: name(r.employee),
+            empId: r.employee?.employeeCode ?? "—",
+            type: r.leaveType?.name ?? "Leave",
+            startDate: r.fromDate,
+            endDate: r.toDate,
+            days: r.days ?? Math.max(1, Math.round((to.getTime() - from.getTime()) / 864e5) + 1),
+            reason: r.reason ?? "",
+            status: r.status,
+          };
+        }));
+      } catch (e) {
+        if ((e as Error).name === "AbortError") return;
+        setError((e as Error).message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [organizationId]);
+
   const [searchTerm, setSearchTerm] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
+
+  const todayKey = new Date().toDateString();
+  const todaysRows = attendanceData.filter((r) => new Date(r.date).toDateString() === todayKey);
+  const countBy = (st: string) => todaysRows.filter((r) => r.status === st).length;
+  const todayCounts = {
+    total: todaysRows.length,
+    PRESENT: countBy("PRESENT"),
+    ABSENT: countBy("ABSENT"),
+    ON_LEAVE: countBy("ON_LEAVE"),
+    LATE: countBy("LATE"),
+  };
+
+  if (orgLoading || loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-96 gap-3">
+        <AlertCircle className="h-10 w-10 text-muted-foreground" />
+        <p className="text-muted-foreground">{error}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -286,8 +294,8 @@ export default function AttendancePage() {
             <CheckCircle className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">42</div>
-            <p className="text-xs text-muted-foreground">Out of 45 employees</p>
+            <div className="text-2xl font-bold">{todayCounts.PRESENT}</div>
+            <p className="text-xs text-muted-foreground">Of {todayCounts.total} marked today</p>
           </CardContent>
         </Card>
         <Card>
@@ -296,7 +304,7 @@ export default function AttendancePage() {
             <Coffee className="h-4 w-4 text-blue-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">2</div>
+            <div className="text-2xl font-bold">{todayCounts.ON_LEAVE}</div>
             <p className="text-xs text-muted-foreground">Approved leaves</p>
           </CardContent>
         </Card>
@@ -306,7 +314,7 @@ export default function AttendancePage() {
             <XCircle className="h-4 w-4 text-red-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">1</div>
+            <div className="text-2xl font-bold">{todayCounts.ABSENT}</div>
             <p className="text-xs text-muted-foreground">Without leave</p>
           </CardContent>
         </Card>
@@ -316,7 +324,7 @@ export default function AttendancePage() {
             <Timer className="h-4 w-4 text-yellow-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">3</div>
+            <div className="text-2xl font-bold">{todayCounts.LATE}</div>
             <p className="text-xs text-muted-foreground">After 9:30 AM</p>
           </CardContent>
         </Card>
@@ -326,7 +334,7 @@ export default function AttendancePage() {
             <AlertCircle className="h-4 w-4 text-yellow-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">5</div>
+            <div className="text-2xl font-bold">{leaveRequests.filter((l) => l.status === "PENDING").length}</div>
             <p className="text-xs text-muted-foreground">Awaiting approval</p>
           </CardContent>
         </Card>
@@ -375,7 +383,6 @@ export default function AttendancePage() {
                     <TableHead>Check In</TableHead>
                     <TableHead>Check Out</TableHead>
                     <TableHead>Work Hours</TableHead>
-                    <TableHead>Overtime</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="w-[50px]"></TableHead>
                   </TableRow>
@@ -411,16 +418,7 @@ export default function AttendancePage() {
                           "-"
                         )}
                       </TableCell>
-                      <TableCell>{record.workHours || "-"}</TableCell>
-                      <TableCell>
-                        {record.overtime ? (
-                          <Badge variant="outline" className="bg-green-50">
-                            +{record.overtime}
-                          </Badge>
-                        ) : (
-                          "-"
-                        )}
-                      </TableCell>
+                      <TableCell>{workedHours(record.checkIn, record.checkOut)}</TableCell>
                       <TableCell>
                         <Badge className={attendanceStatusColors[record.status]}>
                           {record.status.replace("_", " ")}
@@ -591,39 +589,12 @@ export default function AttendancePage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {leaveBalances.map((emp) => (
-                    <TableRow key={emp.empId}>
-                      <TableCell>
-                        <div>
-                          <div className="font-medium">{emp.employee}</div>
-                          <div className="text-sm text-muted-foreground">
-                            {emp.empId}
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-center">{emp.casual.total}</TableCell>
-                      <TableCell className="text-center text-red-600">
-                        {emp.casual.used}
-                      </TableCell>
-                      <TableCell className="text-center font-medium text-green-600">
-                        {emp.casual.balance}
-                      </TableCell>
-                      <TableCell className="text-center">{emp.sick.total}</TableCell>
-                      <TableCell className="text-center text-red-600">
-                        {emp.sick.used}
-                      </TableCell>
-                      <TableCell className="text-center font-medium text-green-600">
-                        {emp.sick.balance}
-                      </TableCell>
-                      <TableCell className="text-center">{emp.earned.total}</TableCell>
-                      <TableCell className="text-center text-red-600">
-                        {emp.earned.used}
-                      </TableCell>
-                      <TableCell className="text-center font-medium text-green-600">
-                        {emp.earned.balance}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  <TableRow>
+                    <TableCell colSpan={10} className="h-24 text-center text-muted-foreground">
+                      Leave balances are not tracked yet — there is no entitlement or
+                      accrual data behind this view.
+                    </TableCell>
+                  </TableRow>
                 </TableBody>
               </Table>
             </CardContent>
@@ -660,7 +631,7 @@ export default function AttendancePage() {
                       <CardContent className="pt-4">
                         <div className="flex items-center gap-2">
                           <CheckCircle className="h-5 w-5 text-green-600" />
-                          <span className="text-2xl font-bold">42</span>
+                          <span className="text-2xl font-bold">{todayCounts.PRESENT}</span>
                           <span className="text-muted-foreground">Present</span>
                         </div>
                       </CardContent>
@@ -669,7 +640,7 @@ export default function AttendancePage() {
                       <CardContent className="pt-4">
                         <div className="flex items-center gap-2">
                           <XCircle className="h-5 w-5 text-red-600" />
-                          <span className="text-2xl font-bold">1</span>
+                          <span className="text-2xl font-bold">{todayCounts.ABSENT}</span>
                           <span className="text-muted-foreground">Absent</span>
                         </div>
                       </CardContent>
@@ -678,7 +649,7 @@ export default function AttendancePage() {
                       <CardContent className="pt-4">
                         <div className="flex items-center gap-2">
                           <Coffee className="h-5 w-5 text-blue-600" />
-                          <span className="text-2xl font-bold">2</span>
+                          <span className="text-2xl font-bold">{todayCounts.ON_LEAVE}</span>
                           <span className="text-muted-foreground">On Leave</span>
                         </div>
                       </CardContent>

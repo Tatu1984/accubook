@@ -61,7 +61,7 @@ const FEATURES = [
 ];
 
 const STATS = [
-  { value: "200+", label: "tests covering accounting math" },
+  { value: "500+", label: "tests covering accounting math" },
   { value: "9 / 9", label: "GSTR-1 sections supported" },
   { value: "4", label: "banks ready for statement import" },
   { value: "0", label: "JS-float bugs (Decimal end-to-end)" },

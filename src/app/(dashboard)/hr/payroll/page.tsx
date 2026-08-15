@@ -1,6 +1,8 @@
 "use client";
 
+import * as React from "react";
 import { useState } from "react";
+import { useOrganization } from "@/frontend/hooks/use-organization";
 import { Button } from "@/frontend/components/ui/button";
 import { Input } from "@/frontend/components/ui/input";
 import {
@@ -66,6 +68,8 @@ import {
   Clock,
   Settings,
   Info,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -74,128 +78,11 @@ import {
   DropdownMenuTrigger,
 } from "@/frontend/components/ui/dropdown-menu";
 
-const payrollRuns = [
-  {
-    id: "PAY-2024-03",
-    month: "March 2024",
-    employees: 45,
-    grossSalary: 2850000,
-    deductions: 485000,
-    netSalary: 2365000,
-    status: "DRAFT",
-    processedDate: null,
-  },
-  {
-    id: "PAY-2024-02",
-    month: "February 2024",
-    employees: 44,
-    grossSalary: 2780000,
-    deductions: 472000,
-    netSalary: 2308000,
-    status: "PAID",
-    processedDate: "2024-02-28",
-  },
-  {
-    id: "PAY-2024-01",
-    month: "January 2024",
-    employees: 43,
-    grossSalary: 2720000,
-    deductions: 462000,
-    netSalary: 2258000,
-    status: "PAID",
-    processedDate: "2024-01-31",
-  },
-];
 
-const salarySlips = [
-  {
-    id: "SLIP-001",
-    employee: "Rahul Sharma",
-    empId: "EMP001",
-    department: "Engineering",
-    basic: 50000,
-    hra: 20000,
-    allowances: 15000,
-    grossSalary: 85000,
-    pf: 6000,
-    tax: 8500,
-    deductions: 14500,
-    netSalary: 70500,
-    status: "GENERATED",
-  },
-  {
-    id: "SLIP-002",
-    employee: "Priya Patel",
-    empId: "EMP002",
-    department: "Finance",
-    basic: 45000,
-    hra: 18000,
-    allowances: 12000,
-    grossSalary: 75000,
-    pf: 5400,
-    tax: 6500,
-    deductions: 11900,
-    netSalary: 63100,
-    status: "SENT",
-  },
-  {
-    id: "SLIP-003",
-    employee: "Amit Kumar",
-    empId: "EMP003",
-    department: "Sales",
-    basic: 40000,
-    hra: 16000,
-    allowances: 10000,
-    grossSalary: 66000,
-    pf: 4800,
-    tax: 4500,
-    deductions: 9300,
-    netSalary: 56700,
-    status: "GENERATED",
-  },
-  {
-    id: "SLIP-004",
-    employee: "Sneha Reddy",
-    empId: "EMP004",
-    department: "HR",
-    basic: 42000,
-    hra: 16800,
-    allowances: 11000,
-    grossSalary: 69800,
-    pf: 5040,
-    tax: 5200,
-    deductions: 10240,
-    netSalary: 59560,
-    status: "SENT",
-  },
-];
 
-const salaryStructures = [
-  {
-    id: "STR001",
-    name: "Executive Grade",
-    basicPercent: 50,
-    hraPercent: 40,
-    pfPercent: 12,
-    employees: 15,
-  },
-  {
-    id: "STR002",
-    name: "Manager Grade",
-    basicPercent: 50,
-    hraPercent: 40,
-    pfPercent: 12,
-    employees: 12,
-  },
-  {
-    id: "STR003",
-    name: "Senior Grade",
-    basicPercent: 55,
-    hraPercent: 35,
-    pfPercent: 12,
-    employees: 18,
-  },
-];
+
+
+
 
 const statusColors: Record<string, string> = {
   DRAFT: "bg-gray-100 text-gray-800",
@@ -210,6 +97,8 @@ interface SalarySlip {
   employee: string;
   empId: string;
   department: string;
+  month: number;
+  year: number;
   basic: number;
   hra: number;
   allowances: number;
@@ -230,7 +119,100 @@ interface SalaryStructure {
   employees: number;
 }
 
+/**
+ * Payroll, read from the payslip records.
+ *
+ * All three tables here were hardcoded — invented payroll runs
+ * (PAY-2024-03), invented salary slips for invented staff, and invented
+ * salary structures — behind tiles reading ₹28.5L and ₹3.42Cr. Someone
+ * checking what had been paid, or about to disburse, was reading numbers
+ * the system had never computed.
+ *
+ * Payroll runs are derived by grouping payslips by month, which is how
+ * the post-month and pay-month endpoints treat them. Salary structures
+ * have no model behind them, so that tab says so.
+ */
 export default function PayrollPage() {
+  const { organizationId, isLoading: orgLoading } = useOrganization();
+  const [salarySlips, setSalarySlips] = React.useState<SalarySlip[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!organizationId) return;
+    const controller = new AbortController();
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const r = await fetch(`/api/organizations/${organizationId}/payroll?limit=300`, { signal: controller.signal });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Failed to load payroll");
+        const json = await r.json();
+        type Comp = { component?: string; name?: string; amount: number | string };
+        type Row = {
+          id: string; month: number; year: number;
+          basicSalary: string; grossSalary: string; totalDeductions: string; netSalary: string;
+          earnings?: Comp[]; deductions?: Comp[]; status: string;
+          employee?: { employeeCode?: string; firstName?: string; lastName?: string | null; department?: { name?: string } | null } | null;
+        };
+        const pick = (list: Comp[] | undefined, want: string) =>
+          Number((list ?? []).find((c) => (c.component ?? c.name ?? "").toLowerCase() === want)?.amount ?? 0);
+        setSalarySlips(((json.data ?? []) as Row[]).map((p) => {
+          const hra = pick(p.earnings, "hra");
+          const gross = Number(p.grossSalary);
+          const basic = Number(p.basicSalary);
+          return {
+            id: p.id,
+            employee: [p.employee?.firstName, p.employee?.lastName].filter(Boolean).join(" ") || "—",
+            empId: p.employee?.employeeCode ?? "—",
+            department: p.employee?.department?.name ?? "—",
+            month: p.month,
+            year: p.year,
+            basic,
+            hra,
+            allowances: Math.max(0, gross - basic - hra),
+            grossSalary: gross,
+            pf: pick(p.deductions, "pf (employee)") || pick(p.deductions, "pf"),
+            tax: pick(p.deductions, "tds"),
+            deductions: Number(p.totalDeductions),
+            netSalary: Number(p.netSalary),
+            status: p.status,
+          };
+        }));
+      } catch (e) {
+        if ((e as Error).name === "AbortError") return;
+        setError((e as Error).message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [organizationId]);
+
+  /** One row per month that has payslips — how post-month/pay-month group them. */
+  const payrollRuns = React.useMemo(() => {
+    const byPeriod = new Map<string, SalarySlip[]>();
+    for (const s of salarySlips) {
+      const key = `${s.year}-${String(s.month).padStart(2, "0")}`;
+      byPeriod.set(key, [...(byPeriod.get(key) ?? []), s]);
+    }
+    return [...byPeriod.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([period, slips]) => ({
+        id: period,
+        period,
+        employees: slips.length,
+        grossAmount: slips.reduce((t, s) => t + s.grossSalary, 0),
+        deductions: slips.reduce((t, s) => t + s.deductions, 0),
+        netAmount: slips.reduce((t, s) => t + s.netSalary, 0),
+        status: slips.every((s) => s.status === "PAID")
+          ? "PAID"
+          : slips.some((s) => s.status === "PROCESSED" || s.status === "PAID")
+          ? "PROCESSED"
+          : "DRAFT",
+      }));
+  }, [salarySlips]);
+
   const [searchTerm, setSearchTerm] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSlipDialogOpen, setIsSlipDialogOpen] = useState(false);
@@ -343,6 +325,28 @@ Generated on: ${new Date().toLocaleDateString()}
     setIsStructureDialogOpen(false);
   };
 
+  const latestRun = payrollRuns[0];
+  const ytdNet = payrollRuns.reduce((t, r) => t + r.netAmount, 0);
+  const employeesOnPayroll = new Set(salarySlips.map((s) => s.empId)).size;
+  const lakhs = (n: number) =>
+    n >= 1e7 ? `₹${(n / 1e7).toFixed(2)}Cr` : `₹${(n / 1e5).toFixed(2)}L`;
+
+  if (orgLoading || loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-96 gap-3">
+        <AlertCircle className="h-10 w-10 text-muted-foreground" />
+        <p className="text-muted-foreground">{error}</p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -404,15 +408,15 @@ Generated on: ${new Date().toLocaleDateString()}
                   <div className="grid grid-cols-3 gap-4 text-sm">
                     <div>
                       <div className="text-muted-foreground">Employees</div>
-                      <div className="text-xl font-bold">45</div>
+                      <div className="text-xl font-bold">{employeesOnPayroll}</div>
                     </div>
                     <div>
                       <div className="text-muted-foreground">Est. Gross</div>
-                      <div className="text-xl font-bold">₹28.5L</div>
+                      <div className="text-xl font-bold">{lakhs(latestRun?.grossAmount ?? 0)}</div>
                     </div>
                     <div>
                       <div className="text-muted-foreground">Est. Net</div>
-                      <div className="text-xl font-bold">₹23.6L</div>
+                      <div className="text-xl font-bold">{lakhs(latestRun?.netAmount ?? 0)}</div>
                     </div>
                   </div>
                 </CardContent>
@@ -439,8 +443,10 @@ Generated on: ${new Date().toLocaleDateString()}
             <Wallet className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">₹28.5L</div>
-            <p className="text-xs text-muted-foreground">March 2024 (Draft)</p>
+            <div className="text-2xl font-bold">{lakhs(latestRun?.netAmount ?? 0)}</div>
+            <p className="text-xs text-muted-foreground">
+              {latestRun ? `${latestRun.period} (${latestRun.status})` : "No payroll run yet"}
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -449,8 +455,8 @@ Generated on: ${new Date().toLocaleDateString()}
             <IndianRupee className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">₹3.42Cr</div>
-            <p className="text-xs text-muted-foreground">FY 2024-25</p>
+            <div className="text-2xl font-bold">{lakhs(ytdNet)}</div>
+            <p className="text-xs text-muted-foreground">Across {payrollRuns.length} run(s)</p>
           </CardContent>
         </Card>
         <Card>
@@ -459,8 +465,8 @@ Generated on: ${new Date().toLocaleDateString()}
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">45</div>
-            <p className="text-xs text-muted-foreground">Active on payroll</p>
+            <div className="text-2xl font-bold">{employeesOnPayroll}</div>
+            <p className="text-xs text-muted-foreground">With a payslip on record</p>
           </CardContent>
         </Card>
         <Card>
@@ -469,8 +475,10 @@ Generated on: ${new Date().toLocaleDateString()}
             <Clock className="h-4 w-4 text-yellow-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">2</div>
-            <p className="text-xs text-muted-foreground">Salary revisions</p>
+            <div className="text-2xl font-bold">
+              {salarySlips.filter((s) => s.status === "DRAFT").length}
+            </div>
+            <p className="text-xs text-muted-foreground">Payslips still in draft</p>
           </CardContent>
         </Card>
       </div>
@@ -524,16 +532,16 @@ Generated on: ${new Date().toLocaleDateString()}
                 <TableBody>
                   {payrollRuns.map((run) => (
                     <TableRow key={run.id}>
-                      <TableCell className="font-medium">{run.month}</TableCell>
+                      <TableCell className="font-medium">{run.period}</TableCell>
                       <TableCell className="text-right">{run.employees}</TableCell>
                       <TableCell className="text-right">
-                        ₹{(run.grossSalary / 100000).toFixed(2)}L
+                        ₹{(run.grossAmount / 100000).toFixed(2)}L
                       </TableCell>
                       <TableCell className="text-right text-red-600">
                         ₹{(run.deductions / 100000).toFixed(2)}L
                       </TableCell>
                       <TableCell className="text-right font-medium">
-                        ₹{(run.netSalary / 100000).toFixed(2)}L
+                        ₹{(run.netAmount / 100000).toFixed(2)}L
                       </TableCell>
                       <TableCell>
                         <Badge className={statusColors[run.status]}>
@@ -541,9 +549,7 @@ Generated on: ${new Date().toLocaleDateString()}
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        {run.processedDate
-                          ? new Date(run.processedDate).toLocaleDateString()
-                          : "-"}
+                        {run.status === "DRAFT" ? "-" : run.status}
                       </TableCell>
                       <TableCell>
                         <DropdownMenu>
@@ -809,33 +815,11 @@ Generated on: ${new Date().toLocaleDateString()}
             </CardHeader>
             <CardContent>
               <div className="grid gap-4 md:grid-cols-3">
-                {salaryStructures.map((structure) => (
-                  <Card key={structure.id}>
-                    <CardHeader>
-                      <CardTitle className="text-lg">{structure.name}</CardTitle>
-                      <CardDescription>
-                        {structure.employees} employees
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">Basic</span>
-                        <span className="font-medium">{structure.basicPercent}% of CTC</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">HRA</span>
-                        <span className="font-medium">{structure.hraPercent}% of Basic</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">PF Contribution</span>
-                        <span className="font-medium">{structure.pfPercent}% of Basic</span>
-                      </div>
-                      <Button variant="outline" className="w-full mt-4" onClick={() => handleEditStructure(structure)}>
-                        Edit Structure
-                      </Button>
-                    </CardContent>
-                  </Card>
-                ))}
+                <p className="text-sm text-muted-foreground md:col-span-3">
+                  Salary structures are not stored yet — there is no model behind
+                  them, so nothing can be listed here. Payslips are computed from
+                  each employee&apos;s CTC and the statutory rules instead.
+                </p>
               </div>
             </CardContent>
           </Card>
