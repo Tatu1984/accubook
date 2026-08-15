@@ -1,6 +1,8 @@
 "use client";
 
+import * as React from "react";
 import { useState } from "react";
+import { useOrganization } from "@/frontend/hooks/use-organization";
 import { Button } from "@/frontend/components/ui/button";
 import { Input } from "@/frontend/components/ui/input";
 import {
@@ -51,8 +53,8 @@ import {
   Mail,
   Key,
   UserCog,
-  Lock,
-  Unlock,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -61,101 +63,65 @@ import {
   DropdownMenuTrigger,
 } from "@/frontend/components/ui/dropdown-menu";
 
-const users = [
-  {
-    id: "USR001",
-    name: "System Administrator",
-    email: "admin@accubooks.com",
-    role: "ADMIN",
-    department: "IT",
-    status: "ACTIVE",
-    lastLogin: "2024-03-15 14:30",
-    mfaEnabled: true,
-  },
-  {
-    id: "USR002",
-    name: "Rahul Sharma",
-    email: "rahul@democorp.com",
-    role: "ACCOUNTANT",
-    department: "Finance",
-    status: "ACTIVE",
-    lastLogin: "2024-03-15 09:15",
-    mfaEnabled: true,
-  },
-  {
-    id: "USR003",
-    name: "Priya Patel",
-    email: "priya@democorp.com",
-    role: "MANAGER",
-    department: "Finance",
-    status: "ACTIVE",
-    lastLogin: "2024-03-14 17:45",
-    mfaEnabled: false,
-  },
-  {
-    id: "USR004",
-    name: "Amit Kumar",
-    email: "amit@democorp.com",
-    role: "VIEWER",
-    department: "Sales",
-    status: "INACTIVE",
-    lastLogin: "2024-03-01 11:00",
-    mfaEnabled: false,
-  },
-  {
-    id: "USR005",
-    name: "Sneha Reddy",
-    email: "sneha@democorp.com",
-    role: "SALES_REP",
-    department: "Sales",
-    status: "ACTIVE",
-    lastLogin: "2024-03-15 10:30",
-    mfaEnabled: true,
-  },
-];
+/**
+ * Members and roles come from the organization.
+ *
+ * This page used to render a hardcoded roster (USR001 "System
+ * Administrator", invented colleagues, invented last-login times and MFA
+ * flags) next to four hardcoded tiles reading 29 / 12 / 5 / 68%. None of
+ * it reflected who could actually sign in, which is the one question an
+ * administrator opens this page to answer.
+ */
+/** Rows as the users and roles endpoints return them. */
+type OrgUserRow = {
+  userId?: string;
+  isActive?: boolean;
+  createdAt?: string;
+  user?: { id?: string; name?: string | null; email?: string; avatar?: string | null; lastLoginAt?: string | null };
+  role?: { id?: string; name?: string };
+};
+type RoleRow = {
+  id: string;
+  name: string;
+  description?: string | null;
+  isSystem?: boolean;
+  userCount?: number;
+  permissions?: unknown;
+};
 
-const roles = [
-  {
-    id: "ADMIN",
-    name: "Administrator",
-    description: "Full access to all features",
-    users: 1,
-    permissions: ["*"],
-    isSystem: true,
-  },
-  {
-    id: "MANAGER",
-    name: "Manager",
-    description: "Manage team and approve transactions",
-    users: 3,
-    permissions: ["read", "write", "approve"],
-    isSystem: true,
-  },
-  {
-    id: "ACCOUNTANT",
-    name: "Accountant",
-    description: "Access to accounting and finance modules",
-    users: 5,
-    permissions: ["read", "write"],
-    isSystem: true,
-  },
-  {
-    id: "SALES_REP",
-    name: "Sales Representative",
-    description: "Access to sales and customer modules",
-    users: 8,
-    permissions: ["read", "write"],
-    isSystem: false,
-  },
-  {
-    id: "VIEWER",
-    name: "Viewer",
-    description: "Read-only access to reports",
-    users: 12,
-    permissions: ["read"],
-    isSystem: true,
-  },
-];
+interface OrgMember {
+  id: string;
+  name: string;
+  email: string;
+  avatar?: string | null;
+  roleId: string;
+  roleName: string;
+  isActive: boolean;
+  joinedAt?: string;
+  lastLoginAt?: string;
+}
+
+interface OrgRole {
+  id: string;
+  name: string;
+  description?: string;
+  isSystem: boolean;
+  userCount: number;
+  /** Stored grants; either the current object form or a legacy string list. */
+  permissions: unknown;
+}
+
+/** A short, readable summary of what a role grants. */
+function permissionLabels(permissions: unknown): string[] {
+  if (!Array.isArray(permissions)) return [];
+  return permissions.map((p) => {
+    if (typeof p === "string") return p.replace(/_/g, " ");
+    const g = p as { module?: string; category?: string; actions?: string[] };
+    if (!g?.module) return "";
+    const scope = g.module === "*" ? "Full Access" : g.category && g.category !== "*" ? `${g.module}/${g.category}` : g.module;
+    return scope === "Full Access" ? scope : `${scope}: ${(g.actions ?? []).join(", ")}`;
+  }).filter(Boolean);
+}
 
 const modules = [
   { id: "dashboard", name: "Dashboard", actions: ["view"] },
@@ -185,9 +151,77 @@ const roleColors: Record<string, string> = {
 };
 
 export default function UsersPage() {
+  const { organizationId, isLoading: orgLoading } = useOrganization();
+  const [users, setUsers] = React.useState<OrgMember[]>([]);
+  const [roles, setRoles] = React.useState<OrgRole[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!organizationId) return;
+    const controller = new AbortController();
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const get = async (path: string) => {
+          const r = await fetch(`/api/organizations/${organizationId}/${path}`, { signal: controller.signal });
+          if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Failed to load ${path}`);
+          return r.json();
+        };
+        const [uRes, rRes] = await Promise.all([get("users?limit=200"), get("roles?includeUserCount=true")]);
+        const rows = (uRes.data ?? []) as OrgUserRow[];
+        setUsers(rows.map((ou) => ({
+          id: String(ou.user?.id ?? ou.userId),
+          name: String(ou.user?.name ?? ou.user?.email ?? "Unknown"),
+          email: String(ou.user?.email ?? ""),
+          avatar: ou.user?.avatar ?? null,
+          roleId: String(ou.role?.id ?? ""),
+          roleName: String(ou.role?.name ?? "—"),
+          isActive: Boolean(ou.isActive),
+          joinedAt: ou.createdAt ? String(ou.createdAt) : undefined,
+          lastLoginAt: ou.user?.lastLoginAt ? String(ou.user.lastLoginAt) : undefined,
+        })));
+        const roleRows = (Array.isArray(rRes) ? rRes : rRes.data ?? []) as RoleRow[];
+        setRoles(roleRows.map((r) => ({
+          id: String(r.id),
+          name: String(r.name),
+          description: r.description ? String(r.description) : undefined,
+          isSystem: Boolean(r.isSystem),
+          userCount: Number(r.userCount ?? 0),
+          permissions: r.permissions,
+        })));
+      } catch (e) {
+        if ((e as Error).name === "AbortError") return;
+        setError((e as Error).message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [organizationId]);
+
+  const activeCount = users.filter((u) => u.isActive).length;
+
   const [searchTerm, setSearchTerm] = useState("");
   const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
   const [isRoleDialogOpen, setIsRoleDialogOpen] = useState(false);
+
+  if (orgLoading || loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-96 gap-3">
+        <AlertCircle className="h-10 w-10 text-muted-foreground" />
+        <p className="text-muted-foreground">{error}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -204,22 +238,24 @@ export default function UsersPage() {
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Users</CardTitle>
+            <CardTitle className="text-sm font-medium">Members</CardTitle>
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">29</div>
-            <p className="text-xs text-muted-foreground">4 pending invitations</p>
+            <div className="text-2xl font-bold">{users.length}</div>
+            <p className="text-xs text-muted-foreground">In this organization</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Now</CardTitle>
-            <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+            <CardTitle className="text-sm font-medium">Active</CardTitle>
+            <div className="h-2 w-2 rounded-full bg-green-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">12</div>
-            <p className="text-xs text-muted-foreground">Currently online</p>
+            <div className="text-2xl font-bold">{activeCount}</div>
+            <p className="text-xs text-muted-foreground">
+              {users.length - activeCount} deactivated
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -228,18 +264,25 @@ export default function UsersPage() {
             <Shield className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">5</div>
-            <p className="text-xs text-muted-foreground">3 system, 2 custom</p>
+            <div className="text-2xl font-bold">{roles.length}</div>
+            <p className="text-xs text-muted-foreground">
+              {roles.filter((r) => r.isSystem).length} system,{" "}
+              {roles.filter((r) => !r.isSystem).length} custom
+            </p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">MFA Enabled</CardTitle>
+            <CardTitle className="text-sm font-medium">Signed in before</CardTitle>
             <Key className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">68%</div>
-            <p className="text-xs text-muted-foreground">17 of 25 users</p>
+            <div className="text-2xl font-bold">
+              {users.filter((u) => u.lastLoginAt).length}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {users.filter((u) => !u.lastLoginAt).length} have never signed in
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -356,22 +399,27 @@ export default function UsersPage() {
                   <TableRow>
                     <TableHead>User</TableHead>
                     <TableHead>Role</TableHead>
-                    <TableHead>Department</TableHead>
                     <TableHead>Last Login</TableHead>
-                    <TableHead>MFA</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="w-[50px]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
+                  {users.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
+                        No members yet.
+                      </TableCell>
+                    </TableRow>
+                  )}
                   {users.map((user) => (
                     <TableRow key={user.id}>
                       <TableCell>
                         <div className="flex items-center gap-3">
                           <Avatar className="h-8 w-8">
-                            <AvatarImage src="" />
+                            <AvatarImage src={user.avatar ?? undefined} />
                             <AvatarFallback>
-                              {user.name.split(" ").map((n) => n[0]).join("")}
+                              {user.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
                             </AvatarFallback>
                           </Avatar>
                           <div>
@@ -383,30 +431,21 @@ export default function UsersPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge className={roleColors[user.role]}>
-                          {roles.find((r) => r.id === user.role)?.name || user.role}
+                        <Badge className={roleColors[user.roleName] ?? "bg-gray-100 text-gray-800"}>
+                          {user.roleName}
                         </Badge>
                       </TableCell>
-                      <TableCell>{user.department}</TableCell>
                       <TableCell className="text-sm text-muted-foreground">
-                        {user.lastLogin}
+                        {user.lastLoginAt
+                          ? new Date(user.lastLoginAt).toLocaleString("en-IN", {
+                              day: "2-digit", month: "short", year: "numeric",
+                              hour: "2-digit", minute: "2-digit",
+                            })
+                          : "Never"}
                       </TableCell>
                       <TableCell>
-                        {user.mfaEnabled ? (
-                          <Badge variant="outline" className="bg-green-50">
-                            <Lock className="mr-1 h-3 w-3" />
-                            Enabled
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline" className="bg-yellow-50">
-                            <Unlock className="mr-1 h-3 w-3" />
-                            Disabled
-                          </Badge>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Badge className={statusColors[user.status]}>
-                          {user.status}
+                        <Badge className={user.isActive ? statusColors.ACTIVE : statusColors.INACTIVE}>
+                          {user.isActive ? "ACTIVE" : "INACTIVE"}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -531,17 +570,17 @@ export default function UsersPage() {
                     <CardContent className="space-y-3">
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-muted-foreground">Users</span>
-                        <span className="font-medium">{role.users}</span>
+                        <span className="font-medium">{role.userCount}</span>
                       </div>
                       <div className="flex flex-wrap gap-1">
-                        {role.permissions.slice(0, 3).map((perm) => (
+                        {permissionLabels(role.permissions).slice(0, 3).map((perm) => (
                           <Badge key={perm} variant="outline" className="text-xs">
-                            {perm === "*" ? "Full Access" : perm}
+                            {perm}
                           </Badge>
                         ))}
-                        {role.permissions.length > 3 && (
+                        {permissionLabels(role.permissions).length > 3 && (
                           <Badge variant="outline" className="text-xs">
-                            +{role.permissions.length - 3} more
+                            +{permissionLabels(role.permissions).length - 3} more
                           </Badge>
                         )}
                       </div>

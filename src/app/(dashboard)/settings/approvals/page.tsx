@@ -1,6 +1,8 @@
 "use client";
 
+import * as React from "react";
 import { useState } from "react";
+import { useOrganization } from "@/frontend/hooks/use-organization";
 import { Button } from "@/frontend/components/ui/button";
 import { Input } from "@/frontend/components/ui/input";
 import {
@@ -48,6 +50,8 @@ import {
   XCircle,
   Clock,
   FileCheck,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -56,106 +60,33 @@ import {
   DropdownMenuTrigger,
 } from "@/frontend/components/ui/dropdown-menu";
 
-const workflows = [
-  {
-    id: "WF001",
-    name: "Purchase Order Approval",
-    module: "Purchases",
-    trigger: "Amount > ₹50,000",
-    steps: 2,
-    isActive: true,
-    pendingApprovals: 5,
-  },
-  {
-    id: "WF002",
-    name: "Payment Approval",
-    module: "Banking",
-    trigger: "All Payments",
-    steps: 1,
-    isActive: true,
-    pendingApprovals: 3,
-  },
-  {
-    id: "WF003",
-    name: "Expense Claim Approval",
-    module: "HR",
-    trigger: "Amount > ₹5,000",
-    steps: 2,
-    isActive: true,
-    pendingApprovals: 8,
-  },
-  {
-    id: "WF004",
-    name: "Voucher Approval",
-    module: "Accounting",
-    trigger: "Journal Entries",
-    steps: 1,
-    isActive: false,
-    pendingApprovals: 0,
-  },
-  {
-    id: "WF005",
-    name: "Leave Request Approval",
-    module: "HR",
-    trigger: "All Leave Requests",
-    steps: 1,
-    isActive: true,
-    pendingApprovals: 2,
-  },
-];
+/**
+ * Workflows and the current user's queue, from the approvals endpoint.
+ *
+ * Both lists used to be hardcoded — invented workflows (WF001 "Purchase
+ * Order Approval"), invented requests from invented colleagues, and four
+ * tiles reading 18 / 12 / 2 / 4. An administrator checking what needed
+ * their sign-off was shown someone else's fiction.
+ */
+interface Workflow {
+  id: string;
+  name: string;
+  entityType: string;
+  isActive: boolean;
+  steps: { id: string; stepNumber: number; approverType: string; amountLimit?: string | null }[];
+}
 
-const pendingApprovals = [
-  {
-    id: "APR001",
-    document: "PO-2024-045",
-    type: "Purchase Order",
-    requestedBy: "Rahul Sharma",
-    amount: 125000,
-    date: "2024-03-15",
-    status: "PENDING",
-    currentStep: "Manager Approval",
-  },
-  {
-    id: "APR002",
-    document: "PAY-2024-032",
-    type: "Payment",
-    requestedBy: "Priya Patel",
-    amount: 85000,
-    date: "2024-03-15",
-    status: "PENDING",
-    currentStep: "Finance Head Approval",
-  },
-  {
-    id: "APR003",
-    document: "EXP-2024-018",
-    type: "Expense Claim",
-    requestedBy: "Amit Kumar",
-    amount: 12500,
-    date: "2024-03-14",
-    status: "PENDING",
-    currentStep: "Manager Approval",
-  },
-  {
-    id: "APR004",
-    document: "LV-2024-089",
-    type: "Leave Request",
-    requestedBy: "Sneha Reddy",
-    amount: null,
-    date: "2024-03-14",
-    status: "APPROVED",
-    currentStep: "Completed",
-  },
-  {
-    id: "APR005",
-    document: "PO-2024-044",
-    type: "Purchase Order",
-    requestedBy: "Vikram Singh",
-    amount: 250000,
-    date: "2024-03-13",
-    status: "REJECTED",
-    currentStep: "Rejected by CFO",
-  },
-];
+interface PendingApproval {
+  id: string;
+  entityType: string;
+  entityId: string;
+  entityLabel?: string | null;
+  amount?: string | null;
+  status: string;
+  stepNumber?: number | null;
+  createdAt: string;
+  requester?: { id: string; name: string | null; email: string } | null;
+}
 
 const statusColors: Record<string, string> = {
   PENDING: "bg-yellow-100 text-yellow-800",
@@ -165,8 +96,67 @@ const statusColors: Record<string, string> = {
 };
 
 export default function ApprovalsPage() {
+  const { organizationId, isLoading: orgLoading } = useOrganization();
+  const [workflows, setWorkflows] = React.useState<Workflow[]>([]);
+  const [pendingApprovals, setPendingApprovals] = React.useState<PendingApproval[]>([]);
+  const [history, setHistory] = React.useState<PendingApproval[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!organizationId) return;
+    const controller = new AbortController();
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const get = async (qs: string) => {
+          const r = await fetch(`/api/organizations/${organizationId}/approvals?${qs}`, { signal: controller.signal });
+          if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Failed to load approvals");
+          return r.json();
+        };
+        const [wf, pend, hist] = await Promise.all([
+          get("view=workflows&limit=100"),
+          get("view=pending&limit=100"),
+          get("view=history&limit=200"),
+        ]);
+        setWorkflows((wf.data ?? []) as Workflow[]);
+        setPendingApprovals((pend.data ?? []) as PendingApproval[]);
+        setHistory((hist.data ?? []) as PendingApproval[]);
+      } catch (e) {
+        if ((e as Error).name === "AbortError") return;
+        setError((e as Error).message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [organizationId]);
+
   const [searchTerm, setSearchTerm] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+
+  const today = new Date().toDateString();
+  const historyToday = {
+    approved: history.filter((a) => a.status === "APPROVED" && new Date(a.createdAt).toDateString() === today).length,
+    rejected: history.filter((a) => a.status === "REJECTED" && new Date(a.createdAt).toDateString() === today).length,
+  };
+
+  if (orgLoading || loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-96 gap-3">
+        <AlertCircle className="h-10 w-10 text-muted-foreground" />
+        <p className="text-muted-foreground">{error}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -304,7 +294,7 @@ export default function ApprovalsPage() {
             <Clock className="h-4 w-4 text-yellow-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">18</div>
+            <div className="text-2xl font-bold">{pendingApprovals.length}</div>
             <p className="text-xs text-muted-foreground">Awaiting your action</p>
           </CardContent>
         </Card>
@@ -314,7 +304,7 @@ export default function ApprovalsPage() {
             <CheckCircle className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">12</div>
+            <div className="text-2xl font-bold">{historyToday.approved}</div>
             <p className="text-xs text-muted-foreground">Documents approved</p>
           </CardContent>
         </Card>
@@ -324,7 +314,7 @@ export default function ApprovalsPage() {
             <XCircle className="h-4 w-4 text-red-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">2</div>
+            <div className="text-2xl font-bold">{historyToday.rejected}</div>
             <p className="text-xs text-muted-foreground">This week</p>
           </CardContent>
         </Card>
@@ -334,7 +324,7 @@ export default function ApprovalsPage() {
             <GitBranch className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">4</div>
+            <div className="text-2xl font-bold">{workflows.filter((w) => w.isActive).length}</div>
             <p className="text-xs text-muted-foreground">Of 5 configured</p>
           </CardContent>
         </Card>
@@ -344,7 +334,7 @@ export default function ApprovalsPage() {
         <TabsList>
           <TabsTrigger value="pending">
             Pending Approvals
-            <Badge variant="secondary" className="ml-2">18</Badge>
+            <Badge variant="secondary" className="ml-2">{pendingApprovals.length}</Badge>
           </TabsTrigger>
           <TabsTrigger value="workflows">Workflows</TabsTrigger>
           <TabsTrigger value="history">Approval History</TabsTrigger>
@@ -395,23 +385,23 @@ export default function ApprovalsPage() {
                     <TableRow key={approval.id}>
                       <TableCell className="font-medium">
                         <span className="text-blue-600 cursor-pointer hover:underline">
-                          {approval.document}
+                          {approval.entityLabel ?? approval.entityId}
                         </span>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline">{approval.type}</Badge>
+                        <Badge variant="outline">{approval.entityType}</Badge>
                       </TableCell>
-                      <TableCell>{approval.requestedBy}</TableCell>
+                      <TableCell>{approval.requester?.name ?? approval.requester?.email ?? "—"}</TableCell>
                       <TableCell className="text-right">
                         {approval.amount
-                          ? `₹${approval.amount.toLocaleString()}`
+                          ? `₹${Number(approval.amount).toLocaleString("en-IN")}`
                           : "-"}
                       </TableCell>
                       <TableCell>
-                        {new Date(approval.date).toLocaleDateString()}
+                        {new Date(approval.createdAt).toLocaleDateString("en-IN")}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
-                        {approval.currentStep}
+                        {approval.stepNumber ? `Step ${approval.stepNumber}` : "—"}
                       </TableCell>
                       <TableCell>
                         <Badge className={statusColors[approval.status]}>
@@ -468,14 +458,16 @@ export default function ApprovalsPage() {
                     <TableRow key={workflow.id}>
                       <TableCell className="font-medium">{workflow.name}</TableCell>
                       <TableCell>
-                        <Badge variant="outline">{workflow.module}</Badge>
+                        <Badge variant="outline">{workflow.entityType}</Badge>
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
-                        {workflow.trigger}
+                        {workflow.steps.find((st) => st.amountLimit)
+                          ? `Above ₹${Number(workflow.steps.find((st) => st.amountLimit)!.amountLimit).toLocaleString("en-IN")}`
+                          : "All documents"}
                       </TableCell>
                       <TableCell className="text-center">
                         <div className="flex items-center justify-center gap-1">
-                          {Array.from({ length: workflow.steps }).map((_, i) => (
+                          {workflow.steps.map((_, i) => (
                             <div
                               key={i}
                               className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center text-xs"
@@ -486,13 +478,12 @@ export default function ApprovalsPage() {
                         </div>
                       </TableCell>
                       <TableCell className="text-center">
-                        {workflow.pendingApprovals > 0 ? (
-                          <Badge variant="secondary">
-                            {workflow.pendingApprovals}
-                          </Badge>
-                        ) : (
-                          "-"
-                        )}
+                        {(() => {
+                          const n = pendingApprovals.filter(
+                            (a) => a.entityType === workflow.entityType
+                          ).length;
+                          return n > 0 ? <Badge variant="secondary">{n}</Badge> : "-";
+                        })()}
                       </TableCell>
                       <TableCell>
                         <Badge

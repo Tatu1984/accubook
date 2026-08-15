@@ -77,6 +77,9 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
               email: true,
               avatar: true,
               createdAt: true,
+              // Surfaced so the members screen can show when someone last
+              // signed in, rather than an invented timestamp.
+              lastLoginAt: true,
             },
           },
           role: {
