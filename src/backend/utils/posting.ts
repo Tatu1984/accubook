@@ -293,12 +293,52 @@ export class LedgerScopeError extends Error {
   }
 }
 
+/**
+ * A set of entries whose debits and credits disagree.
+ *
+ * Double entry is the one invariant the whole ledger rests on: if a single
+ * unbalanced voucher reaches the books, the trial balance stops agreeing
+ * and every statement derived from it is wrong, with nothing to point at
+ * which entry did it.
+ *
+ * This was not hypothetical. `buildPayrollJournal` matches payslip
+ * deduction components by their exact display name, so a deduction the
+ * user had named "PF" rather than "PF (Employee)" was left off the credit
+ * side. The resulting voucher was written with totalDebit 36,800 against
+ * totalCredit 35,000 and posted without complaint; the trial balance was
+ * out by the difference from that month onward.
+ */
+export class UnbalancedEntriesError extends Error {
+  constructor(
+    public readonly totalDebit: Prisma.Decimal,
+    public readonly totalCredit: Prisma.Decimal
+  ) {
+    super(
+      `Refusing to post: debits (${totalDebit.toString()}) do not equal ` +
+        `credits (${totalCredit.toString()}), a difference of ` +
+        `${totalDebit.minus(totalCredit).toString()}.`
+    );
+    this.name = "UnbalancedEntriesError";
+  }
+}
+
 export async function applyLedgerEntries(
   tx: Tx,
   organizationId: string,
   entries: { ledgerId: string; debitAmount: Prisma.Decimal; creditAmount: Prisma.Decimal }[]
 ): Promise<void> {
   if (entries.length === 0) return;
+
+  // Every posting path in the application funnels through here — invoices,
+  // bills, payments, receipts, payroll, manufacturing, the Tally import and
+  // hand-written vouchers. Checking the invariant at this one point means no
+  // caller can bypass it, and a new posting path is covered the day it is
+  // written.
+  const totalDebit = sum(entries.map((e) => D(e.debitAmount)));
+  const totalCredit = sum(entries.map((e) => D(e.creditAmount)));
+  if (!totalDebit.equals(totalCredit)) {
+    throw new UnbalancedEntriesError(totalDebit, totalCredit);
+  }
 
   const ledgerIds = [...new Set(entries.map((e) => e.ledgerId))];
   // Scoped by organizationId, not just by id. Without this a caller could

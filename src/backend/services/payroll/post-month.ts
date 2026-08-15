@@ -32,12 +32,14 @@ export type PayslipLineForJv = {
   grossSalary: DecimalLike;
   netSalary: DecimalLike;
   /**
-   * The Payslip.deductions JSON column — array of `{component, amount}`.
+   * The Payslip.deductions JSON column. Canonically `{component, amount}`,
+   * but rows written by `POST /payroll` before it was corrected carry
+   * `{name, amount}`, so both are accepted here.
    * Components we look for: "PF (Employee)", "ESI (Employee)", "TDS",
    * "Professional Tax", "Loss of Pay". Anything else is ignored for
    * posting (treated as informational).
    */
-  deductions: Array<{ component: string; amount: number | string }>;
+  deductions: Array<{ component?: string; name?: string; amount: number | string }>;
   /**
    * Optional employer-side amounts. If absent we treat them as zero —
    * the calling endpoint passes them in based on calculatePayroll's
@@ -80,17 +82,72 @@ const PF_PAYABLE = "PF Payable";
 const ESI_PAYABLE = "ESI Payable";
 const PT_PAYABLE = "Professional Tax Payable";
 const TDS_PAYABLE = "TDS Payable";
+const OTHER_DEDUCTIONS_PAYABLE = "Employee Deductions Payable";
 
 const GROUP_INDIRECT = "Indirect Expenses";
 const GROUP_CURRENT_LIAB = "Current Liabilities";
 const GROUP_DUTIES = "Duties & Taxes";
 
+/**
+ * Components this journal knows how to route, and the spellings seen in
+ * the wild for each.
+ *
+ * The calculator writes the canonical name, but a payslip can also be
+ * created by hand through `POST /payroll`, where the operator types the
+ * component themselves.
+ */
+const KNOWN_DEDUCTIONS: Record<string, string[]> = {
+  "PF (Employee)": ["pf (employee)", "pf", "epf", "provident fund", "pf employee"],
+  "ESI (Employee)": ["esi (employee)", "esi", "esi employee"],
+  TDS: ["tds", "income tax", "tds deducted"],
+  "Professional Tax": ["professional tax", "pt", "p tax", "ptax"],
+  "Loss of Pay": ["loss of pay", "lop"],
+};
+
+/**
+ * Read a line's component name.
+ *
+ * `POST /payroll` stored these as `{ name, amount }` while the calculator
+ * writes `{ component, amount }`, and rows in both shapes are already on
+ * disk. Reading either keeps historical payslips postable; the route now
+ * normalises to `component` on the way in, so new rows are consistent.
+ */
+const componentOf = (d: { component?: string; name?: string }) =>
+  d.component ?? d.name ?? "";
+
+const normalise = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
+
+/** Which canonical component this deduction belongs to, if any. */
+function classify(rawComponent: string): string | null {
+  if (!rawComponent) return null;
+  const n = normalise(rawComponent);
+  for (const [canonical, aliases] of Object.entries(KNOWN_DEDUCTIONS)) {
+    if (aliases.includes(n)) return canonical;
+  }
+  return null;
+}
+
 function deductionAmount(
   deds: PayslipLineForJv["deductions"],
   component: string
 ): Prisma.Decimal {
-  const found = deds.find((d) => d.component === component);
-  return found ? D(found.amount) : D(0);
+  return sum(
+    deds.filter((d) => classify(componentOf(d)) === component).map((d) => D(d.amount))
+  );
+}
+
+/**
+ * Everything deducted that this journal has no specific payable for.
+ *
+ * The credit side used to be assembled purely from named lookups, so any
+ * deduction the journal did not recognise was simply left out — the debit
+ * still carried the full gross, and the voucher went to the books short by
+ * the unmatched amount. Sweeping the remainder into one payable makes the
+ * entry balance by construction, whatever an operator calls a deduction,
+ * and leaves the amount visible in a real ledger rather than lost.
+ */
+function unclassifiedDeductions(deds: PayslipLineForJv["deductions"]): Prisma.Decimal {
+  return sum(deds.filter((d) => classify(componentOf(d)) === null).map((d) => D(d.amount)));
 }
 
 export function buildPayrollJournal(payslips: PayslipLineForJv[]): PayrollJournal {
@@ -103,6 +160,7 @@ export function buildPayrollJournal(payslips: PayslipLineForJv[]): PayrollJourna
   const lop = sum(payslips.map((p) => deductionAmount(p.deductions, "Loss of Pay")));
   const pfEmployer = sum(payslips.map((p) => D(p.employerPf ?? 0)));
   const esiEmployer = sum(payslips.map((p) => D(p.employerEsi ?? 0)));
+  const otherDeductions = sum(payslips.map((p) => unclassifiedDeductions(p.deductions)));
 
   const wagesExpense = gross.minus(lop);
 
@@ -115,6 +173,7 @@ export function buildPayrollJournal(payslips: PayslipLineForJv[]): PayrollJourna
     { ledgerName: ESI_PAYABLE, groupName: GROUP_DUTIES, debit: D(0), credit: esiEmployee.plus(esiEmployer) },
     { ledgerName: PT_PAYABLE, groupName: GROUP_DUTIES, debit: D(0), credit: professionalTax },
     { ledgerName: TDS_PAYABLE, groupName: GROUP_DUTIES, debit: D(0), credit: tds },
+    { ledgerName: OTHER_DEDUCTIONS_PAYABLE, groupName: GROUP_CURRENT_LIAB, debit: D(0), credit: otherDeductions },
   ];
 
   // Drop zero-amount lines — no point posting "Cr ESI Payable 0" when no

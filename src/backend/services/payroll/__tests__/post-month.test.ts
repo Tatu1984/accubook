@@ -126,3 +126,88 @@ describe("buildPayrollJournal", () => {
     expect(jv.totals.pfEmployee.toString()).toBe("5400");
   });
 });
+
+/**
+ * A payslip created by hand through `POST /payroll` carries whatever the
+ * operator typed as the deduction component. The journal used to look
+ * those up by exact name, so anything it did not recognise was dropped
+ * from the credit side while the debit still carried the full gross.
+ *
+ * Observed on a real cycle: a deduction named "PF" instead of
+ * "PF (Employee)" produced a voucher of Dr 36,800 against Cr 35,000, and
+ * it posted. The trial balance was out by 1,800 from that month on.
+ */
+describe("buildPayrollJournal — deductions it was not expecting", () => {
+  const base = {
+    basicSalary: 25000,
+    grossSalary: 35000,
+    netSalary: 33200, // 35,000 gross less 1,800 deducted
+    employerPf: 1800,
+    employerEsi: 0,
+  };
+
+  it("balances when a known deduction is spelled loosely", () => {
+    const jv = buildPayrollJournal([
+      { ...base, deductions: [{ component: "PF", amount: 1800 }] },
+    ]);
+    expect(jv.totalDebit.toString()).toBe(jv.totalCredit.toString());
+    // "PF" is the employee's provident fund, so it belongs in PF Payable
+    // alongside the employer's share: 1,800 + 1,800.
+    const pf = jv.lines.find((l) => l.ledgerName === "PF Payable");
+    expect(pf?.credit.toString()).toBe("3600");
+  });
+
+  it("balances when a deduction is one nothing knows about", () => {
+    const jv = buildPayrollJournal([
+      {
+        ...base,
+        netSalary: 32200,
+        deductions: [
+          { component: "PF (Employee)", amount: 1800 },
+          { component: "Canteen recovery", amount: 1000 },
+        ],
+      },
+    ]);
+    expect(jv.totalDebit.toString()).toBe(jv.totalCredit.toString());
+    // Parked in a real liability rather than silently dropped.
+    const other = jv.lines.find((l) => l.ledgerName === "Employee Deductions Payable");
+    expect(other?.credit.toString()).toBe("1000");
+  });
+
+  it("still balances with several unrecognised deductions at once", () => {
+    const jv = buildPayrollJournal([
+      {
+        ...base,
+        netSalary: 30700,
+        deductions: [
+          { component: "epf", amount: 1800 },
+          { component: "Canteen", amount: 1000 },
+          { component: "Loan repayment", amount: 1500 },
+        ],
+      },
+    ]);
+    expect(jv.totalDebit.toString()).toBe(jv.totalCredit.toString());
+    expect(
+      jv.lines.find((l) => l.ledgerName === "Employee Deductions Payable")?.credit.toString()
+    ).toBe("2500");
+  });
+
+  it("keeps the canonical spellings working exactly as before", () => {
+    const jv = buildPayrollJournal([
+      {
+        ...base,
+        netSalary: 28500,
+        deductions: [
+          { component: "PF (Employee)", amount: 1800 },
+          { component: "TDS", amount: 4500 },
+          { component: "Professional Tax", amount: 200 },
+        ],
+      },
+    ]);
+    expect(jv.totalDebit.toString()).toBe(jv.totalCredit.toString());
+    expect(jv.lines.find((l) => l.ledgerName === "TDS Payable")?.credit.toString()).toBe("4500");
+    expect(jv.lines.find((l) => l.ledgerName === "Professional Tax Payable")?.credit.toString()).toBe("200");
+    // Nothing unmatched, so no catch-all line is emitted at all.
+    expect(jv.lines.find((l) => l.ledgerName === "Employee Deductions Payable")).toBeUndefined();
+  });
+});

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth";
 import { logger } from "@/backend/utils/logger";
@@ -8,15 +9,30 @@ import { logger } from "@/backend/utils/logger";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const earningSchema = z.object({
-  name: z.string(),
-  amount: z.number(),
-});
+/**
+ * A payslip line. `component` is the canonical key — it is what the payroll
+ * calculator writes and what `buildPayrollJournal` reads out of the stored
+ * JSON when it books the month.
+ *
+ * This route used to accept and store `{ name, amount }`, so a payslip
+ * entered here was unreadable to the journal: every deduction came back
+ * `undefined`, the entire credit side was dropped, and the month posted as
+ * an unbalanced voucher. `name` is still accepted so existing callers keep
+ * working, and is normalised to `component` on the way in.
+ */
+const payslipLineSchema = z
+  .object({
+    component: optional(z.string().min(1)),
+    name: optional(z.string().min(1)),
+    amount: z.number(),
+  })
+  .refine((v) => v.component || v.name, {
+    message: "Each earning/deduction needs a component name",
+  })
+  .transform((v) => ({ component: (v.component ?? v.name)!, amount: v.amount }));
 
-const deductionSchema = z.object({
-  name: z.string(),
-  amount: z.number(),
-});
+const earningSchema = payslipLineSchema;
+const deductionSchema = payslipLineSchema;
 
 const createPayslipSchema = z.object({
   employeeId: z.string().min(1, "Employee is required"),
