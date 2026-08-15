@@ -535,13 +535,13 @@ out every existing user. Re-seeding rewrites the system roles to the new vocabul
 
 ## 10b. Deployment hazards discovered 2026-08-14
 
-- **A branch push migrates the production database.** `vercel.json`'s
-  `buildCommand` is `prisma migrate deploy && prisma generate && next build`,
-  and preview deployments share the single production `DATABASE_URL`. Pushing
-  the PR-6 branch applied migrations 12 and 13 to production before anything
-  merged. Additive columns made that harmless, but a destructive migration
-  would hit live customer books from an unmerged PR. **Give previews their own
-  Neon branch.**
+- ~~**A branch push migrates the production database.**~~ **FIXED.** The build
+  now runs `scripts/migrate-on-deploy.mjs`, which migrates only when
+  `VERCEL_ENV=production`. Previews skip and say so. Once previews have a
+  database of their own, set `ALLOW_PREVIEW_MIGRATE=true` on the Preview
+  environment to migrate that one. Giving previews a separate Neon branch is
+  still worth doing — they currently *read* production data — but they can no
+  longer alter its schema.
 - **Concurrent builds fail on the Prisma advisory lock.** The PR-6 merge built
   a preview and a production deployment at the same moment; both ran
   `migrate deploy`, contended for `pg_advisory_lock(72707369)`, and died with
@@ -558,6 +558,25 @@ out every existing user. Re-seeding rewrites the system roles to the new vocabul
   `NEXT_PUBLIC_DEMO_EMAIL`, `NEXT_PUBLIC_DEMO_PASSWORD` set on Vercel. They are
   `NEXT_PUBLIC_*`, so they are inlined at build time — a redeploy is required
   after setting them, and whatever is set is public to every visitor of /login.
+
+## 10c. Verification
+
+- `npm test` — 525 unit tests. Fast, no database.
+- `npm run test:e2e` — **the one that matters.** Builds a throwaway database,
+  migrates, seeds, starts the app on port 3117, signs in, and drives a whole
+  cycle through the real HTTP API: masters, bank account with an opening
+  balance, intra/inter-state invoices, receipt, over-collection refusal, bill,
+  goods receipt, payroll post — then asserts every voucher balances, the trial
+  balance agrees (including at year end, where a month-end dated journal hides),
+  the balance sheet balances *and is non-zero*, cost of sales sits above the
+  gross profit line, the bank register agrees with the ledger, and the
+  e-invoice payload generates. 27 invariants. Drops its database afterwards
+  and never reads `.env`.
+
+  Every serious defect found in review passed the unit suite and would have
+  been caught by this. Verified by reintroducing the payroll bug: the suite
+  fails with `Dr 36,800 vs Cr 35,000` and a trial balance out by 1,800 at year
+  end — exactly the original symptom. **Run it before any release.**
 
 ## 11. Critical "do not break"
 
