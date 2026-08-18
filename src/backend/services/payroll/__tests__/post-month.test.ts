@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { buildPayrollJournal, type PayslipLineForJv } from "../post-month";
+import {
+  buildPayrollJournal,
+  PayrollJournalImbalanceError,
+  type PayslipLineForJv,
+} from "../post-month";
 
 const makePayslip = (overrides: Partial<PayslipLineForJv> = {}): PayslipLineForJv => ({
   basicSalary: 30000,
@@ -209,5 +213,104 @@ describe("buildPayrollJournal — deductions it was not expecting", () => {
     expect(jv.lines.find((l) => l.ledgerName === "Professional Tax Payable")?.credit.toString()).toBe("200");
     // Nothing unmatched, so no catch-all line is emitted at all.
     expect(jv.lines.find((l) => l.ledgerName === "Employee Deductions Payable")).toBeUndefined();
+  });
+});
+
+/**
+ * The accounting invariant.
+ *
+ * `buildPayrollJournal` computed `totalDebit` and `totalCredit` and handed
+ * both back without ever comparing them, so an unbalanced journal reached
+ * `tx.voucher.create` and posted. The deduction-shape work upstream fixed
+ * the case that originally exposed this (a `{name}`-keyed payslip whose
+ * deductions all resolved to zero), but it could not fix the general
+ * problem: the debit side is built from gross plus employer contributions
+ * and the credit side from the stored `netSalary`, which are independent
+ * inputs that nothing reconciles.
+ */
+describe("buildPayrollJournal — Dr = Cr invariant", () => {
+  const base: PayslipLineForJv = {
+    basicSalary: 30000,
+    grossSalary: 50000,
+    netSalary: 41000,
+    deductions: [],
+    employerPf: 1800,
+    employerEsi: 0,
+  };
+
+  it("refuses a journal whose netSalary disagrees with its deductions", () => {
+    // Gross 50000 with only 1000 deducted implies net 49000; this payslip
+    // claims 10000. Dr 51800 vs Cr 12800 — the exact shape that used to post.
+    expect(() =>
+      buildPayrollJournal([
+        { ...base, netSalary: 10000, deductions: [{ component: "TDS", amount: 1000 }] },
+      ])
+    ).toThrow(PayrollJournalImbalanceError);
+  });
+
+  it("carries both totals on the error so the imbalance is diagnosable", () => {
+    try {
+      buildPayrollJournal([
+        { ...base, netSalary: 10000, deductions: [{ component: "TDS", amount: 1000 }] },
+      ]);
+      expect.unreachable("expected an imbalance to be thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(PayrollJournalImbalanceError);
+      const e = err as PayrollJournalImbalanceError;
+      expect(e.totalDebit.toString()).toBe("51800");
+      expect(e.totalCredit.toString()).toBe("12800");
+      expect(e.message).toMatch(/does not balance/i);
+    }
+  });
+
+  it("throws before returning, so no journal is available to persist", () => {
+    // The route's persistence sequence is build -> $transaction -> create.
+    // Throwing out of the pure builder means the transaction is never even
+    // opened, which is what guarantees no partial accounting state.
+    let jv: unknown;
+    expect(() => {
+      jv = buildPayrollJournal([{ ...base, netSalary: 1 }]);
+    }).toThrow(PayrollJournalImbalanceError);
+    expect(jv).toBeUndefined();
+  });
+
+  it("still accepts a correctly balanced batch (no false positives)", () => {
+    const jv = buildPayrollJournal([
+      {
+        ...base,
+        netSalary: 41000,
+        deductions: [
+          { component: "PF (Employee)", amount: 1800 },
+          { component: "TDS", amount: 7200 },
+        ],
+      },
+    ]);
+    expect(jv.totalDebit.equals(jv.totalCredit)).toBe(true);
+    expect(jv.totalDebit.toString()).toBe("51800");
+  });
+
+  it("still accepts the normalised legacy `name` shape", () => {
+    // Regression guard for the original defect: these resolved to zero
+    // before the upstream normalisation landed, producing Dr 51800 /
+    // Cr 42800. They must keep balancing — and must not trip the new
+    // assertion, which would be a regression of a different kind.
+    const jv = buildPayrollJournal([
+      {
+        ...base,
+        netSalary: 41000,
+        deductions: [
+          { name: "PF (Employee)", amount: 1800 },
+          { name: "TDS", amount: 7200 },
+        ],
+      },
+    ]);
+    expect(jv.totalDebit.equals(jv.totalCredit)).toBe(true);
+    expect(jv.lines.find((l) => l.ledgerName === "TDS Payable")?.credit.toString()).toBe("7200");
+  });
+
+  it("an empty batch is balanced at zero, not an imbalance", () => {
+    const jv = buildPayrollJournal([]);
+    expect(jv.totalDebit.toString()).toBe("0");
+    expect(jv.totalCredit.toString()).toBe("0");
   });
 });

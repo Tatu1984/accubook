@@ -11,7 +11,11 @@ import {
   getVoucherTypeByCode,
 } from "@/backend/utils/posting";
 import { writeAudit } from "@/backend/utils/audit";
-import { buildPayrollJournal, type PayslipLineForJv } from "@/backend/services/payroll/post-month";
+import {
+  buildPayrollJournal,
+  PayrollJournalImbalanceError,
+  type PayslipLineForJv,
+} from "@/backend/services/payroll/post-month";
 import {
   calculatePF,
   calculateESI,
@@ -266,6 +270,16 @@ export const POST = withOrgAuth(async (request, { orgId, userId, orgUser }) => {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
+    }
+    // An unbalanced journal is bad input (a payslip whose netSalary
+    // disagrees with its own gross and deductions), not a server fault —
+    // report it as such, with both totals so the operator can find the
+    // offending payslip instead of guessing.
+    if (error instanceof PayrollJournalImbalanceError) {
+      return badRequest(error.message, {
+        totalDebit: error.totalDebit.toString(),
+        totalCredit: error.totalCredit.toString(),
+      });
     }
     if (error instanceof Error && /not configured|No fiscal year/i.test(error.message)) {
       return badRequest(error.message);
