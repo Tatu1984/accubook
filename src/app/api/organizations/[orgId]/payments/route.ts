@@ -169,19 +169,41 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
       let tdsRationale: string | null = null;
       if (validatedData.tdsSection) {
         const deducteeType: DeducteeType = validatedData.deducteeType ?? "COMPANY_OTHER";
-        // YTD aggregate of past payments to this party in the current FY,
-        // for the threshold check. We sum payments dated in the FY so far
-        // (excluding this one — caller should not double-count).
-        const ytd = await tx.payment.aggregate({
+        // YTD aggregate for the threshold check, scoped to THIS SECTION.
+        //
+        // Every TDS threshold in `TDS_RULES` is per-section: 194C is
+        // ₹1,00,000 a year, 194J ₹30,000 a single bill, 194Q ₹50,00,000 a
+        // year. `computeTds` compares this aggregate against the threshold
+        // of the section being deducted, so pooling every payment to the
+        // party regardless of section makes an unrelated 194J fee count
+        // towards the 194C ceiling. The threshold then trips early and we
+        // withhold tax that is not yet due — money taken from a vendor and
+        // paid to the department on their behalf before the law requires
+        // it. `postBillToGl` already scopes its aggregate this way.
+        //
+        // The section lives on `TdsDeduction`, not on `Payment` (a payment
+        // carries no section column), so the history is summed there.
+        // `baseAmount` is the payment amount the deduction was computed on
+        // and is written inside this same transaction, so a prior payment
+        // is always visible here.
+        //
+        // Forward-only, deliberately: a row exists only where tax was
+        // actually deducted, so payments made below a cumulative threshold
+        // (194Q's ₹50L) do not contribute to the aggregate. That
+        // under-counts rather than over-counts — it defers the deduction
+        // instead of taking it early — and matches the same limitation
+        // `postBillToGl` documents. Recording section on every payment is
+        // a schema change and belongs in its own task.
+        const ytd = await tx.tdsDeduction.aggregate({
           where: {
             organizationId: orgId,
             partyId: party.id,
-            date: { gte: fy.startDate, lte: validatedData.date },
-            status: "COMPLETED",
+            section: validatedData.tdsSection,
+            deductedAt: { gte: fy.startDate, lte: validatedData.date },
           },
-          _sum: { amount: true },
+          _sum: { baseAmount: true },
         });
-        const ytdAggregate = D(ytd._sum.amount ?? 0);
+        const ytdAggregate = D(ytd._sum.baseAmount ?? 0);
         const tdsResult = computeTds({
           section: validatedData.tdsSection as TdsSectionCode,
           deducteeType,
