@@ -153,3 +153,136 @@ export async function createBankAccount(
   });
   return account;
 }
+
+export type WorkOrderFixture = {
+  organizationId: string;
+  userId: string;
+  workOrderId: string;
+  finishedItemId: string;
+  warehouseId: string;
+  /** Total value of raw material issued to the WO. */
+  issuedValue: number;
+};
+
+/**
+ * A work order sitting at IN_PROGRESS with material already issued —
+ * the precondition `POST .../work-orders/[id]/complete` looks for.
+ *
+ * The ISSUE stock movement is created directly rather than by driving the
+ * issue route, so the fixture states exactly what has been consumed. The
+ * completion path only ever reads those movements back, so this is the
+ * same input it would see in production.
+ */
+export async function createWorkOrderFixture(
+  db: PrismaClient,
+  opts: { issuedValue?: number; plannedQuantity?: number } = {}
+): Promise<WorkOrderFixture> {
+  const issuedValue = opts.issuedValue ?? 5000;
+  const plannedQuantity = opts.plannedQuantity ?? 10;
+
+  await ensureVoucherTypes(db);
+  await db.currency.upsert({
+    where: { code: "INR" },
+    update: {},
+    create: { code: "INR", name: "Indian Rupee", symbol: "₹" },
+  });
+
+  const user = await db.user.create({
+    data: {
+      email: `wo-${Date.now()}-${Math.round(performance.now())}@test.local`,
+      name: "WO Tester",
+      isActive: true,
+    },
+  });
+  const org = await db.organization.create({
+    data: { name: "WO Concurrency Co", isActive: true },
+  });
+
+  const provisioned = await db.$transaction(async (tx) => {
+    await ensureBaseCurrency(tx, org.id);
+    return provisionOrganization(tx, {
+      organizationId: org.id,
+      on: new Date(Date.UTC(2025, 5, 15)),
+    });
+  });
+
+  const unit = await db.unitOfMeasure.create({
+    data: { name: "Piece", symbol: `PC${Date.now() % 100000}` },
+  });
+
+  const finished = await db.item.create({
+    data: {
+      organizationId: org.id,
+      name: "Finished Widget",
+      sku: `FG-${Date.now()}`,
+      type: "GOODS",
+      primaryUnitId: unit.id,
+      isActive: true,
+    },
+  });
+  const raw = await db.item.create({
+    data: {
+      organizationId: org.id,
+      name: "Raw Material",
+      sku: `RM-${Date.now()}`,
+      type: "GOODS",
+      primaryUnitId: unit.id,
+      isActive: true,
+    },
+  });
+
+  const bom = await db.bom.create({
+    data: {
+      organizationId: org.id,
+      itemId: finished.id,
+      bomNumber: `BOM-${Date.now()}`,
+      outputQuantity: plannedQuantity,
+      outputUnitId: unit.id,
+      isActive: true,
+      components: {
+        create: [
+          { itemId: raw.id, quantity: plannedQuantity, unitId: unit.id, unitCost: issuedValue / plannedQuantity },
+        ],
+      },
+    },
+  });
+
+  const workOrder = await db.workOrder.create({
+    data: {
+      organizationId: org.id,
+      workOrderNumber: `WO-${Date.now()}`,
+      bomId: bom.id,
+      itemId: finished.id,
+      plannedQuantity,
+      warehouseId: provisioned.warehouseId,
+      status: "IN_PROGRESS",
+      startDate: new Date(Date.UTC(2025, 5, 10)),
+    },
+  });
+
+  // Material already issued to the WO. `complete` sums these to derive
+  // the WIP value it relieves.
+  await db.stockMovement.create({
+    data: {
+      itemId: raw.id,
+      fromWarehouseId: provisioned.warehouseId,
+      unitId: unit.id,
+      movementType: "ISSUE",
+      quantity: plannedQuantity,
+      rate: issuedValue / plannedQuantity,
+      totalValue: issuedValue,
+      referenceType: "WORK_ORDER",
+      referenceId: workOrder.id,
+      date: new Date(Date.UTC(2025, 5, 12)),
+    },
+  });
+
+  return {
+    organizationId: org.id,
+    userId: user.id,
+    workOrderId: workOrder.id,
+    finishedItemId: finished.id,
+    warehouseId: provisioned.warehouseId,
+    issuedValue,
+  };
+}
