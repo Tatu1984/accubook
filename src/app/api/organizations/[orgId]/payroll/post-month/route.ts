@@ -45,6 +45,27 @@ const postMonthSchema = z.object({
  * grossSalary using the same helpers `calculatePayroll` uses, since the
  * Payslip JSON does not persist employer contributions on its own.
  */
+/**
+ * Raised when a concurrent request posted the month first.
+ *
+ * Not an error in the caller's request — the month simply got booked by
+ * somebody else a moment earlier — so it surfaces as the same 409 the
+ * sequential path already returns for an already-posted period, rather
+ * than as a 500.
+ */
+class PayrollAlreadyPostedError extends Error {
+  constructor(
+    public readonly month: number,
+    public readonly year: number
+  ) {
+    super(
+      `Payroll for ${month}/${year} was posted by a concurrent request. ` +
+        `No changes were made by this one.`
+    );
+    this.name = "PayrollAlreadyPostedError";
+  }
+}
+
 export const POST = withOrgAuth(async (request, { orgId, userId, orgUser }) => {
   // Permission gate — anomaly: every other GL-posting POST gates on
   // approve-class permission; payroll was missing it. Closes audit
@@ -213,10 +234,35 @@ export const POST = withOrgAuth(async (request, { orgId, userId, orgUser }) => {
       // 6. Link every included payslip to this voucher and move them
       //    to PROCESSED. PAID is a separate later step (when net salary
       //    actually leaves the bank).
-      await tx.payslip.updateMany({
-        where: { id: { in: eligible.map((p) => p.id) } },
+      // Claim the payslips, re-asserting the precondition the eligibility
+      // read established. That read (`voucherId: null`) happens before this
+      // transaction opens, so two requests arriving together both see the
+      // same unposted month and both build the same journal. Repeating
+      // `voucherId: null` here turns the write into a conditional claim:
+      // whichever transaction commits first stamps the rows, and the loser
+      // updates nothing.
+      //
+      // `Payslip.voucherId` cannot carry a unique constraint — many
+      // payslips share one voucher — so the database will not refuse the
+      // second write on its own. Counting the rows actually claimed is
+      // what makes the loser detectable, mirroring the conditional
+      // `updateMany` + count check that work-order issue already uses
+      // against concurrent stock depletion.
+      const claimed = await tx.payslip.updateMany({
+        where: {
+          id: { in: eligible.map((p) => p.id) },
+          voucherId: null,
+        },
         data: { voucherId: voucher.id, status: "PROCESSED" },
       });
+
+      if (claimed.count !== eligible.length) {
+        // Another request posted this month between our read and this
+        // write. Throwing unwinds the whole transaction — the voucher,
+        // its entries and the ledger movements applied above all roll
+        // back — so the month is booked exactly once.
+        throw new PayrollAlreadyPostedError(month, year);
+      }
 
       // 7. Audit trail.
       await writeAudit(tx, {
@@ -270,6 +316,12 @@ export const POST = withOrgAuth(async (request, { orgId, userId, orgUser }) => {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
+    }
+    // Lost the race to another request. The transaction rolled back, so
+    // there is nothing to undo — report the same 409 the sequential
+    // already-posted path returns.
+    if (error instanceof PayrollAlreadyPostedError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
     }
     // An unbalanced journal is bad input (a payslip whose netSalary
     // disagrees with its own gross and deductions), not a server fault —
