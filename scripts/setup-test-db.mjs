@@ -57,4 +57,10 @@ try {
   process.exit(1);
 }
 
-console.log(`\nReady. Run the suite with:\n  TEST_DATABASE_URL="${url(DB)}" npm run test:integration\n`);
+console.log(
+  `\nReady.\n\n` +
+    `Point DATABASE_URL in .env at the test database:\n` +
+    `  DATABASE_URL="${url(DB)}"\n\n` +
+    `then run:  npm run test:integration\n\n` +
+    `Switch DATABASE_URL back to the development database afterwards.\n`
+);

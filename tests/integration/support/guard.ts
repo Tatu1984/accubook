@@ -3,8 +3,15 @@
  *
  * Integration tests truncate every table between cases. Pointing them at
  * the development or production database would therefore destroy real
- * books, so this refuses to let the suite start unless the configured
- * database can be positively identified as the dedicated test database.
+ * books, so this refuses to let the suite start unless `DATABASE_URL` can
+ * be positively identified as the dedicated test database.
+ *
+ * There is deliberately only one database variable. The suite reads the
+ * same `DATABASE_URL` the application does, so the developer switches
+ * databases by editing that one line in `.env` — and the checks below are
+ * what make that safe. A second variable would let the two drift, and the
+ * interesting failure is not "the test URL is wrong" but "the suite ran
+ * against whatever the app was pointed at".
  *
  * The check is deliberately allow-list shaped: a URL has to prove it is
  * the test database, rather than merely failing to look like production.
@@ -29,8 +36,9 @@ export class UnsafeTestDatabaseError extends Error {
       `Refusing to run integration tests: ${reason}\n\n` +
         `These tests TRUNCATE every table. They may only run against a ` +
         `dedicated local database named "${REQUIRED_TEST_DB}".\n\n` +
-        `Set TEST_DATABASE_URL, e.g.\n` +
-        `  TEST_DATABASE_URL="postgresql://postgres:PASSWORD@localhost:5432/${REQUIRED_TEST_DB}?schema=public"\n`
+        `Point DATABASE_URL at it in .env, e.g.\n` +
+        `  DATABASE_URL="postgresql://postgres:PASSWORD@localhost:5432/${REQUIRED_TEST_DB}?schema=public"\n\n` +
+        `Remember to switch it back to the development database afterwards.\n`
     );
     this.name = "UnsafeTestDatabaseError";
   }
@@ -50,11 +58,6 @@ function databaseName(u: URL): string {
   return decodeURIComponent(u.pathname.replace(/^\//, ""));
 }
 
-/** Host:port identity, used to compare two URLs for "same server". */
-function serverIdentity(u: URL): string {
-  const port = u.port || "5432";
-  return `${u.hostname.toLowerCase()}:${port}`;
-}
 
 /**
  * Validate the configured test database, returning the URL to use.
@@ -65,70 +68,45 @@ function serverIdentity(u: URL): string {
 export type EnvLike = Record<string, string | undefined>;
 
 export function assertSafeTestDatabase(env: EnvLike = process.env): string {
-  const testUrl = env.TEST_DATABASE_URL;
-  if (!testUrl || testUrl.trim() === "") {
-    throw new UnsafeTestDatabaseError("TEST_DATABASE_URL is not set.");
+  const url = env.DATABASE_URL;
+  if (!url || url.trim() === "") {
+    throw new UnsafeTestDatabaseError("DATABASE_URL is not set.");
   }
 
-  const test = parse(testUrl, "TEST_DATABASE_URL");
+  const target = parse(url, "DATABASE_URL");
 
-  if (test.protocol !== "postgresql:" && test.protocol !== "postgres:") {
+  if (target.protocol !== "postgresql:" && target.protocol !== "postgres:") {
     throw new UnsafeTestDatabaseError(
-      `TEST_DATABASE_URL must be a postgresql:// URL (got "${test.protocol}").`
+      `DATABASE_URL must be a postgresql:// URL (got "${target.protocol}").`
     );
   }
 
   // 1. Positive identification: the database must carry the reserved name.
-  const dbName = databaseName(test);
+  //    This is an allow-list, not a deny-list — a URL has to prove it is
+  //    the test database rather than merely failing to look like
+  //    production. Naming specific databases to exclude would silently
+  //    admit anything nobody thought to ban.
+  const dbName = databaseName(target);
   if (dbName !== REQUIRED_TEST_DB) {
     throw new UnsafeTestDatabaseError(
-      `TEST_DATABASE_URL points at database "${dbName || "(none)"}", not "${REQUIRED_TEST_DB}".`
+      `DATABASE_URL points at database "${dbName || "(none)"}", not "${REQUIRED_TEST_DB}". ` +
+        `This is what stops the suite running against the development database ` +
+        `when .env is still pointed at it.`
     );
   }
 
   // 2. Local only. A remote host is either production or somebody else's
   //    data; neither is an acceptable target for a suite that truncates.
-  const host = test.hostname.toLowerCase();
+  //    Independent of the name check on purpose — a remote database that
+  //    happened to be called "accubook_test" is still refused.
+  const host = target.hostname.toLowerCase();
   const isLocal = host === "localhost" || host === "127.0.0.1" || host === "::1";
   if (!isLocal) {
     throw new UnsafeTestDatabaseError(
-      `TEST_DATABASE_URL host "${test.hostname}" is not local. ` +
+      `DATABASE_URL host "${target.hostname}" is not local. ` +
         `Integration tests may only run against a local PostgreSQL server.`
     );
   }
 
-  // 3. Never the application's own database, even if it somehow satisfied
-  //    the checks above. Compared on (server, database) rather than on the
-  //    raw string, so differing credentials or query parameters cannot
-  //    disguise the same physical target.
-  //
-  //    Global setup repoints DATABASE_URL at the validated test database so
-  //    application modules connect there, which means that by the time a
-  //    worker re-validates, DATABASE_URL legitimately *is* the test URL.
-  //    Treat that specific case as already-checked rather than a collision;
-  //    anything else still has to differ.
-  const appUrl = env.ORIGINAL_DATABASE_URL ?? env.DATABASE_URL;
-  const appIsTheValidatedTestDb =
-    !env.ORIGINAL_DATABASE_URL && appUrl?.trim() === testUrl.trim();
-  if (appUrl && appUrl.trim() !== "" && !appIsTheValidatedTestDb) {
-    let app: URL | null = null;
-    try {
-      app = new URL(appUrl);
-    } catch {
-      // A malformed application URL cannot collide with anything; the app's
-      // own env validation is responsible for reporting it.
-    }
-    if (
-      app &&
-      serverIdentity(app) === serverIdentity(test) &&
-      databaseName(app) === dbName
-    ) {
-      throw new UnsafeTestDatabaseError(
-        `TEST_DATABASE_URL resolves to the same database as DATABASE_URL ` +
-          `(${serverIdentity(test)}/${dbName}).`
-      );
-    }
-  }
-
-  return testUrl;
+  return url;
 }

@@ -1,3 +1,9 @@
+// Load .env before anything reads process.env. The suite takes its
+// database from DATABASE_URL — the same variable the application uses —
+// so the developer switches targets by editing that one line in .env.
+// Vitest does not read .env on its own, and `prisma.config.ts` already
+// pulls it in the same way.
+import "dotenv/config";
 import { defineConfig } from "vitest/config";
 import path from "node:path";
 
@@ -14,8 +20,8 @@ import path from "node:path";
  * the `interleave` helper, never by running test files side by side.
  *
  * CI: this suite is not wired into .github/workflows/ci.yml, which has no
- * database. To enable it, give the job a Postgres service and export
- * TEST_DATABASE_URL, e.g.
+ * database. To enable it, give the job a Postgres service and set
+ * DATABASE_URL to the local test database, e.g.
  *
  *   services:
  *     postgres:
@@ -30,7 +36,7 @@ import path from "node:path";
  *   - run: npm run test:integration:setup
  *   - run: npm run test:integration
  *     env:
- *       TEST_DATABASE_URL: postgresql://postgres:password@localhost:5432/accubook_test?schema=public
+ *       DATABASE_URL: postgresql://postgres:password@localhost:5432/accubook_test?schema=public
  *
  * Left as documentation rather than an edit to the workflow: turning it on
  * changes CI runtime and cost, which is a call for whoever owns the pipeline.

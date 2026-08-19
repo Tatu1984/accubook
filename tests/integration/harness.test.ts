@@ -49,46 +49,54 @@ describe("integration harness — database identity", () => {
 });
 
 describe("integration harness — safety guard", () => {
-  it("refuses to run when TEST_DATABASE_URL is unset", () => {
-    expect(() => assertSafeTestDatabase({})).toThrow(
-      UnsafeTestDatabaseError
-    );
+  it("refuses to run when DATABASE_URL is unset", () => {
+    expect(() => assertSafeTestDatabase({})).toThrow(UnsafeTestDatabaseError);
   });
 
-  it("refuses a database that is not the reserved test database", () => {
+  it("refuses the development database", () => {
+    // The realistic accident: .env is still pointed at Neon and someone
+    // runs the integration suite, which truncates every table.
     expect(() =>
       assertSafeTestDatabase({
-        TEST_DATABASE_URL: "postgresql://postgres:pw@localhost:5432/accubook?schema=public",
+        DATABASE_URL:
+          "postgresql://neondb_owner:pw@ep-crimson-glade-a4jvhp02-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require",
+      })
+    ).toThrow(/not "accubook_test"/);
+  });
+
+  it("refuses any other local database", () => {
+    // Other projects share this PostgreSQL server; none of them may be
+    // truncated either.
+    expect(() =>
+      assertSafeTestDatabase({
+        DATABASE_URL: "postgresql://postgres:pw@localhost:5432/hrms?schema=public",
       })
     ).toThrow(/not "accubook_test"/);
   });
 
   it("refuses a remote host even when the database name matches", () => {
+    // Name alone is not sufficient: a remote "accubook_test" is somebody
+    // else's server. The host check is independent of the name check.
     expect(() =>
       assertSafeTestDatabase({
-        TEST_DATABASE_URL:
+        DATABASE_URL:
           "postgresql://u:p@ep-crimson-glade-a4jvhp02-pooler.us-east-1.aws.neon.tech:5432/accubook_test",
       })
     ).toThrow(/is not local/);
   });
 
-  it("refuses when the test URL resolves to the application's own database", () => {
-    const same = "postgresql://postgres:pw@localhost:5432/accubook_test?schema=public";
+  it("refuses a non-postgres URL", () => {
     expect(() =>
       assertSafeTestDatabase({
-        TEST_DATABASE_URL: same,
-        // Same server and database, different credentials — the string
-        // differs but the physical target does not.
-        DATABASE_URL: "postgresql://other:other@localhost:5432/accubook_test",
+        DATABASE_URL: "mysql://root:pw@localhost:3306/accubook_test",
       })
-    ).toThrow(/same database as DATABASE_URL/);
+    ).toThrow(/must be a postgresql/);
   });
 
-  it("accepts the correctly configured test database", () => {
+  it("accepts the local test database", () => {
     expect(
       assertSafeTestDatabase({
-        TEST_DATABASE_URL: "postgresql://postgres:pw@localhost:5432/accubook_test?schema=public",
-        DATABASE_URL: "postgresql://u:p@ep-crimson-glade.neon.tech/neondb",
+        DATABASE_URL: "postgresql://postgres:pw@localhost:5432/accubook_test?schema=public",
       })
     ).toContain("accubook_test");
   });
