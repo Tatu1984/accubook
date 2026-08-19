@@ -50,7 +50,12 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
         const entries = await prisma.voucherEntry.findMany({
           where: {
             ledgerId: { in: ledgers.map(l => l.id) },
-            voucher: { organizationId: orgId, date: { lte: asOfDate }, status: "APPROVED" },
+            voucher: {
+              organizationId: orgId,
+              date: { lte: asOfDate },
+              status: "APPROVED",
+              isPosted: true,
+            },
           },
           include: { voucher: { select: { date: true } } },
         });
@@ -109,7 +114,12 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
         const entries = await prisma.voucherEntry.findMany({
           where: {
             ledgerId: { in: ledgers.map(l => l.id) },
-            voucher: { organizationId: orgId, date: { gte: startDate, lte: endDate }, status: "APPROVED" },
+            voucher: {
+              organizationId: orgId,
+              date: { gte: startDate, lte: endDate },
+              status: "APPROVED",
+              isPosted: true,
+            },
           },
         });
 
@@ -337,6 +347,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
               organizationId: orgId,
               date: { gte: startDate, lte: endDate },
               status: "APPROVED",
+              isPosted: true,
             },
           },
           include: {
