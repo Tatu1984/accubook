@@ -124,3 +124,32 @@ export async function createPayrollFixture(
     year,
   };
 }
+
+/**
+ * Add a bank account to an existing fixture organization.
+ *
+ * `pay-month` treats `bankAccountId` as optional and falls back to
+ * "Cash in Hand", but a real bank account exercises the extra
+ * `BankAccount.currentBalance` decrement — which is the second place a
+ * double payment would show up.
+ */
+export async function createBankAccount(
+  db: PrismaClient,
+  organizationId: string,
+  openingBalance = 500000
+): Promise<{ id: string; name: string }> {
+  const account = await db.bankAccount.create({
+    data: {
+      organizationId,
+      name: "Test Current A/c",
+      accountNumber: `TEST${Date.now()}`,
+      bankName: "Test Bank",
+      accountType: "CURRENT",
+      openingBalance,
+      currentBalance: openingBalance,
+      isActive: true,
+    },
+    select: { id: true, name: true },
+  });
+  return account;
+}

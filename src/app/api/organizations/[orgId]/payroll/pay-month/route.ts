@@ -51,6 +51,26 @@ const payMonthSchema = z.object({
  * happened earlier; demand a manual fix rather than corrupting the
  * netSalary sum.
  */
+/**
+ * Raised when a concurrent request disbursed the month first.
+ *
+ * The caller did nothing wrong — the batch was simply claimed a moment
+ * earlier — so this surfaces as the same 409 the sequential
+ * already-paid path returns rather than a 500.
+ */
+class PayrollAlreadyPaidError extends Error {
+  constructor(
+    public readonly month: number,
+    public readonly year: number
+  ) {
+    super(
+      `Payroll for ${month}/${year} was paid by a concurrent request. ` +
+        `No payment was made by this one.`
+    );
+    this.name = "PayrollAlreadyPaidError";
+  }
+}
+
 export const POST = withOrgAuth(async (request, { orgId, userId, orgUser }) => {
   if (!hasPermission(orgUser, "hr", "payroll", "approve")) {
     return forbidden("You don't have permission to disburse payroll");
@@ -194,8 +214,29 @@ export const POST = withOrgAuth(async (request, { orgId, userId, orgUser }) => {
       //    transactionRef. We don't link them to this voucher
       //    individually; the JV's metadata lists month+year and the
       //    audit row anchors the entire batch.
-      await tx.payslip.updateMany({
-        where: { id: { in: eligible.map((p) => p.id) } },
+      // Claim the batch, re-asserting the status the eligibility read
+      // established. That read happens before this transaction opens, so
+      // two requests arriving together both see the same PROCESSED batch
+      // and both disburse it. Repeating `status: "PROCESSED"` here makes
+      // the write a conditional claim: the first transaction to commit
+      // moves the rows, and the loser matches nothing.
+      //
+      // This matters more here than on the posting side. Everything above
+      // — the voucher, the ledger credit to bank, the BankAccount
+      // decrement — has already run by this point, so a loser that was
+      // allowed to continue would have moved real money. All of those
+      // writes use `tx`, so throwing unwinds every one of them.
+      //
+      // Note the batch was previously protected only by accident: on an
+      // organization's first payment both requests race to create the
+      // bank ledger, and `Ledger(organizationId, name)` is unique, so one
+      // died on the constraint. Once that ledger exists — every payment
+      // after the first — nothing stood in the way.
+      const claimed = await tx.payslip.updateMany({
+        where: {
+          id: { in: eligible.map((p) => p.id) },
+          status: "PROCESSED",
+        },
         data: {
           status: "PAID",
           paidAt: validated.paidAt,
@@ -203,6 +244,10 @@ export const POST = withOrgAuth(async (request, { orgId, userId, orgUser }) => {
           transactionRef: validated.transactionRef,
         },
       });
+
+      if (claimed.count !== eligible.length) {
+        throw new PayrollAlreadyPaidError(month, year);
+      }
 
       await writeAudit(tx, {
         organizationId: orgId,
@@ -239,6 +284,12 @@ export const POST = withOrgAuth(async (request, { orgId, userId, orgUser }) => {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
+    }
+    // Lost the race to a concurrent request. The transaction rolled
+    // back — no voucher, no ledger movement, no bank decrement — so
+    // report the same 409 the sequential already-paid path returns.
+    if (error instanceof PayrollAlreadyPaidError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
     }
     if (error instanceof Error && /not configured|No fiscal year/i.test(error.message)) {
       return badRequest(error.message);
