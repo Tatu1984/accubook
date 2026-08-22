@@ -23,7 +23,13 @@ import type { Prisma } from "@/generated/prisma";
  *
  * LOP is treated as a reduction to wage expense — the company doesn't
  * owe the LOP'd amount to anyone, so it's netted against gross before
- * booking. Total Dr always equals total Cr by construction.
+ * booking.
+ *
+ * Total Dr must equal total Cr, and that is now asserted rather than
+ * assumed: the comment here used to claim balance held "by construction",
+ * which was not true — the debit side comes from gross plus employer
+ * contributions while the credit side comes from the stored netSalary, and
+ * nothing reconciles the two. See `PayrollJournalImbalanceError`.
  */
 
 export type PayslipLineForJv = {
@@ -49,6 +55,39 @@ export type PayslipLineForJv = {
   employerPf?: DecimalLike;
   employerEsi?: DecimalLike;
 };
+
+/**
+ * Raised when an assembled payroll journal does not balance.
+ *
+ * Every other posting path in this codebase refuses to write an unbalanced
+ * voucher — `postInvoiceToGl` and `postBillToGl` both compare their totals
+ * and throw rather than persist. Payroll computed `totalDebit` and
+ * `totalCredit` and returned them without ever comparing the two, so an
+ * imbalance reached `tx.voucher.create` unchallenged.
+ *
+ * The debit side is driven by `grossSalary` and the employer contributions,
+ * while the credit side is driven by the stored `netSalary` plus the
+ * individual deductions. Those are independent inputs: nothing forces
+ * `net == gross - deductions`, and `POST /payroll` derives its own
+ * `netSalary` at write time. When they disagree the journal is short by
+ * exactly the difference, and the books absorb it silently.
+ *
+ * Carrying both totals on the error keeps the imbalance visible in logs and
+ * in the API response instead of forcing a re-derivation to diagnose it.
+ */
+export class PayrollJournalImbalanceError extends Error {
+  constructor(
+    public readonly totalDebit: Prisma.Decimal,
+    public readonly totalCredit: Prisma.Decimal
+  ) {
+    super(
+      `Payroll journal does not balance: Dr ${totalDebit.toString()} \u2260 Cr ${totalCredit.toString()} ` +
+        `(difference ${totalDebit.minus(totalCredit).toString()}). Refusing to post. ` +
+        `This usually means a payslip's netSalary disagrees with its gross minus deductions.`
+    );
+    this.name = "PayrollJournalImbalanceError";
+  }
+}
 
 export type PayrollJournalLine = {
   ledgerName: string;
@@ -184,6 +223,20 @@ export function buildPayrollJournal(payslips: PayslipLineForJv[]): PayrollJourna
 
   const totalDebit = sum(lines.map((l) => l.debit));
   const totalCredit = sum(lines.map((l) => l.credit));
+
+  // The accounting invariant, asserted before the caller can persist any of
+  // this. `buildPayrollJournal` is pure, so throwing here happens before the
+  // route opens its transaction — no voucher, no entries, no ledger movement
+  // and no payslip status change can be left behind by a rejected batch.
+  //
+  // Compared with Decimal.equals, never `===` or a float subtraction: these
+  // are Prisma.Decimal values and an exact comparison is what "balanced"
+  // means. No epsilon, and deliberately no rounding of either side to force
+  // agreement — a journal that does not balance is a bug to surface, not a
+  // number to nudge.
+  if (!totalDebit.equals(totalCredit)) {
+    throw new PayrollJournalImbalanceError(totalDebit, totalCredit);
+  }
 
   return {
     totalDebit,

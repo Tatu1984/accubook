@@ -174,18 +174,34 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
       let tcsRationale: string | null = null;
       if (validatedData.tcsSection) {
         const deducteeType: DeducteeType = validatedData.deducteeType ?? "COMPANY_OTHER";
-        // YTD aggregate of past receipts from this buyer in the current
-        // FY for the threshold check (206C(1H) is per-FY).
-        const ytd = await tx.receipt.aggregate({
+        // YTD aggregate for the threshold check, scoped to THIS SECTION.
+        //
+        // The two collection sections measure different things —
+        // 206C(1H) is ₹50,00,000 of receipts from a buyer across the year,
+        // 206C(1F) is a ₹10,00,000 single sale — so one aggregate covering
+        // both makes ordinary trade receipts push a vehicle sale over its
+        // limit and vice versa. 206C(1H) charges only the excess over the
+        // threshold, so an inflated aggregate collects tax from the buyer
+        // that is not yet due; TCS is added ON TOP of the amount, so the
+        // buyer is over-charged rather than under-paid.
+        //
+        // Summed from `TcsCollection`, which carries the section (a
+        // receipt has no section column). `baseAmount` is written in this
+        // same transaction, so earlier receipts are always visible.
+        //
+        // Same forward-only limitation as the payment side: receipts below
+        // the cumulative threshold create no row and so do not count
+        // toward it. That defers collection rather than collecting early.
+        const ytd = await tx.tcsCollection.aggregate({
           where: {
             organizationId: orgId,
             partyId: party.id,
-            date: { gte: fy.startDate, lte: validatedData.date },
-            status: "COMPLETED",
+            section: validatedData.tcsSection,
+            collectedAt: { gte: fy.startDate, lte: validatedData.date },
           },
-          _sum: { amount: true },
+          _sum: { baseAmount: true },
         });
-        const ytdAggregate = D(ytd._sum.amount ?? 0);
+        const ytdAggregate = D(ytd._sum.baseAmount ?? 0);
         const tcsResult = computeTds({
           section: validatedData.tcsSection as TdsSectionCode,
           deducteeType,

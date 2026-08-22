@@ -50,6 +50,23 @@ const completeSchema = z.object({
  * Returns 409 if the WO is not in IN_PROGRESS state, 400 if quantities
  * are invalid, 404 if the WO doesn't exist.
  */
+/**
+ * Raised when a concurrent request completed the work order first.
+ *
+ * Surfaces as the same 409 the sequential guard returns for a work order
+ * that is not IN_PROGRESS, rather than a 500 — the caller's request was
+ * valid, it simply arrived second.
+ */
+class WorkOrderAlreadyCompletedError extends Error {
+  constructor(public readonly workOrderNumber: string) {
+    super(
+      `Work order ${workOrderNumber} was completed by a concurrent request. ` +
+        `No materials were relieved by this one.`
+    );
+    this.name = "WorkOrderAlreadyCompletedError";
+  }
+}
+
 export const POST = withOrgAuth<{ workOrderId: string }>(async (request, { orgId, userId, params }) => {
   try {
     const { workOrderId } = params;
@@ -184,14 +201,42 @@ export const POST = withOrgAuth<{ workOrderId: string }>(async (request, { orgId
       });
 
       // 3. Transition WO to COMPLETED.
-      const updated = await tx.workOrder.update({
-        where: { id: workOrder.id },
+      // Claim the work order, re-asserting the status the guard above
+      // established. That guard reads at route level, before this
+      // transaction opens, so two requests arriving together both see
+      // IN_PROGRESS and both complete it.
+      //
+      // Unlike the payroll races there is no depleting resource to lean
+      // on. `wipValue` is recomputed each time by summing the WO's ISSUE
+      // movements, and nothing consumes or marks them; the finished-goods
+      // receipt only ever increments. WO *issue* is safe by accident —
+      // its stock decrement carries `quantity: { gte: required }`, so a
+      // second issue finds nothing to take — but completion adds on both
+      // sides, so run twice it simply succeeds twice. `status` is the only
+      // state that can be claimed, so the claim is made here with
+      // `updateMany`, which reports how many rows actually matched.
+      // `update` cannot express the condition: it throws when the record
+      // is absent rather than when it fails a predicate.
+      const claimed = await tx.workOrder.updateMany({
+        where: { id: workOrder.id, status: "IN_PROGRESS" },
         data: {
           status: "COMPLETED",
           completedQuantity: completed,
           scrapQuantity: scrap,
           endDate: validated.date,
         },
+      });
+
+      if (claimed.count !== 1) {
+        // Another request completed this work order between our guard and
+        // this write. Throwing unwinds the whole transaction — the GRN
+        // movement, the finished-goods receipt and the WIP relief posted
+        // above all roll back — so the material is relieved exactly once.
+        throw new WorkOrderAlreadyCompletedError(workOrder.workOrderNumber);
+      }
+
+      const updated = await tx.workOrder.findUniqueOrThrow({
+        where: { id: workOrder.id },
       });
 
       await writeAudit(tx, {
@@ -228,6 +273,12 @@ export const POST = withOrgAuth<{ workOrderId: string }>(async (request, { orgId
   } catch (error) {
     if (error instanceof z.ZodError) {
       return badRequest("Validation failed", error.issues);
+    }
+    // Lost the race to a concurrent request. The transaction rolled back,
+    // so no GRN, no finished goods and no WIP relief were written —
+    // report the same 409 the sequential status guard returns.
+    if (error instanceof WorkOrderAlreadyCompletedError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
     }
     if (error instanceof Error && /not configured|No fiscal year/i.test(error.message)) {
       return badRequest(error.message);

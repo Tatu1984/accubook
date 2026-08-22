@@ -91,6 +91,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
           organizationId: orgId,
           date: { gte: periodStart, lte: periodEnd },
           status: "APPROVED",
+          isPosted: true,
         },
       },
     });
@@ -105,6 +106,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
             organizationId: orgId,
             date: { gte: prevPeriodStart, lte: prevPeriodEnd },
             status: "APPROVED",
+            isPosted: true,
           },
         },
       });

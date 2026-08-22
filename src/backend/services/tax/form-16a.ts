@@ -175,11 +175,22 @@ export function quarterDateRange(
   }
   const startYear = parseInt(m[1], 10);
   // Quarter offsets, in (month, day) pairs.
+  //
+  // `endDate` closes at the last representable instant of the final day,
+  // not at its midnight. Both consumers use this as an INCLUSIVE bound on
+  // a timestamp column — `deductedAt: { gte, lte }` for Form 16A and
+  // `collectedAt: { gte, lte }` for Form 27D — so an end of
+  // `2026-03-31T00:00:00Z` silently dropped every deduction made during
+  // 31 March. That is the heaviest TDS day of the Indian fiscal year, and
+  // for an IST deployment (UTC+5:30) it excluded the whole working day.
+  // `computeCmp08` already builds its bounds this way.
+  const endOfDay = (y: number, m: number, d: number) =>
+    new Date(Date.UTC(y, m, d, 23, 59, 59, 999));
   const ranges: Array<[Date, Date]> = [
-    [new Date(Date.UTC(startYear, 3, 1)), new Date(Date.UTC(startYear, 5, 30))],
-    [new Date(Date.UTC(startYear, 6, 1)), new Date(Date.UTC(startYear, 8, 30))],
-    [new Date(Date.UTC(startYear, 9, 1)), new Date(Date.UTC(startYear, 11, 31))],
-    [new Date(Date.UTC(startYear + 1, 0, 1)), new Date(Date.UTC(startYear + 1, 2, 31))],
+    [new Date(Date.UTC(startYear, 3, 1)), endOfDay(startYear, 5, 30)],
+    [new Date(Date.UTC(startYear, 6, 1)), endOfDay(startYear, 8, 30)],
+    [new Date(Date.UTC(startYear, 9, 1)), endOfDay(startYear, 11, 31)],
+    [new Date(Date.UTC(startYear + 1, 0, 1)), endOfDay(startYear + 1, 2, 31)],
   ];
   const [startDate, endDate] = ranges[quarter - 1];
   return { startDate, endDate };

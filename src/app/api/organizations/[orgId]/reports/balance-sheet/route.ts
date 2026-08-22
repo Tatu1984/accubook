@@ -90,6 +90,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
           organizationId: orgId,
           date: { lte: asOfDate },
           status: "APPROVED",
+          isPosted: true,
         },
       },
       include: {
@@ -109,6 +110,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
             organizationId: orgId,
             date: { lte: prevAsOfDate },
             status: "APPROVED",
+            isPosted: true,
           },
         },
         include: {
@@ -145,6 +147,10 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
      * Retained earnings are therefore derived: everything earned before this
      * fiscal year is brought forward, and this year's profit is shown
      * separately, exactly as a closing entry would have left them.
+     *
+     * `isPosted` matters as much as the date window: a voucher can be APPROVED
+     * without having reached the ledger, and counting those would put profit
+     * on the statement that the books have not actually recorded.
      */
     const [plEntriesAllTime, plEntriesThisYear] = await Promise.all([
       prisma.voucherEntry.findMany({
@@ -154,6 +160,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
             organizationId: orgId,
             date: { lte: asOfDate },
             status: "APPROVED",
+            isPosted: true,
           },
         },
       }),
@@ -164,6 +171,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
             organizationId: orgId,
             date: { gte: fyStart, lte: asOfDate },
             status: "APPROVED",
+            isPosted: true,
           },
         },
       }),
