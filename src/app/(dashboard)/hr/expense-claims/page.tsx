@@ -57,6 +57,9 @@ import {
   SelectValue,
 } from "@/frontend/components/ui/select";
 import { DataTable } from "@/frontend/components/ui/data-table";
+import { RecordDetailsDialog } from "@/frontend/components/ui/record-details-dialog";
+import { downloadCsv } from "@/frontend/utils/export-csv";
+import { toast } from "sonner";
 import { Tabs, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
 import { cn } from "@/shared/utils/common.util";
 
@@ -112,7 +115,19 @@ function formatDate(dateStr: string) {
   });
 }
 
-const columns: ColumnDef<ExpenseClaim>[] = [
+interface ClaimActions {
+  onView: (claim: ExpenseClaim) => void;
+  onAct: (claim: ExpenseClaim, action: "APPROVE" | "REJECT" | "REIMBURSE") => void;
+  busyId: string | null;
+}
+
+/**
+ * Built per render so the row menu can reach the page's handlers — the column
+ * list used to be a module-level constant, which is why none of its actions
+ * could do anything.
+ */
+function buildColumns(actions: ClaimActions): ColumnDef<ExpenseClaim>[] {
+  return [
   {
     accessorKey: "date",
     header: ({ column }) => (
@@ -216,25 +231,37 @@ const columns: ColumnDef<ExpenseClaim>[] = [
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuLabel>Actions</DropdownMenuLabel>
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={() => actions.onView(claim)}>
               <Eye className="mr-2 h-4 w-4" />
               View Details
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             {claim.status === "PENDING" && (
               <>
-                <DropdownMenuItem className="text-green-600">
+                <DropdownMenuItem
+                  className="text-green-600"
+                  disabled={actions.busyId === claim.id}
+                  onClick={() => actions.onAct(claim, "APPROVE")}
+                >
                   <CheckCircle className="mr-2 h-4 w-4" />
                   Approve
                 </DropdownMenuItem>
-                <DropdownMenuItem className="text-red-600">
+                <DropdownMenuItem
+                  className="text-red-600"
+                  disabled={actions.busyId === claim.id}
+                  onClick={() => actions.onAct(claim, "REJECT")}
+                >
                   <XCircle className="mr-2 h-4 w-4" />
                   Reject
                 </DropdownMenuItem>
               </>
             )}
             {claim.status === "APPROVED" && (
-              <DropdownMenuItem className="text-blue-600">
+              <DropdownMenuItem
+                className="text-blue-600"
+                disabled={actions.busyId === claim.id}
+                onClick={() => actions.onAct(claim, "REIMBURSE")}
+              >
                 <Receipt className="mr-2 h-4 w-4" />
                 Mark as Reimbursed
               </DropdownMenuItem>
@@ -244,7 +271,8 @@ const columns: ColumnDef<ExpenseClaim>[] = [
       );
     },
   },
-];
+  ];
+}
 
 export default function ExpenseClaimsPage() {
   const { organizationId, isLoading: orgLoading } = useOrganization();
@@ -252,43 +280,90 @@ export default function ExpenseClaimsPage() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
+  const [detailsClaim, setDetailsClaim] = React.useState<ExpenseClaim | null>(null);
+  const [busyId, setBusyId] = React.useState<string | null>(null);
+
+  const fetchClaims = React.useCallback(async (signal?: AbortSignal) => {
+    if (!organizationId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/organizations/${organizationId}/expense-claims?limit=200`, { signal });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to load expense claims");
+      const json = await res.json();
+      type Row = {
+        id: string; claimNumber?: string; date: string; category: string; description: string;
+        amount: string | number; status: string;
+        employee?: { firstName?: string; lastName?: string | null; employeeCode?: string } | null;
+        approver?: { name?: string | null } | null;
+      };
+      setExpenseClaims(((json.data ?? []) as Row[]).map((c) => ({
+        id: c.id,
+        claimNumber: c.claimNumber ?? c.id.slice(0, 8),
+        date: c.date,
+        employeeName: [c.employee?.firstName, c.employee?.lastName].filter(Boolean).join(" ") || "—",
+        employeeCode: c.employee?.employeeCode ?? "—",
+        category: c.category as ExpenseClaim["category"],
+        description: c.description,
+        amount: Number(c.amount),
+        status: c.status as ExpenseClaim["status"],
+        approvedBy: c.approver?.name ?? undefined,
+      })));
+    } catch (e) {
+      if ((e as Error).name === "AbortError") return;
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [organizationId]);
+
   React.useEffect(() => {
     if (!organizationId) return;
     const controller = new AbortController();
-    (async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await fetch(`/api/organizations/${organizationId}/expense-claims?limit=200`, { signal: controller.signal });
-        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to load expense claims");
-        const json = await res.json();
-        type Row = {
-          id: string; claimNumber?: string; date: string; category: string; description: string;
-          amount: string | number; status: string;
-          employee?: { firstName?: string; lastName?: string | null; employeeCode?: string } | null;
-          approver?: { name?: string | null } | null;
-        };
-        setExpenseClaims(((json.data ?? []) as Row[]).map((c) => ({
-          id: c.id,
-          claimNumber: c.claimNumber ?? c.id.slice(0, 8),
-          date: c.date,
-          employeeName: [c.employee?.firstName, c.employee?.lastName].filter(Boolean).join(" ") || "—",
-          employeeCode: c.employee?.employeeCode ?? "—",
-          category: c.category as ExpenseClaim["category"],
-          description: c.description,
-          amount: Number(c.amount),
-          status: c.status as ExpenseClaim["status"],
-          approvedBy: c.approver?.name ?? undefined,
-        })));
-      } catch (e) {
-        if ((e as Error).name === "AbortError") return;
-        setError((e as Error).message);
-      } finally {
-        setLoading(false);
-      }
-    })();
+    fetchClaims(controller.signal);
     return () => controller.abort();
-  }, [organizationId]);
+  }, [organizationId, fetchClaims]);
+
+  const handleClaimAction = async (
+    claim: ExpenseClaim,
+    action: "APPROVE" | "REJECT" | "REIMBURSE"
+  ) => {
+    if (!organizationId) return;
+    setBusyId(claim.id);
+    try {
+      const res = await fetch(`/api/organizations/${organizationId}/expense-claims`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ claimId: claim.id, action }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to update claim");
+      toast.success(
+        action === "APPROVE"
+          ? `Claim ${claim.claimNumber} approved`
+          : action === "REJECT"
+          ? `Claim ${claim.claimNumber} rejected`
+          : `Claim ${claim.claimNumber} marked reimbursed`
+      );
+      fetchClaims();
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to update claim");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const columns = React.useMemo(
+    () =>
+      buildColumns({
+        onView: setDetailsClaim,
+        onAct: handleClaimAction,
+        busyId,
+      }),
+    // handleClaimAction closes over organizationId/fetchClaims, both stable here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [busyId, organizationId, fetchClaims]
+  );
 
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
   const [selectedStatus, setSelectedStatus] = React.useState<string>("all");
@@ -297,6 +372,28 @@ export default function ExpenseClaimsPage() {
     if (selectedStatus === "all") return expenseClaims;
     return expenseClaims.filter((c) => c.status === selectedStatus);
   }, [selectedStatus, expenseClaims]);
+
+  const handleExport = () => {
+    if (filteredClaims.length === 0) {
+      toast.error("Nothing to export");
+      return;
+    }
+    downloadCsv(
+      `expense-claims-${new Date().toISOString().slice(0, 10)}`,
+      filteredClaims.map((claim) => ({
+        Claim: claim.claimNumber,
+        Date: formatDate(claim.date),
+        Employee: claim.employeeName,
+        EmployeeCode: claim.employeeCode,
+        Category: claim.category,
+        Description: claim.description,
+        Amount: claim.amount,
+        Status: claim.status,
+        ApprovedBy: claim.approvedBy ?? "",
+      }))
+    );
+    toast.success(`Exported ${filteredClaims.length} claims`);
+  };
 
   const stats = React.useMemo(() => {
     return {
@@ -337,7 +434,7 @@ export default function ExpenseClaimsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline">
+          <Button variant="outline" onClick={handleExport}>
             <Download className="mr-2 h-4 w-4" />
             Export
           </Button>
@@ -489,6 +586,61 @@ export default function ExpenseClaimsPage() {
           />
         </CardContent>
       </Card>
+
+      {detailsClaim && (
+        <RecordDetailsDialog
+          open={!!detailsClaim}
+          onOpenChange={(open) => !open && setDetailsClaim(null)}
+          title={`Claim ${detailsClaim.claimNumber}`}
+          description={detailsClaim.employeeName}
+          status={{ label: detailsClaim.status }}
+          sections={[
+            {
+              title: "Claim",
+              fields: [
+                { label: "Employee", value: detailsClaim.employeeName },
+                { label: "Employee Code", value: detailsClaim.employeeCode },
+                { label: "Date", value: formatDate(detailsClaim.date) },
+                { label: "Category", value: detailsClaim.category.replace("_", " ") },
+                { label: "Amount", value: formatCurrency(detailsClaim.amount) },
+                { label: "Approved By", value: detailsClaim.approvedBy },
+                {
+                  label: "Description",
+                  value: detailsClaim.description,
+                  full: true,
+                },
+              ],
+            },
+          ]}
+          actions={
+            detailsClaim.status === "PENDING" ? (
+              <>
+                <Button
+                  variant="outline"
+                  disabled={busyId === detailsClaim.id}
+                  onClick={() => {
+                    const claim = detailsClaim;
+                    setDetailsClaim(null);
+                    handleClaimAction(claim, "REJECT");
+                  }}
+                >
+                  Reject
+                </Button>
+                <Button
+                  disabled={busyId === detailsClaim.id}
+                  onClick={() => {
+                    const claim = detailsClaim;
+                    setDetailsClaim(null);
+                    handleClaimAction(claim, "APPROVE");
+                  }}
+                >
+                  Approve
+                </Button>
+              </>
+            ) : null
+          }
+        />
+      )}
     </div>
   );
 }

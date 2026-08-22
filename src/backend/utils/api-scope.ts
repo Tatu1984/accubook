@@ -51,6 +51,11 @@ export const API_RESOURCE_MAP: Record<string, { module: string; category: string
   // Parties
   "parties":             { module: "parties",     category: "parties" },
 
+  // Cross-module document delivery (emails an invoice / quotation / bill to
+  // its counterparty). Scoped under sales because every document it sends is
+  // an outbound customer- or vendor-facing record.
+  "documents":           { module: "sales",       category: "invoices" },
+
   // Banking
   "bank-accounts":       { module: "banking",     category: "accounts" },
   "banking":             { module: "banking",     category: "import" }, // /banking/import-statement etc
@@ -69,11 +74,14 @@ export const API_RESOURCE_MAP: Record<string, { module: string; category: string
   "employees":           { module: "hr",          category: "employees" },
   "attendance":          { module: "hr",          category: "attendance" },
   "leaves":              { module: "hr",          category: "leaves" },
+  "leave-types":         { module: "hr",          category: "leaves" },
+  "departments":         { module: "hr",          category: "employees" },
   "payroll":             { module: "hr",          category: "payroll" },
   "expense-claims":      { module: "hr",          category: "expense-claims" },
 
   // Reports
   "reports":             { module: "reports",     category: "reports" },
+  "report-templates":    { module: "reports",     category: "reports" },
   "dashboard":           { module: "reports",     category: "dashboard" },
 
   // Organization administration

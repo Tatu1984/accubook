@@ -22,6 +22,9 @@ import {
   SelectValue,
 } from "@/frontend/components/ui/select";
 import { useOrganization } from "@/frontend/hooks/use-organization";
+import { resolveAsOf } from "@/frontend/utils/report-period";
+import { exportReport } from "@/frontend/utils/export-report";
+import { toast } from "sonner";
 
 type TbItem = {
   ledgerId: string;
@@ -95,6 +98,22 @@ export default function TrialBalancePage() {
     }).format(amount);
   };
 
+  const [exporting, setExporting] = React.useState(false);
+
+  const handleExport = async () => {
+    if (!organizationId) return;
+    const { startDate, endDate } = resolveAsOf(asOf);
+    setExporting(true);
+    try {
+      await exportReport(organizationId, "trial-balance", { startDate, endDate }, "xlsx");
+      toast.success("Report exported");
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to export report");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   if (orgLoading || isLoading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -132,8 +151,12 @@ export default function TrialBalancePage() {
               <SelectItem value="custom">Custom Date</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline">
-            <Download className="mr-2 h-4 w-4" />
+          <Button variant="outline" onClick={handleExport} disabled={exporting}>
+            {exporting ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="mr-2 h-4 w-4" />
+            )}
             Export
           </Button>
         </div>

@@ -61,6 +61,8 @@ import {
 import { Textarea } from "@/frontend/components/ui/textarea";
 import { DataTable } from "@/frontend/components/ui/data-table";
 import { useOrganization } from "@/frontend/hooks/use-organization";
+import { RecordDetailsDialog } from "@/frontend/components/ui/record-details-dialog";
+import { printDocument } from "@/frontend/utils/print-document";
 import { toast } from "sonner";
 
 interface Party {
@@ -110,13 +112,17 @@ const statusColors: Record<string, string> = {
 };
 
 export default function CreditNotesPage() {
-  const { organizationId, isLoading: orgLoading } = useOrganization();
+  const { organizationId, organizationName, isLoading: orgLoading } = useOrganization();
   const [creditNotes, setCreditNotes] = React.useState<CreditNoteData[]>([]);
   const [parties, setParties] = React.useState<Party[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [deleteCreditNoteId, setDeleteCreditNoteId] = React.useState<string | null>(null);
+  const [detailsNote, setDetailsNote] = React.useState<CreditNoteData | null>(null);
+  const [editingNote, setEditingNote] = React.useState<CreditNoteData | null>(null);
+  const [editForm, setEditForm] = React.useState({ notes: "", terms: "", status: "" });
+  const [actionId, setActionId] = React.useState<string | null>(null);
 
   const [formData, setFormData] = React.useState({
     partyId: "",
@@ -262,6 +268,97 @@ export default function CreditNotesPage() {
     }
   };
 
+  const handlePrint = (note: CreditNoteData) => {
+    printDocument({
+      title: "Credit Note",
+      subtitle: note.invoiceNumber,
+      issuer: organizationName ?? undefined,
+      fields: [
+        { label: "Customer", value: note.party?.name },
+        { label: "Date", value: formatDate(note.date) },
+        { label: "Due Date", value: note.dueDate ? formatDate(note.dueDate) : "-" },
+        { label: "Status", value: note.status },
+      ],
+      totals: [
+        { label: "Subtotal", value: formatCurrency(Number(note.subtotal)) },
+        { label: "Discount", value: formatCurrency(Number(note.discountAmount)) },
+        { label: "Tax", value: formatCurrency(Number(note.taxAmount)) },
+        { label: "Total", value: formatCurrency(Number(note.totalAmount)) },
+      ],
+      notes: note.notes,
+    });
+  };
+
+  const handleSendToCustomer = async (note: CreditNoteData) => {
+    if (!organizationId) return;
+    setActionId(note.id);
+    try {
+      const response = await fetch(
+        `/api/organizations/${organizationId}/documents/send`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "creditNote", id: note.id }),
+        }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Failed to send credit note");
+      toast.success(
+        data.delivered
+          ? `Credit note emailed to ${data.recipient}`
+          : `Logged for ${data.recipient} — no email provider configured yet`
+      );
+    } catch (error) {
+      console.error("Error sending credit note:", error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to send credit note"
+      );
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const openEditDialog = (note: CreditNoteData) => {
+    setEditingNote(note);
+    setEditForm({
+      notes: note.notes ?? "",
+      terms: "",
+      status: note.status,
+    });
+  };
+
+  const handleSaveEdit = async () => {
+    if (!organizationId || !editingNote) return;
+    setIsSubmitting(true);
+    try {
+      const payload: Record<string, unknown> = { notes: editForm.notes };
+      if (editForm.terms) payload.terms = editForm.terms;
+      if (editForm.status !== editingNote.status) payload.status = editForm.status;
+
+      const response = await fetch(
+        `/api/organizations/${organizationId}/invoices/${editingNote.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Failed to update credit note");
+
+      toast.success("Credit note updated");
+      setEditingNote(null);
+      fetchCreditNotes();
+    } catch (error) {
+      console.error("Error updating credit note:", error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to update credit note"
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleDelete = async () => {
     if (!organizationId || !deleteCreditNoteId) return;
     try {
@@ -347,20 +444,23 @@ export default function CreditNotesPage() {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuLabel>Actions</DropdownMenuLabel>
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setDetailsNote(row.original)}>
               <Eye className="mr-2 h-4 w-4" />
               View Details
             </DropdownMenuItem>
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handlePrint(row.original)}>
               <Download className="mr-2 h-4 w-4" />
-              Download PDF
+              Print / Save as PDF
             </DropdownMenuItem>
-            <DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={actionId === row.original.id}
+              onClick={() => handleSendToCustomer(row.original)}
+            >
               <Send className="mr-2 h-4 w-4" />
               Send to Customer
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={() => openEditDialog(row.original)}>
               <Pencil className="mr-2 h-4 w-4" />
               Edit
             </DropdownMenuItem>
@@ -676,6 +776,129 @@ export default function CreditNotesPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {detailsNote && (
+        <RecordDetailsDialog
+          open={!!detailsNote}
+          onOpenChange={(open) => !open && setDetailsNote(null)}
+          title={`Credit Note ${detailsNote.invoiceNumber}`}
+          description={detailsNote.party?.name}
+          status={{ label: detailsNote.status }}
+          sections={[
+            {
+              title: "Details",
+              fields: [
+                { label: "Customer", value: detailsNote.party?.name },
+                { label: "Email", value: detailsNote.party?.email },
+                { label: "Date", value: formatDate(detailsNote.date) },
+                {
+                  label: "Due Date",
+                  value: detailsNote.dueDate ? formatDate(detailsNote.dueDate) : null,
+                },
+              ],
+            },
+            {
+              title: "Amounts",
+              fields: [
+                {
+                  label: "Subtotal",
+                  value: formatCurrency(Number(detailsNote.subtotal)),
+                },
+                {
+                  label: "Discount",
+                  value: formatCurrency(Number(detailsNote.discountAmount)),
+                },
+                { label: "Tax", value: formatCurrency(Number(detailsNote.taxAmount)) },
+                {
+                  label: "Total",
+                  value: formatCurrency(Number(detailsNote.totalAmount)),
+                },
+                {
+                  label: "Balance",
+                  value: formatCurrency(Number(detailsNote.amountDue)),
+                },
+                { label: "Notes", value: detailsNote.notes, full: true },
+              ],
+            },
+          ]}
+          actions={
+            <Button variant="outline" onClick={() => handlePrint(detailsNote)}>
+              <Download className="mr-2 h-4 w-4" />
+              Print
+            </Button>
+          }
+        />
+      )}
+
+      <Dialog
+        open={!!editingNote}
+        onOpenChange={(open) => !open && setEditingNote(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit {editingNote?.invoiceNumber}</DialogTitle>
+            <DialogDescription>
+              Update the note text or move the credit note through its lifecycle.
+              Line items are fixed once a document is numbered — cancel and
+              re-issue if the amounts are wrong.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="space-y-2">
+              <Label>Status</Label>
+              <Select
+                value={editForm.status}
+                onValueChange={(value) =>
+                  setEditForm({ ...editForm, status: value })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="DRAFT">Draft</SelectItem>
+                  <SelectItem value="SENT">Issued</SelectItem>
+                  <SelectItem value="CANCELLED">Cancelled</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-notes">Notes</Label>
+              <Textarea
+                id="edit-notes"
+                value={editForm.notes}
+                onChange={(e) =>
+                  setEditForm({ ...editForm, notes: e.target.value })
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-terms">Terms</Label>
+              <Textarea
+                id="edit-terms"
+                placeholder="Optional terms to print on the document"
+                value={editForm.terms}
+                onChange={(e) =>
+                  setEditForm({ ...editForm, terms: e.target.value })
+                }
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setEditingNote(null)}
+              disabled={isSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSaveEdit} disabled={isSubmitting}>
+              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

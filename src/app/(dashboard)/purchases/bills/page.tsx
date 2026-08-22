@@ -73,6 +73,10 @@ import {
   DropdownMenuTrigger,
 } from "@/frontend/components/ui/dropdown-menu";
 import { useOrganization } from "@/frontend/hooks/use-organization";
+import { RecordDetailsDialog } from "@/frontend/components/ui/record-details-dialog";
+import { downloadCsv } from "@/frontend/utils/export-csv";
+import { printDocument } from "@/frontend/utils/print-document";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { cn } from "@/shared/utils/common.util";
 
@@ -161,7 +165,8 @@ function getDaysUntilDue(dueDate: string) {
 }
 
 export default function PurchaseBillsPage() {
-  const { organizationId } = useOrganization();
+  const router = useRouter();
+  const { organizationId, organizationName } = useOrganization();
   const [bills, setBills] = React.useState<Bill[]>([]);
   const [parties, setParties] = React.useState<Party[]>([]);
   const [items, setItems] = React.useState<Item[]>([]);
@@ -171,6 +176,13 @@ export default function PurchaseBillsPage() {
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [billToDelete, setBillToDelete] = React.useState<Bill | null>(null);
+  const [detailsBill, setDetailsBill] = React.useState<Bill | null>(null);
+  const [editingBill, setEditingBill] = React.useState<Bill | null>(null);
+  const [editForm, setEditForm] = React.useState({
+    status: "",
+    notes: "",
+    vendorBillNo: "",
+  });
   const [saving, setSaving] = React.useState(false);
 
   const [formData, setFormData] = React.useState({
@@ -399,6 +411,107 @@ export default function PurchaseBillsPage() {
     }));
   };
 
+  const handlePrintBill = (bill: Bill) => {
+    printDocument({
+      title: "Purchase Bill",
+      subtitle: bill.billNumber,
+      issuer: organizationName ?? undefined,
+      fields: [
+        { label: "Vendor", value: bill.party?.name },
+        { label: "Bill Date", value: new Date(bill.date).toLocaleDateString("en-IN") },
+        {
+          label: "Due Date",
+          value: bill.dueDate
+            ? new Date(bill.dueDate).toLocaleDateString("en-IN")
+            : "-",
+        },
+        { label: "Status", value: bill.status },
+      ],
+      table: {
+        columns: ["#", "Item", "Qty", "Rate", "Amount"],
+        rows: (bill.items ?? []).map((line, index) => [
+          index + 1,
+          line.item?.name ?? "",
+          Number(line.quantity),
+          formatCurrency(Number(line.unitPrice)),
+          formatCurrency(Number(line.totalAmount)),
+        ]),
+      },
+      totals: [
+        { label: "Total", value: formatCurrency(Number(bill.totalAmount)) },
+        { label: "Balance Due", value: formatCurrency(Number(bill.balanceDue)) },
+      ],
+    });
+  };
+
+  const openEditDialog = (bill: Bill) => {
+    setEditingBill(bill);
+    setEditForm({
+      status: bill.status,
+      notes: "",
+      vendorBillNo: "",
+    });
+  };
+
+  const handleSaveEdit = async () => {
+    if (!organizationId || !editingBill) return;
+    setSaving(true);
+    try {
+      const payload: Record<string, unknown> = {};
+      if (editForm.status !== editingBill.status) payload.status = editForm.status;
+      if (editForm.notes) payload.notes = editForm.notes;
+      if (editForm.vendorBillNo) payload.vendorBillNo = editForm.vendorBillNo;
+
+      if (Object.keys(payload).length === 0) {
+        toast.error("Nothing to save");
+        setSaving(false);
+        return;
+      }
+
+      const response = await fetch(
+        `/api/organizations/${organizationId}/bills/${editingBill.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Failed to update bill");
+
+      toast.success("Bill updated");
+      setEditingBill(null);
+      fetchBills();
+    } catch (error) {
+      console.error("Error updating bill:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to update bill");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleExport = () => {
+    if (filteredBills.length === 0) {
+      toast.error("Nothing to export");
+      return;
+    }
+    downloadCsv(
+      `purchase-bills-${new Date().toISOString().slice(0, 10)}`,
+      filteredBills.map((bill) => ({
+        Number: bill.billNumber,
+        Date: new Date(bill.date).toLocaleDateString("en-IN"),
+        DueDate: bill.dueDate
+          ? new Date(bill.dueDate).toLocaleDateString("en-IN")
+          : "",
+        Vendor: bill.party?.name ?? "",
+        Total: Number(bill.totalAmount),
+        BalanceDue: Number(bill.balanceDue),
+        Status: bill.status,
+      }))
+    );
+    toast.success(`Exported ${filteredBills.length} bills`);
+  };
+
   const filteredBills = React.useMemo(() => {
     let filtered = bills;
 
@@ -457,7 +570,7 @@ export default function PurchaseBillsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline">
+          <Button variant="outline" onClick={handleExport}>
             <Download className="mr-2 h-4 w-4" />
             Export
           </Button>
@@ -854,23 +967,29 @@ export default function PurchaseBillsPage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => setDetailsBill(bill)}>
                               <Eye className="mr-2 h-4 w-4" />
                               View
                             </DropdownMenuItem>
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => openEditDialog(bill)}>
                               <Edit className="mr-2 h-4 w-4" />
                               Edit
                             </DropdownMenuItem>
                             {bill.status !== "PAID" && (
-                              <DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  router.push(
+                                    `/purchases/payments?billId=${bill.id}&partyId=${bill.partyId}`
+                                  )
+                                }
+                              >
                                 <CheckCircle className="mr-2 h-4 w-4" />
                                 Record Payment
                               </DropdownMenuItem>
                             )}
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handlePrintBill(bill)}>
                               <Download className="mr-2 h-4 w-4" />
-                              Download
+                              Print / Save as PDF
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
@@ -912,6 +1031,125 @@ export default function PurchaseBillsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {detailsBill && (
+        <RecordDetailsDialog
+          open={!!detailsBill}
+          onOpenChange={(open) => !open && setDetailsBill(null)}
+          title={`Bill ${detailsBill.billNumber}`}
+          description={detailsBill.party?.name}
+          status={{ label: statusConfig[detailsBill.status]?.label ?? detailsBill.status }}
+          sections={[
+            {
+              title: "Details",
+              fields: [
+                { label: "Vendor", value: detailsBill.party?.name },
+                { label: "Email", value: detailsBill.party?.email },
+                { label: "Bill Date", value: formatDate(detailsBill.date) },
+                {
+                  label: "Due Date",
+                  value: detailsBill.dueDate ? formatDate(detailsBill.dueDate) : null,
+                },
+                {
+                  label: "Total",
+                  value: formatCurrency(Number(detailsBill.totalAmount)),
+                },
+                {
+                  label: "Balance Due",
+                  value: formatCurrency(Number(detailsBill.balanceDue)),
+                },
+              ],
+            },
+          ]}
+          table={{
+            title: "Line Items",
+            columns: ["Item", "Qty", "Rate", "Amount"],
+            rows: (detailsBill.items ?? []).map((line) => [
+              line.item?.name ?? "-",
+              Number(line.quantity),
+              formatCurrency(Number(line.unitPrice)),
+              formatCurrency(Number(line.totalAmount)),
+            ]),
+          }}
+          actions={
+            <Button variant="outline" onClick={() => handlePrintBill(detailsBill)}>
+              <Download className="mr-2 h-4 w-4" />
+              Print
+            </Button>
+          }
+        />
+      )}
+
+      <Dialog
+        open={!!editingBill}
+        onOpenChange={(open) => !open && setEditingBill(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit {editingBill?.billNumber}</DialogTitle>
+            <DialogDescription>
+              Move the bill through its approval lifecycle, or correct the vendor
+              reference. Approving posts the bill to the general ledger; notes and
+              the vendor bill number lock once it is approved.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="space-y-2">
+              <Label>Status</Label>
+              <Select
+                value={editForm.status}
+                onValueChange={(value) =>
+                  setEditForm({ ...editForm, status: value })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="DRAFT">Draft</SelectItem>
+                  <SelectItem value="PENDING_APPROVAL">Pending Approval</SelectItem>
+                  <SelectItem value="APPROVED">Approved</SelectItem>
+                  <SelectItem value="CANCELLED">Cancelled</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-vendor-bill-no">Vendor Bill No.</Label>
+              <Input
+                id="edit-vendor-bill-no"
+                placeholder="Vendor's own bill number"
+                value={editForm.vendorBillNo}
+                onChange={(e) =>
+                  setEditForm({ ...editForm, vendorBillNo: e.target.value })
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-bill-notes">Notes</Label>
+              <Input
+                id="edit-bill-notes"
+                value={editForm.notes}
+                onChange={(e) =>
+                  setEditForm({ ...editForm, notes: e.target.value })
+                }
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setEditingBill(null)}
+              disabled={saving}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSaveEdit} disabled={saving}>
+              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

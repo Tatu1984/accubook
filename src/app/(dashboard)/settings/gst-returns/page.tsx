@@ -45,6 +45,8 @@ import {
 } from "@/frontend/components/ui/dialog";
 import { Input } from "@/frontend/components/ui/input";
 import { Label } from "@/frontend/components/ui/label";
+import { RecordDetailsDialog } from "@/frontend/components/ui/record-details-dialog";
+import { toast } from "sonner";
 import {
   Select,
   SelectContent,
@@ -109,7 +111,17 @@ function isOverdue(dueDate: string, status: string): boolean {
   return status === "PENDING" && new Date(dueDate) < new Date();
 }
 
-const columns: ColumnDef<GSTReturn>[] = [
+interface ReturnActions {
+  onView: (r: GSTReturn) => void;
+  onDownload: (r: GSTReturn) => void;
+  onPrepare: (r: GSTReturn) => void;
+  onFile: (r: GSTReturn, revision: boolean) => void;
+  busyId: string | null;
+}
+
+/** Built per render so the row menu can reach the page handlers. */
+function buildColumns(actions: ReturnActions): ColumnDef<GSTReturn>[] {
+  return [
   {
     accessorKey: "returnType",
     header: "Return Type",
@@ -224,29 +236,35 @@ const columns: ColumnDef<GSTReturn>[] = [
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuLabel>Actions</DropdownMenuLabel>
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={() => actions.onView(gstReturn)}>
               <Eye className="mr-2 h-4 w-4" />
               View Details
             </DropdownMenuItem>
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={() => actions.onDownload(gstReturn)}>
               <Download className="mr-2 h-4 w-4" />
               Download JSON
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             {gstReturn.status === "PENDING" && (
               <>
-                <DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={actions.busyId === gstReturn.id}
+                  onClick={() => actions.onPrepare(gstReturn)}
+                >
                   <FileText className="mr-2 h-4 w-4" />
                   Prepare Return
                 </DropdownMenuItem>
-                <DropdownMenuItem className="text-green-600">
+                <DropdownMenuItem
+                  className="text-green-600"
+                  onClick={() => actions.onFile(gstReturn, false)}
+                >
                   <Upload className="mr-2 h-4 w-4" />
                   File Return
                 </DropdownMenuItem>
               </>
             )}
             {gstReturn.status === "FILED" && (
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={() => actions.onFile(gstReturn, true)}>
                 <RefreshCw className="mr-2 h-4 w-4" />
                 File Revision
               </DropdownMenuItem>
@@ -256,7 +274,8 @@ const columns: ColumnDef<GSTReturn>[] = [
       );
     },
   },
-];
+  ];
+}
 
 export default function GSTReturnsPage() {
   const { organizationId, isLoading: orgLoading } = useOrganization();
@@ -266,14 +285,13 @@ export default function GSTReturnsPage() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
-  React.useEffect(() => {
+  const loadReturns = React.useCallback(async (signal?: AbortSignal) => {
     if (!organizationId) return;
-    const controller = new AbortController();
-    (async () => {
+    {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(`/api/organizations/${organizationId}/gst-returns?limit=200`, { signal: controller.signal });
+        const res = await fetch(`/api/organizations/${organizationId}/gst-returns?limit=200`, { signal });
         if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to load GST returns");
         const json = await res.json();
         setGstReturns(
@@ -296,9 +314,216 @@ export default function GSTReturnsPage() {
       } finally {
         setLoading(false);
       }
-    })();
-    return () => controller.abort();
+    }
   }, [organizationId]);
+
+  React.useEffect(() => {
+    if (!organizationId) return;
+    const controller = new AbortController();
+    loadReturns(controller.signal);
+    return () => controller.abort();
+  }, [organizationId, loadReturns]);
+
+  const [detailsReturn, setDetailsReturn] = React.useState<GSTReturn | null>(null);
+  const [busyId, setBusyId] = React.useState<string | null>(null);
+  const [filingReturn, setFilingReturn] = React.useState<{
+    row: GSTReturn;
+    revision: boolean;
+  } | null>(null);
+  const [filingForm, setFilingForm] = React.useState({
+    arn: "",
+    filingDate: new Date().toISOString().slice(0, 10),
+  });
+
+  /**
+   * A stored `period` is either "Apr-2024" (monthly) or "Q1-2024" (quarterly).
+   * The portal and compute endpoints want a concrete date range.
+   */
+  const periodRange = React.useCallback((period: string) => {
+    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const [head, yearText] = period.split("-");
+    const year = Number(yearText);
+    if (!Number.isFinite(year)) return null;
+
+    if (head?.startsWith("Q")) {
+      const quarter = Number(head.slice(1));
+      if (!quarter || quarter < 1 || quarter > 4) return null;
+      const startMonth = (quarter - 1) * 3;
+      return {
+        from: new Date(Date.UTC(year, startMonth, 1)),
+        to: new Date(Date.UTC(year, startMonth + 3, 0)),
+        year,
+      };
+    }
+
+    const monthIndex = months.indexOf(head ?? "");
+    if (monthIndex === -1) return null;
+    return {
+      from: new Date(Date.UTC(year, monthIndex, 1)),
+      to: new Date(Date.UTC(year, monthIndex + 1, 0)),
+      year,
+    };
+  }, []);
+
+  const handleDownloadJson = async (row: GSTReturn) => {
+    if (!organizationId) return;
+    if (row.returnType === "GSTR9") {
+      toast.error("Annual return JSON is generated from the GSTR-9 screen");
+      return;
+    }
+    const range = periodRange(row.period);
+    if (!range) {
+      toast.error(`Could not read the period "${row.period}"`);
+      return;
+    }
+    const iso = (d: Date) => d.toISOString().slice(0, 10);
+    const endpoint = row.returnType === "GSTR1" ? "gstr1" : "gstr3b";
+    setBusyId(row.id);
+    try {
+      const res = await fetch(
+        `/api/organizations/${organizationId}/gst-returns/${endpoint}/portal?from=${iso(range.from)}&to=${iso(range.to)}&download=true`
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "Failed to build the portal JSON");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${row.returnType}_${row.period}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success(`${row.returnType} JSON downloaded`);
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to download JSON");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handlePrepare = async (row: GSTReturn) => {
+    if (!organizationId) return;
+    if (row.returnType === "GSTR9") {
+      toast.error("Annual returns are prepared from the GSTR-9 screen");
+      return;
+    }
+    const range = periodRange(row.period);
+    if (!range) {
+      toast.error(`Could not read the period "${row.period}"`);
+      return;
+    }
+    setBusyId(row.id);
+    try {
+      const res = await fetch(
+        `/api/organizations/${organizationId}/gst-returns/compute`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            returnType: row.returnType,
+            period: row.period.split("-")[0],
+            year: range.year,
+          }),
+        }
+      );
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "Failed to compute the return");
+
+      // Persist the computed figures so the list stops showing blanks.
+      const summary = body.summary ?? {};
+      const patch: Record<string, unknown> = { returnId: row.id };
+      if (row.returnType === "GSTR3B") {
+        patch.totalTaxLiability = summary.totalOutwardTax ?? undefined;
+        patch.totalItcClaimed = summary.totalITC ?? undefined;
+        patch.netPayable = summary.netPayable ?? undefined;
+      } else {
+        patch.totalTaxLiability = body.data?.summary?.totalTax ?? undefined;
+      }
+
+      const patchRes = await fetch(
+        `/api/organizations/${organizationId}/gst-returns`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        }
+      );
+      if (!patchRes.ok) {
+        const err = await patchRes.json().catch(() => ({}));
+        throw new Error(err.error || "Computed, but could not save the figures");
+      }
+
+      toast.success(`${row.returnType} for ${row.period} prepared`);
+      loadReturns();
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to prepare the return");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const openFilingDialog = (row: GSTReturn, revision: boolean) => {
+    setFilingReturn({ row, revision });
+    setFilingForm({
+      arn: revision ? "" : row.arn ?? "",
+      filingDate: new Date().toISOString().slice(0, 10),
+    });
+  };
+
+  /**
+   * Filing itself happens on the GSTN portal — this records the acknowledgement
+   * (ARN and date) against the return so the register reflects reality.
+   */
+  const handleRecordFiling = async () => {
+    if (!organizationId || !filingReturn) return;
+    if (!filingForm.arn.trim()) {
+      toast.error("The ARN from the portal acknowledgement is required");
+      return;
+    }
+    setBusyId(filingReturn.row.id);
+    try {
+      const res = await fetch(
+        `/api/organizations/${organizationId}/gst-returns`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            returnId: filingReturn.row.id,
+            status: filingReturn.revision ? "REVISED" : "FILED",
+            arn: filingForm.arn.trim(),
+            filingDate: filingForm.filingDate,
+          }),
+        }
+      );
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "Failed to record the filing");
+      toast.success(
+        filingReturn.revision ? "Revision recorded" : "Return marked as filed"
+      );
+      setFilingReturn(null);
+      loadReturns();
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to record the filing");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const columns = React.useMemo(
+    () =>
+      buildColumns({
+        onView: setDetailsReturn,
+        onDownload: handleDownloadJson,
+        onPrepare: handlePrepare,
+        onFile: openFilingDialog,
+        busyId,
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [busyId, organizationId, periodRange]
+  );
 
   const filteredReturns = React.useMemo(() => {
     if (selectedType === "all") return gstReturns;
@@ -460,6 +685,111 @@ export default function GSTReturnsPage() {
           />
         </CardContent>
       </Card>
+
+      {detailsReturn && (
+        <RecordDetailsDialog
+          open={!!detailsReturn}
+          onOpenChange={(open) => !open && setDetailsReturn(null)}
+          title={`${detailsReturn.returnType} — ${detailsReturn.period}`}
+          description={detailsReturn.arn ? `ARN ${detailsReturn.arn}` : undefined}
+          status={{ label: detailsReturn.status }}
+          sections={[
+            {
+              title: "Filing",
+              fields: [
+                { label: "Return Type", value: detailsReturn.returnType },
+                { label: "Period", value: detailsReturn.period },
+                {
+                  label: "Due Date",
+                  value: new Date(detailsReturn.dueDate).toLocaleDateString("en-IN"),
+                },
+                {
+                  label: "Filed On",
+                  value: detailsReturn.filingDate
+                    ? new Date(detailsReturn.filingDate).toLocaleDateString("en-IN")
+                    : null,
+                },
+                { label: "ARN", value: detailsReturn.arn },
+              ],
+            },
+            {
+              title: "Amounts",
+              fields: [
+                {
+                  label: "Tax Liability",
+                  value: detailsReturn.totalTaxLiability,
+                },
+                { label: "ITC Claimed", value: detailsReturn.totalItcClaimed },
+                { label: "Net Payable", value: detailsReturn.netPayable },
+              ],
+            },
+          ]}
+          actions={
+            <Button
+              variant="outline"
+              onClick={() => handleDownloadJson(detailsReturn)}
+            >
+              <Download className="mr-2 h-4 w-4" />
+              Download JSON
+            </Button>
+          }
+        />
+      )}
+
+      <Dialog
+        open={!!filingReturn}
+        onOpenChange={(open) => !open && setFilingReturn(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {filingReturn?.revision ? "Record Revision" : "Record Filing"}
+            </DialogTitle>
+            <DialogDescription>
+              {filingReturn?.row.returnType} for {filingReturn?.row.period}. The
+              return is filed on the GSTN portal — enter the acknowledgement it
+              returned so this register matches.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="arn">ARN *</Label>
+              <Input
+                id="arn"
+                placeholder="AA270424000000X"
+                value={filingForm.arn}
+                onChange={(e) =>
+                  setFilingForm({ ...filingForm, arn: e.target.value })
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="filing-date">Filing Date</Label>
+              <Input
+                id="filing-date"
+                type="date"
+                value={filingForm.filingDate}
+                onChange={(e) =>
+                  setFilingForm({ ...filingForm, filingDate: e.target.value })
+                }
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setFilingReturn(null)}
+              disabled={!!busyId}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleRecordFiling} disabled={!!busyId}>
+              {busyId && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {filingReturn?.revision ? "Record Revision" : "Mark as Filed"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

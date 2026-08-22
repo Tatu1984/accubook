@@ -24,13 +24,10 @@ import {
   SelectValue,
 } from "@/frontend/components/ui/select";
 import { useOrganization } from "@/frontend/hooks/use-organization";
+import { resolvePeriod } from "@/frontend/utils/report-period";
+import { exportReport } from "@/frontend/utils/export-report";
+import { toast } from "sonner";
 
-/** India's fiscal year runs April to March. */
-function fyRange() {
-  const now = new Date();
-  const startYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
-  return { startDate: `${startYear}-04-01`, endDate: `${startYear + 1}-03-31` };
-}
 
 export default function ProfitLossPage() {
   const { organizationId, isLoading: orgLoading } = useOrganization();
@@ -51,7 +48,7 @@ export default function ProfitLossPage() {
       setIsLoading(true);
       setError(null);
       try {
-        const { startDate, endDate } = fyRange();
+        const { startDate, endDate } = resolvePeriod(period);
         const res = await fetch(
           `/api/organizations/${organizationId}/reports/profit-loss?startDate=${startDate}&endDate=${endDate}`,
           { signal: controller.signal }
@@ -66,7 +63,7 @@ export default function ProfitLossPage() {
       }
     })();
     return () => controller.abort();
-  }, [organizationId]);
+  }, [organizationId, period]);
 
   const num = (v: unknown) => Number(v ?? 0);
   const revenue = num(data?.income?.total);
@@ -79,6 +76,22 @@ export default function ProfitLossPage() {
       style: "currency",
       currency: "INR",
     }).format(amount);
+  };
+
+  const [exporting, setExporting] = React.useState(false);
+
+  const handleExport = async () => {
+    if (!organizationId) return;
+    const { startDate, endDate } = resolvePeriod(period);
+    setExporting(true);
+    try {
+      await exportReport(organizationId, "profit-loss", { startDate, endDate }, "xlsx");
+      toast.success("Report exported");
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to export report");
+    } finally {
+      setExporting(false);
+    }
   };
 
   if (orgLoading || isLoading) {
@@ -129,8 +142,12 @@ export default function ProfitLossPage() {
               <SelectItem value="custom">Custom Range</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline">
-            <Download className="mr-2 h-4 w-4" />
+          <Button variant="outline" onClick={handleExport} disabled={exporting}>
+            {exporting ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="mr-2 h-4 w-4" />
+            )}
             Export
           </Button>
         </div>

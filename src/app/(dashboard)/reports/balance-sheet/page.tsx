@@ -22,20 +22,32 @@ import {
   SelectValue,
 } from "@/frontend/components/ui/select";
 import { useOrganization } from "@/frontend/hooks/use-organization";
+import { resolveAsOf } from "@/frontend/utils/report-period";
+import { exportReport } from "@/frontend/utils/export-report";
+import { toast } from "sonner";
 
-/** India's fiscal year runs April to March. */
-function fyRange() {
-  const now = new Date();
-  const startYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
-  return { startDate: `${startYear}-04-01`, endDate: `${startYear + 1}-03-31` };
-}
 
 export default function BalanceSheetPage() {
   const { organizationId, isLoading: orgLoading } = useOrganization();
   const [isLoading, setIsLoading] = React.useState(true);
   const [asOf, setAsOf] = React.useState("today");
 
-  const [data, setData] = React.useState<{ summary?: { totalAssets?: string; totalLiabilities?: string; totalEquity?: string; isBalanced?: boolean } } | null>(null);
+  interface Group {
+    name: string;
+    total: string | number;
+    ledgers?: { name: string; balance: string | number }[];
+  }
+  const [data, setData] = React.useState<{
+    assets?: { groups?: Group[]; total?: string };
+    liabilities?: { groups?: Group[]; total?: string };
+    equity?: { groups?: Group[]; retainedEarnings?: string; total?: string };
+    summary?: {
+      totalAssets?: string;
+      totalLiabilities?: string;
+      totalEquity?: string;
+      isBalanced?: boolean;
+    };
+  } | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
   /**
@@ -49,7 +61,7 @@ export default function BalanceSheetPage() {
       setIsLoading(true);
       setError(null);
       try {
-        const { startDate, endDate } = fyRange();
+        const { startDate, endDate } = resolveAsOf(asOf);
         const res = await fetch(
           `/api/organizations/${organizationId}/reports/balance-sheet?startDate=${startDate}&endDate=${endDate}`,
           { signal: controller.signal }
@@ -64,17 +76,65 @@ export default function BalanceSheetPage() {
       }
     })();
     return () => controller.abort();
-  }, [organizationId]);
+  }, [organizationId, asOf]);
 
   const num = (v: unknown) => Number(v ?? 0);
   const summary = data?.summary ?? {};
 
+
+  const renderGroups = (groups: Group[] | undefined, emptyText: string) => {
+    if (!groups || groups.length === 0) {
+      return (
+        <div className="flex flex-col items-center justify-center py-8">
+          <Scale className="h-8 w-8 text-muted-foreground mb-2" />
+          <p className="text-sm text-muted-foreground">{emptyText}</p>
+        </div>
+      );
+    }
+    return (
+      <div className="space-y-3">
+        {groups.map((group) => (
+          <div key={group.name} className="space-y-1">
+            <div className="flex items-center justify-between font-medium">
+              <span>{group.name}</span>
+              <span>{formatCurrency(num(group.total))}</span>
+            </div>
+            {(group.ledgers ?? []).map((ledger) => (
+              <div
+                key={`${group.name}-${ledger.name}`}
+                className="flex items-center justify-between pl-4 text-sm text-muted-foreground"
+              >
+                <span>{ledger.name}</span>
+                <span>{formatCurrency(num(ledger.balance))}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-IN", {
       style: "currency",
       currency: "INR",
     }).format(amount);
+  };
+
+  const [exporting, setExporting] = React.useState(false);
+
+  const handleExport = async () => {
+    if (!organizationId) return;
+    const { startDate, endDate } = resolveAsOf(asOf);
+    setExporting(true);
+    try {
+      await exportReport(organizationId, "balance-sheet", { startDate, endDate }, "xlsx");
+      toast.success("Report exported");
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to export report");
+    } finally {
+      setExporting(false);
+    }
   };
 
   if (orgLoading || isLoading) {
@@ -122,8 +182,12 @@ export default function BalanceSheetPage() {
               <SelectItem value="custom">Custom Date</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline">
-            <Download className="mr-2 h-4 w-4" />
+          <Button variant="outline" onClick={handleExport} disabled={exporting}>
+            {exporting ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="mr-2 h-4 w-4" />
+            )}
             Export
           </Button>
         </div>
@@ -163,22 +227,32 @@ export default function BalanceSheetPage() {
             <CardDescription>Current and fixed assets</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="flex flex-col items-center justify-center py-8">
-              <Scale className="h-8 w-8 text-muted-foreground mb-2" />
-              <p className="text-sm text-muted-foreground">No asset data</p>
-            </div>
+            {/* The endpoint returns the group breakdown; this panel used to
+                show "No asset data" unconditionally, so a balanced statement
+                still looked empty. */}
+            {renderGroups(data?.assets?.groups, "No asset balances")}
           </CardContent>
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Liabilities & Equity</CardTitle>
+            <CardTitle>Liabilities &amp; Equity</CardTitle>
             <CardDescription>Current and long-term liabilities</CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="flex flex-col items-center justify-center py-8">
-              <Scale className="h-8 w-8 text-muted-foreground mb-2" />
-              <p className="text-sm text-muted-foreground">No liability data</p>
-            </div>
+          <CardContent className="space-y-4">
+            {renderGroups(
+              [...(data?.liabilities?.groups ?? []), ...(data?.equity?.groups ?? [])],
+              "No liability or equity balances"
+            )}
+            {data?.equity?.retainedEarnings != null && (
+              <div className="flex items-center justify-between border-t pt-3 text-sm">
+                <span className="text-muted-foreground">
+                  Retained earnings (current year)
+                </span>
+                <span className="font-medium">
+                  {formatCurrency(num(data.equity.retainedEarnings))}
+                </span>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

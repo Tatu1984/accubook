@@ -27,28 +27,62 @@ interface StockMovement {
   toWarehouse: string;
   quantity: number;
   reference: string;
-  status: string;
+}
+
+interface MovementResponse {
+  id: string;
+  date: string;
+  movementType: string;
+  quantity: string | number;
+  narration: string | null;
+  referenceType: string | null;
+  referenceId: string | null;
+  item: { id: string; name: string; sku: string | null } | null;
+  fromWarehouse: { id: string; name: string } | null;
+  toWarehouse: { id: string; name: string } | null;
 }
 
 export default function StockMovementsPage() {
   const { organizationId, isLoading: orgLoading } = useOrganization();
   const [movements, setMovements] = React.useState<StockMovement[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
+  // Read from `location` rather than `useSearchParams` so this page needs no
+  // Suspense boundary. Items → "Stock Movement" links here with ?itemId=.
+  const [itemFilter, setItemFilter] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setItemFilter(params.get("itemId"));
+  }, []);
 
   const fetchMovements = React.useCallback(async () => {
     if (!organizationId) return;
     try {
+      const query = new URLSearchParams({ view: "movements", limit: "200" });
+      if (itemFilter) query.set("itemId", itemFilter);
       const response = await fetch(
-        `/api/organizations/${organizationId}/stock?type=transfer`
+        `/api/organizations/${organizationId}/stock?${query.toString()}`
       );
       if (!response.ok) throw new Error("Failed to fetch stock movements");
-      const data = await response.json();
-      setMovements(data.data || data || []);
+      const payload = await response.json();
+      const rows: MovementResponse[] = payload.data ?? [];
+      setMovements(
+        rows.map((m) => ({
+          id: m.id,
+          date: m.date,
+          type: m.movementType,
+          itemName: m.item?.name ?? "-",
+          fromWarehouse: m.fromWarehouse?.name ?? "-",
+          toWarehouse: m.toWarehouse?.name ?? "-",
+          quantity: Number(m.quantity),
+          reference: m.referenceId ?? m.referenceType ?? "",
+        }))
+      );
     } catch (error) {
       console.error("Error fetching stock movements:", error);
       toast.error("Failed to fetch stock movements");
     }
-  }, [organizationId]);
+  }, [organizationId, itemFilter]);
 
   React.useEffect(() => {
     if (organizationId) {
@@ -110,16 +144,11 @@ export default function StockMovementsPage() {
       cell: ({ row }) => row.getValue("quantity"),
     },
     {
-      accessorKey: "status",
-      header: "Status",
-      cell: ({ row }) => {
-        const status = row.getValue("status") as string;
-        return (
-          <Badge variant={status === "COMPLETED" ? "default" : "secondary"}>
-            {status}
-          </Badge>
-        );
-      },
+      accessorKey: "type",
+      header: "Type",
+      cell: ({ row }) => (
+        <Badge variant="secondary">{row.getValue("type")}</Badge>
+      ),
     },
   ];
 
@@ -145,9 +174,20 @@ export default function StockMovementsPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Stock Movements</h1>
           <p className="text-muted-foreground">
-            Track stock transfers between warehouses
+            Track every stock movement across your warehouses
           </p>
         </div>
+        {itemFilter && (
+          <Button
+            variant="outline"
+            onClick={() => {
+              setItemFilter(null);
+              window.history.replaceState(null, "", "/inventory/movements");
+            }}
+          >
+            Clear item filter
+          </Button>
+        )}
       </div>
 
       <Card>

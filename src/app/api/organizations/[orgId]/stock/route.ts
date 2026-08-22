@@ -5,6 +5,8 @@ import { prisma } from "@/backend/database/client";
 import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
 import { D, mul, toNumber } from "@/backend/utils/money";
 import { logger } from "@/backend/utils/logger";
+import { writeAudit } from "@/backend/utils/audit";
+import { validateMovementWarehouses } from "@/backend/services/inventory/movement-rules";
 
 // Force Node.js runtime for this route
 export const runtime = "nodejs";
@@ -28,11 +30,22 @@ const stockMovementSchema = z.object({
 export const GET = withOrgAuth(async (request, { orgId }) => {
   try {
     const { searchParams } = new URL(request.url);
-    const view = searchParams.get("view") || "summary";
     const warehouseId = searchParams.get("warehouseId");
     const itemId = searchParams.get("itemId");
+    const movementType = searchParams.get("movementType");
     const page = parseInt(searchParams.get("page") || "1");
     const limit = parseInt(searchParams.get("limit") || "20");
+
+    /**
+     * `movementType` implies the movements view. The adjustment and movements
+     * screens asked for `?type=adjustment` / `?type=transfer`, which this
+     * handler never read: they silently received the *stock summary* instead,
+     * whose rows have none of the columns those tables render. Accepting the
+     * filter here — and defaulting to the movements view whenever one is
+     * given — is what makes those screens show their own data.
+     */
+    const view =
+      searchParams.get("view") || (movementType ? "movements" : "summary");
 
     if (view === "movements") {
       // Get stock movements
@@ -49,6 +62,16 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
 
       if (itemId) {
         where.itemId = itemId;
+      }
+
+      if (movementType) {
+        const types = movementType
+          .split(",")
+          .map((t) => t.trim().toUpperCase())
+          .filter(Boolean);
+        if (types.length > 0) {
+          where.movementType = types.length === 1 ? types[0] : { in: types };
+        }
       }
 
       const [movements, total] = await Promise.all([
@@ -168,7 +191,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
   }
 });
 
-export const POST = withOrgAuth(async (request, { orgId }) => {
+export const POST = withOrgAuth(async (request, { orgId, userId }) => {
   try {
     const body = await request.json();
     const validatedData = stockMovementSchema.parse(body);
@@ -213,21 +236,23 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
     }
 
     /**
-     * A movement has to move stock somewhere.
+     * The warehouses a movement names have to match the direction it moves.
      *
-     * Both warehouse fields are optional, and a movement naming neither
-     * was accepted with a 201 while changing no balance at all: the
-     * decrement is guarded by `fromWarehouseId` and the increment by
-     * `toWarehouseId`, so with both absent the record was written and the
-     * stock ledger left untouched. A goods receipt entered that way looked
-     * successful and put nothing into stores.
+     * This used to check only that *some* warehouse was supplied, which caught
+     * a movement that changed nothing but not one that changed the wrong
+     * thing: the decrement is guarded by `fromWarehouseId` and the increment by
+     * `toWarehouseId`, so a SALE carrying only a `toWarehouseId` was accepted
+     * and *increased* stock.
      */
-    if (!validatedData.fromWarehouseId && !validatedData.toWarehouseId) {
-      return badRequest(
-        "A stock movement needs a source or destination warehouse — " +
-          "receipts need toWarehouseId, issues need fromWarehouseId, " +
-          "transfers need both."
-      );
+    const warehouseError = validateMovementWarehouses(
+      validatedData.movementType,
+      {
+        fromWarehouseId: validatedData.fromWarehouseId,
+        toWarehouseId: validatedData.toWarehouseId,
+      }
+    );
+    if (warehouseError) {
+      return badRequest(warehouseError);
     }
 
     const qty = D(validatedData.quantity);
@@ -336,6 +361,30 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
           });
         }
       }
+
+      /*
+       * Stock mutations were the one financially-significant write with no
+       * audit trail — bills, invoices, payroll and dispatch all record one.
+       */
+      await writeAudit(tx, {
+        organizationId: orgId,
+        userId,
+        action: "CREATE",
+        entityType: "StockMovement",
+        entityId: movement.id,
+        newData: {
+          movementType: validatedData.movementType,
+          itemId: validatedData.itemId,
+          quantity: qty.toString(),
+          rate: rate.toString(),
+          totalValue: totalValue.toString(),
+          fromWarehouseId: validatedData.fromWarehouseId ?? null,
+          toWarehouseId: validatedData.toWarehouseId ?? null,
+          referenceType: validatedData.referenceType ?? null,
+          referenceId: validatedData.referenceId ?? null,
+          date: validatedData.date.toISOString(),
+        },
+      });
 
       return { movement };
     });

@@ -31,12 +31,85 @@ export default function NotificationsPage() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [notifications, setNotifications] = React.useState<Notification[]>([]);
 
-  React.useEffect(() => {
-    if (organizationId) {
+  /**
+   * The list was never fetched — the effect only flipped the loading flag with
+   * a "// In real implementation, fetch notifications" note, so this screen
+   * always claimed the user was all caught up.
+   */
+  const fetchNotifications = React.useCallback(async () => {
+    if (!organizationId) return;
+    try {
+      const r = await fetch(
+        `/api/organizations/${organizationId}/notifications?limit=100`
+      );
+      if (!r.ok) throw new Error("Failed to load notifications");
+      const body = await r.json();
+      type Row = {
+        id: string;
+        title: string;
+        message: string;
+        type: string;
+        isRead?: boolean;
+        createdAt: string;
+      };
+      setNotifications(
+        ((body.data ?? []) as Row[]).map((n) => ({
+          id: n.id,
+          title: n.title,
+          message: n.message,
+          type: n.type,
+          read: Boolean(n.isRead),
+          createdAt: n.createdAt,
+        }))
+      );
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to load notifications");
+    } finally {
       setIsLoading(false);
-      // In real implementation, fetch notifications
     }
   }, [organizationId]);
+
+  React.useEffect(() => {
+    if (organizationId) {
+      setIsLoading(true);
+      fetchNotifications();
+    }
+  }, [organizationId, fetchNotifications]);
+
+  const handleMarkAllRead = async () => {
+    if (!organizationId) return;
+    try {
+      const r = await fetch(
+        `/api/organizations/${organizationId}/notifications`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "markAllRead" }),
+        }
+      );
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || "Failed to mark as read");
+      toast.success("All notifications marked as read");
+      fetchNotifications();
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to mark as read");
+    }
+  };
+
+  const handleDelete = async (notification: Notification) => {
+    if (!organizationId) return;
+    try {
+      const r = await fetch(
+        `/api/organizations/${organizationId}/notifications?notificationId=${notification.id}`,
+        { method: "DELETE" }
+      );
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || "Failed to delete notification");
+      setNotifications((prev) => prev.filter((n) => n.id !== notification.id));
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to delete notification");
+    }
+  };
 
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleDateString("en-IN", {
@@ -68,12 +141,7 @@ export default function NotificationsPage() {
         <div className="flex gap-2">
           <Button
             variant="outline"
-            onClick={() => {
-              setNotifications((prev) =>
-                prev.map((n) => ({ ...n, read: true }))
-              );
-              toast.success("All notifications marked as read");
-            }}
+            onClick={handleMarkAllRead}
             disabled={notifications.length === 0 || notifications.every((n) => n.read)}
           >
             <Check className="mr-2 h-4 w-4" />
@@ -121,7 +189,12 @@ export default function NotificationsPage() {
                       {formatDate(notification.createdAt)}
                     </p>
                   </div>
-                  <Button variant="ghost" size="icon">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label="Delete notification"
+                    onClick={() => handleDelete(notification)}
+                  >
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>

@@ -41,6 +41,9 @@ import { Badge } from "@/frontend/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
 import { Textarea } from "@/frontend/components/ui/textarea";
 import { Calendar } from "@/frontend/components/ui/calendar";
+import { RecordDetailsDialog } from "@/frontend/components/ui/record-details-dialog";
+import { downloadCsv } from "@/frontend/utils/export-csv";
+import { toast } from "sonner";
 import {
   Plus,
   Search,
@@ -110,12 +113,14 @@ function workedHours(checkIn: string | null, checkOut: string | null) {
 
 interface AttendanceRow {
   id: string;
+  employeeId: string;
   employee: string;
   empId: string;
   date: string;
   checkIn: string | null;
   checkOut: string | null;
   status: string;
+  notes?: string | null;
 }
 
 interface LeaveRow {
@@ -149,13 +154,15 @@ export default function AttendancePage() {
           if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Failed to load ${path}`);
           return r.json();
         };
-        type Emp = { employeeCode?: string; firstName?: string; lastName?: string | null } | null;
+        type Emp = { id?: string; employeeCode?: string; firstName?: string; lastName?: string | null } | null;
         const name = (e: Emp | undefined) => [e?.firstName, e?.lastName].filter(Boolean).join(" ") || "—";
         const [att, lv] = await Promise.all([get("attendance?limit=200"), get("leaves?limit=200")]);
 
-        type AttRow = { id: string; date: string; checkIn?: string | null; checkOut?: string | null; status: string; employee?: Emp };
+        type AttRow = { id: string; employeeId?: string; date: string; checkIn?: string | null; checkOut?: string | null; status: string; notes?: string | null; employee?: Emp };
         setAttendanceData(((att.data ?? []) as AttRow[]).map((r) => ({
           id: r.id,
+          employeeId: r.employeeId ?? r.employee?.id ?? "",
+          notes: r.notes ?? null,
           employee: name(r.employee),
           empId: r.employee?.employeeCode ?? "—",
           date: r.date,
@@ -195,6 +202,236 @@ export default function AttendancePage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
+  const [detailsAttendance, setDetailsAttendance] = useState<AttendanceRow | null>(null);
+  const [detailsLeave, setDetailsLeave] = useState<LeaveRow | null>(null);
+  const [timeRecord, setTimeRecord] = useState<AttendanceRow | null>(null);
+  const [timeForm, setTimeForm] = useState({ checkIn: "", checkOut: "", status: "PRESENT" });
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [savingTime, setSavingTime] = useState(false);
+  const [employees, setEmployees] = useState<
+    { id: string; employeeCode: string; firstName: string; lastName?: string | null }[]
+  >([]);
+  const [leaveTypes, setLeaveTypes] = useState<
+    { id: string; name: string; annualQuota: string | number }[]
+  >([]);
+  const [leaveForm, setLeaveForm] = useState({
+    employeeId: "",
+    leaveTypeId: "",
+    fromDate: "",
+    toDate: "",
+    reason: "",
+  });
+  const [submittingLeave, setSubmittingLeave] = useState(false);
+
+  React.useEffect(() => {
+    if (!organizationId) return;
+    (async () => {
+      try {
+        const [empRes, typeRes] = await Promise.all([
+          fetch(`/api/organizations/${organizationId}/employees?limit=500`),
+          fetch(`/api/organizations/${organizationId}/leave-types`),
+        ]);
+        if (empRes.ok) {
+          const payload = await empRes.json();
+          setEmployees(payload.data ?? []);
+        }
+        if (typeRes.ok) {
+          const payload = await typeRes.json();
+          setLeaveTypes(payload.data ?? []);
+        }
+      } catch {
+        // The form falls back to empty selects with an explanatory message.
+      }
+    })();
+  }, [organizationId]);
+
+  const handleApplyLeave = async () => {
+    if (!organizationId) return;
+    if (!leaveForm.employeeId) {
+      toast.error("Select an employee");
+      return;
+    }
+    if (!leaveForm.leaveTypeId) {
+      toast.error("Select a leave type");
+      return;
+    }
+    if (!leaveForm.fromDate || !leaveForm.toDate) {
+      toast.error("Both start and end dates are required");
+      return;
+    }
+    if (new Date(leaveForm.toDate) < new Date(leaveForm.fromDate)) {
+      toast.error("The end date cannot be before the start date");
+      return;
+    }
+
+    setSubmittingLeave(true);
+    try {
+      const response = await fetch(`/api/organizations/${organizationId}/leaves`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          employeeId: leaveForm.employeeId,
+          leaveTypeId: leaveForm.leaveTypeId,
+          fromDate: leaveForm.fromDate,
+          toDate: leaveForm.toDate,
+          reason: leaveForm.reason || undefined,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Failed to submit leave request");
+
+      toast.success("Leave request submitted");
+      setIsDialogOpen(false);
+      setLeaveForm({
+        employeeId: "",
+        leaveTypeId: "",
+        fromDate: "",
+        toDate: "",
+        reason: "",
+      });
+      reload();
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to submit leave request");
+    } finally {
+      setSubmittingLeave(false);
+    }
+  };
+
+  const reload = React.useCallback(async () => {
+    if (!organizationId) return;
+    const get = async (path: string) => {
+      const r = await fetch(`/api/organizations/${organizationId}/${path}`);
+      if (!r.ok) throw new Error("reload failed");
+      return r.json();
+    };
+    type Emp = { id?: string; employeeCode?: string; firstName?: string; lastName?: string | null } | null;
+    const name = (e: Emp | undefined) => [e?.firstName, e?.lastName].filter(Boolean).join(" ") || "—";
+    try {
+      const [att, lv] = await Promise.all([get("attendance?limit=200"), get("leaves?limit=200")]);
+      type AttRow = { id: string; employeeId?: string; date: string; checkIn?: string | null; checkOut?: string | null; status: string; notes?: string | null; employee?: Emp };
+      setAttendanceData(((att.data ?? []) as AttRow[]).map((r) => ({
+        id: r.id,
+        employeeId: r.employeeId ?? r.employee?.id ?? "",
+        notes: r.notes ?? null,
+        employee: name(r.employee),
+        empId: r.employee?.employeeCode ?? "—",
+        date: r.date,
+        checkIn: r.checkIn ?? null,
+        checkOut: r.checkOut ?? null,
+        status: r.status,
+      })));
+      type LvRow = {
+        id: string; fromDate: string; toDate: string; days?: number; reason?: string | null;
+        status: string; employee?: Emp; leaveType?: { name?: string } | null;
+      };
+      setLeaveRequests(((lv.data ?? []) as LvRow[]).map((r) => {
+        const from = new Date(r.fromDate), to = new Date(r.toDate);
+        return {
+          id: r.id,
+          employee: name(r.employee),
+          empId: r.employee?.employeeCode ?? "—",
+          type: r.leaveType?.name ?? "Leave",
+          startDate: r.fromDate,
+          endDate: r.toDate,
+          days: r.days ?? Math.max(1, Math.round((to.getTime() - from.getTime()) / 864e5) + 1),
+          reason: r.reason ?? "",
+          status: r.status,
+        };
+      }));
+    } catch {
+      // A failed background refresh leaves the current list on screen.
+    }
+  }, [organizationId]);
+
+  const openTimeDialog = (record: AttendanceRow) => {
+    setTimeRecord(record);
+    setTimeForm({
+      checkIn: record.checkIn ?? "",
+      checkOut: record.checkOut ?? "",
+      status: record.status,
+    });
+  };
+
+  /**
+   * The attendance endpoint upserts on (employeeId, date), so re-posting the
+   * same day with new times is the edit path.
+   */
+  const handleSaveTime = async () => {
+    if (!organizationId || !timeRecord) return;
+    if (!timeRecord.employeeId) {
+      toast.error("This record has no linked employee");
+      return;
+    }
+    setSavingTime(true);
+    try {
+      const response = await fetch(`/api/organizations/${organizationId}/attendance`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          employeeId: timeRecord.employeeId,
+          date: timeRecord.date,
+          status: timeForm.status,
+          checkIn: timeForm.checkIn || undefined,
+          checkOut: timeForm.checkOut || undefined,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Failed to save attendance");
+      toast.success("Attendance updated");
+      setTimeRecord(null);
+      reload();
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to save attendance");
+    } finally {
+      setSavingTime(false);
+    }
+  };
+
+  const handleLeaveDecision = async (
+    leave: LeaveRow,
+    status: "APPROVED" | "REJECTED"
+  ) => {
+    if (!organizationId) return;
+    setBusyId(leave.id);
+    try {
+      const response = await fetch(`/api/organizations/${organizationId}/leaves`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leaveId: leave.id, status }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Failed to update leave");
+      toast.success(
+        status === "APPROVED"
+          ? `Leave for ${leave.employee} approved`
+          : `Leave for ${leave.employee} rejected`
+      );
+      reload();
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to update leave");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleExportAttendance = () => {
+    if (attendanceData.length === 0) {
+      toast.error("Nothing to export");
+      return;
+    }
+    downloadCsv(
+      `attendance-${new Date().toISOString().slice(0, 10)}`,
+      attendanceData.map((r) => ({
+        Date: new Date(r.date).toLocaleDateString("en-IN"),
+        Employee: r.employee,
+        EmployeeCode: r.empId,
+        CheckIn: r.checkIn ?? "",
+        CheckOut: r.checkOut ?? "",
+        Status: r.status,
+      }))
+    );
+    toast.success(`Exported ${attendanceData.length} attendance rows`);
+  };
 
   const todayKey = new Date().toDateString();
   const todaysRows = attendanceData.filter((r) => new Date(r.date).toDateString() === todayKey);
@@ -248,39 +485,111 @@ export default function AttendancePage() {
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="space-y-2">
-                <Label>Leave Type</Label>
-                <Select>
+                <Label>Employee *</Label>
+                <Select
+                  value={leaveForm.employeeId}
+                  onValueChange={(value) =>
+                    setLeaveForm({ ...leaveForm, employeeId: value })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select employee" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {employees.length === 0 ? (
+                      <div className="px-2 py-3 text-sm text-muted-foreground">
+                        No employees — add one in HR → Employees first
+                      </div>
+                    ) : (
+                      employees.map((employee) => (
+                        <SelectItem key={employee.id} value={employee.id}>
+                          {[employee.firstName, employee.lastName]
+                            .filter(Boolean)
+                            .join(" ")}{" "}
+                          ({employee.employeeCode})
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Leave Type *</Label>
+                <Select
+                  value={leaveForm.leaveTypeId}
+                  onValueChange={(value) =>
+                    setLeaveForm({ ...leaveForm, leaveTypeId: value })
+                  }
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select leave type" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="casual">Casual Leave (9 available)</SelectItem>
-                    <SelectItem value="sick">Sick Leave (11 available)</SelectItem>
-                    <SelectItem value="earned">Earned Leave (10 available)</SelectItem>
-                    <SelectItem value="lop">Loss of Pay</SelectItem>
+                    {leaveTypes.length === 0 ? (
+                      <div className="px-2 py-3 text-sm text-muted-foreground">
+                        No leave types configured yet
+                      </div>
+                    ) : (
+                      leaveTypes.map((type) => (
+                        <SelectItem key={type.id} value={type.id}>
+                          {type.name} ({Number(type.annualQuota)} days / year)
+                        </SelectItem>
+                      ))
+                    )}
                   </SelectContent>
                 </Select>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Start Date</Label>
-                  <Input type="date" />
+                  <Label htmlFor="leave-from">Start Date *</Label>
+                  <Input
+                    id="leave-from"
+                    type="date"
+                    value={leaveForm.fromDate}
+                    onChange={(e) =>
+                      setLeaveForm({ ...leaveForm, fromDate: e.target.value })
+                    }
+                  />
                 </div>
                 <div className="space-y-2">
-                  <Label>End Date</Label>
-                  <Input type="date" />
+                  <Label htmlFor="leave-to">End Date *</Label>
+                  <Input
+                    id="leave-to"
+                    type="date"
+                    value={leaveForm.toDate}
+                    onChange={(e) =>
+                      setLeaveForm({ ...leaveForm, toDate: e.target.value })
+                    }
+                  />
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>Reason</Label>
-                <Textarea placeholder="Enter reason for leave..." rows={3} />
+                <Label htmlFor="leave-reason">Reason</Label>
+                <Textarea
+                  id="leave-reason"
+                  placeholder="Enter reason for leave..."
+                  rows={3}
+                  value={leaveForm.reason}
+                  onChange={(e) =>
+                    setLeaveForm({ ...leaveForm, reason: e.target.value })
+                  }
+                />
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+              <Button
+                variant="outline"
+                onClick={() => setIsDialogOpen(false)}
+                disabled={submittingLeave}
+              >
                 Cancel
               </Button>
-              <Button onClick={() => setIsDialogOpen(false)}>Submit Request</Button>
+              <Button onClick={handleApplyLeave} disabled={submittingLeave}>
+                {submittingLeave && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                Submit Request
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -369,7 +678,12 @@ export default function AttendancePage() {
                       onChange={(e) => setSearchTerm(e.target.value)}
                     />
                   </div>
-                  <Button variant="outline" size="icon">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    aria-label="Export attendance to CSV"
+                    onClick={handleExportAttendance}
+                  >
                     <Download className="h-4 w-4" />
                   </Button>
                 </div>
@@ -432,11 +746,11 @@ export default function AttendancePage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => setDetailsAttendance(record)}>
                               <Eye className="mr-2 h-4 w-4" />
                               View Details
                             </DropdownMenuItem>
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => openTimeDialog(record)}>
                               <Clock className="mr-2 h-4 w-4" />
                               Edit Time
                             </DropdownMenuItem>
@@ -525,17 +839,25 @@ export default function AttendancePage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => setDetailsLeave(leave)}>
                               <Eye className="mr-2 h-4 w-4" />
                               View Details
                             </DropdownMenuItem>
                             {leave.status === "PENDING" && (
                               <>
-                                <DropdownMenuItem className="text-green-600">
+                                <DropdownMenuItem
+                                  className="text-green-600"
+                                  disabled={busyId === leave.id}
+                                  onClick={() => handleLeaveDecision(leave, "APPROVED")}
+                                >
                                   <CheckCircle className="mr-2 h-4 w-4" />
                                   Approve
                                 </DropdownMenuItem>
-                                <DropdownMenuItem className="text-red-600">
+                                <DropdownMenuItem
+                                  className="text-red-600"
+                                  disabled={busyId === leave.id}
+                                  onClick={() => handleLeaveDecision(leave, "REJECTED")}
+                                >
                                   <XCircle className="mr-2 h-4 w-4" />
                                   Reject
                                 </DropdownMenuItem>
@@ -670,6 +992,172 @@ export default function AttendancePage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {detailsAttendance && (
+        <RecordDetailsDialog
+          open={!!detailsAttendance}
+          onOpenChange={(open) => !open && setDetailsAttendance(null)}
+          title={detailsAttendance.employee}
+          description={detailsAttendance.empId}
+          status={{ label: detailsAttendance.status }}
+          sections={[
+            {
+              title: "Attendance",
+              fields: [
+                {
+                  label: "Date",
+                  value: new Date(detailsAttendance.date).toLocaleDateString("en-IN"),
+                },
+                { label: "Check In", value: detailsAttendance.checkIn },
+                { label: "Check Out", value: detailsAttendance.checkOut },
+                { label: "Status", value: detailsAttendance.status },
+                { label: "Notes", value: detailsAttendance.notes, full: true },
+              ],
+            },
+          ]}
+          actions={
+            <Button
+              variant="outline"
+              onClick={() => {
+                const record = detailsAttendance;
+                setDetailsAttendance(null);
+                openTimeDialog(record);
+              }}
+            >
+              <Clock className="mr-2 h-4 w-4" />
+              Edit Time
+            </Button>
+          }
+        />
+      )}
+
+      {detailsLeave && (
+        <RecordDetailsDialog
+          open={!!detailsLeave}
+          onOpenChange={(open) => !open && setDetailsLeave(null)}
+          title={`${detailsLeave.type} — ${detailsLeave.employee}`}
+          description={detailsLeave.empId}
+          status={{ label: detailsLeave.status }}
+          sections={[
+            {
+              title: "Leave Request",
+              fields: [
+                { label: "Employee", value: detailsLeave.employee },
+                { label: "Type", value: detailsLeave.type },
+                {
+                  label: "From",
+                  value: new Date(detailsLeave.startDate).toLocaleDateString("en-IN"),
+                },
+                {
+                  label: "To",
+                  value: new Date(detailsLeave.endDate).toLocaleDateString("en-IN"),
+                },
+                { label: "Days", value: detailsLeave.days },
+                { label: "Reason", value: detailsLeave.reason, full: true },
+              ],
+            },
+          ]}
+          actions={
+            detailsLeave.status === "PENDING" ? (
+              <>
+                <Button
+                  variant="outline"
+                  disabled={busyId === detailsLeave.id}
+                  onClick={() => {
+                    const leave = detailsLeave;
+                    setDetailsLeave(null);
+                    handleLeaveDecision(leave, "REJECTED");
+                  }}
+                >
+                  Reject
+                </Button>
+                <Button
+                  disabled={busyId === detailsLeave.id}
+                  onClick={() => {
+                    const leave = detailsLeave;
+                    setDetailsLeave(null);
+                    handleLeaveDecision(leave, "APPROVED");
+                  }}
+                >
+                  Approve
+                </Button>
+              </>
+            ) : null
+          }
+        />
+      )}
+
+      <Dialog
+        open={!!timeRecord}
+        onOpenChange={(open) => !open && setTimeRecord(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Attendance</DialogTitle>
+            <DialogDescription>
+              {timeRecord?.employee} —{" "}
+              {timeRecord ? new Date(timeRecord.date).toLocaleDateString("en-IN") : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="check-in">Check In</Label>
+                <Input
+                  id="check-in"
+                  type="time"
+                  value={timeForm.checkIn}
+                  onChange={(e) =>
+                    setTimeForm({ ...timeForm, checkIn: e.target.value })
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="check-out">Check Out</Label>
+                <Input
+                  id="check-out"
+                  type="time"
+                  value={timeForm.checkOut}
+                  onChange={(e) =>
+                    setTimeForm({ ...timeForm, checkOut: e.target.value })
+                  }
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Status</Label>
+              <Select
+                value={timeForm.status}
+                onValueChange={(value) => setTimeForm({ ...timeForm, status: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="PRESENT">Present</SelectItem>
+                  <SelectItem value="ABSENT">Absent</SelectItem>
+                  <SelectItem value="HALF_DAY">Half Day</SelectItem>
+                  <SelectItem value="ON_LEAVE">On Leave</SelectItem>
+                  <SelectItem value="HOLIDAY">Holiday</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setTimeRecord(null)}
+              disabled={savingTime}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSaveTime} disabled={savingTime}>
+              {savingTime && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

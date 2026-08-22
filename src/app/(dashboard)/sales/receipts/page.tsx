@@ -69,6 +69,9 @@ import { DataTable } from "@/frontend/components/ui/data-table";
 import { Tabs, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
 import { cn } from "@/shared/utils/common.util";
 import { useOrganization } from "@/frontend/hooks/use-organization";
+import { RecordDetailsDialog } from "@/frontend/components/ui/record-details-dialog";
+import { downloadCsv } from "@/frontend/utils/export-csv";
+import { printDocument } from "@/frontend/utils/print-document";
 import { toast } from "sonner";
 
 interface Receipt {
@@ -145,7 +148,7 @@ function formatDate(dateStr: string) {
 }
 
 export default function ReceiptsPage() {
-  const { organizationId } = useOrganization();
+  const { organizationId, organizationName } = useOrganization();
   const [receipts, setReceipts] = React.useState<Receipt[]>([]);
   const [parties, setParties] = React.useState<Party[]>([]);
   const [bankAccounts, setBankAccounts] = React.useState<BankAccount[]>([]);
@@ -154,6 +157,7 @@ export default function ReceiptsPage() {
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [receiptToDelete, setReceiptToDelete] = React.useState<Receipt | null>(null);
+  const [detailsReceipt, setDetailsReceipt] = React.useState<Receipt | null>(null);
   const [saving, setSaving] = React.useState(false);
 
   const [formData, setFormData] = React.useState({
@@ -272,6 +276,49 @@ export default function ReceiptsPage() {
     } catch (error) {
       toast.error((error as Error).message || "Failed to update receipt");
     }
+  };
+
+  const handlePrintReceipt = (receipt: Receipt) => {
+    printDocument({
+      title: "Receipt",
+      subtitle: receipt.receiptNumber,
+      issuer: organizationName ?? undefined,
+      fields: [
+        { label: "Received From", value: receipt.party?.name },
+        { label: "Date", value: formatDate(receipt.date) },
+        { label: "Payment Mode", value: receipt.paymentMode.replace("_", " ") },
+        { label: "Against Invoice", value: receipt.invoice?.invoiceNumber ?? "-" },
+        { label: "Bank Account", value: receipt.bankAccount?.name ?? "-" },
+        { label: "Reference", value: receipt.transactionRef ?? "-" },
+        { label: "Status", value: receipt.status },
+      ],
+      totals: [
+        { label: "Amount Received", value: formatCurrency(Number(receipt.amount)) },
+      ],
+      notes: receipt.notes ?? null,
+    });
+  };
+
+  const handleExport = () => {
+    if (filteredReceipts.length === 0) {
+      toast.error("Nothing to export");
+      return;
+    }
+    downloadCsv(
+      `receipts-${new Date().toISOString().slice(0, 10)}`,
+      filteredReceipts.map((r) => ({
+        Number: r.receiptNumber,
+        Date: formatDate(r.date),
+        Customer: r.party?.name ?? "",
+        Invoice: r.invoice?.invoiceNumber ?? "",
+        Amount: Number(r.amount),
+        PaymentMode: r.paymentMode,
+        BankAccount: r.bankAccount?.name ?? "",
+        Reference: r.transactionRef ?? "",
+        Status: r.status,
+      }))
+    );
+    toast.success(`Exported ${filteredReceipts.length} receipts`);
   };
 
   const filteredReceipts = React.useMemo(() => {
@@ -417,17 +464,13 @@ export default function ReceiptsPage() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuLabel>Actions</DropdownMenuLabel>
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setDetailsReceipt(receipt)}>
                 <Eye className="mr-2 h-4 w-4" />
                 View Details
               </DropdownMenuItem>
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handlePrintReceipt(receipt)}>
                 <Printer className="mr-2 h-4 w-4" />
-                Print Receipt
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <Download className="mr-2 h-4 w-4" />
-                Download PDF
+                Print / Save as PDF
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               {receipt.status === "COMPLETED" && (
@@ -481,7 +524,7 @@ export default function ReceiptsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline">
+          <Button variant="outline" onClick={handleExport}>
             <Download className="mr-2 h-4 w-4" />
             Export
           </Button>
@@ -730,6 +773,55 @@ export default function ReceiptsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {detailsReceipt && (
+        <RecordDetailsDialog
+          open={!!detailsReceipt}
+          onOpenChange={(open) => !open && setDetailsReceipt(null)}
+          title={`Receipt ${detailsReceipt.receiptNumber}`}
+          description={detailsReceipt.party?.name}
+          status={{ label: detailsReceipt.status }}
+          sections={[
+            {
+              title: "Receipt",
+              fields: [
+                { label: "Customer", value: detailsReceipt.party?.name },
+                { label: "Email", value: detailsReceipt.party?.email },
+                { label: "Date", value: formatDate(detailsReceipt.date) },
+                {
+                  label: "Amount",
+                  value: formatCurrency(Number(detailsReceipt.amount)),
+                },
+              ],
+            },
+            {
+              title: "Payment",
+              fields: [
+                {
+                  label: "Mode",
+                  value: detailsReceipt.paymentMode.replace("_", " "),
+                },
+                { label: "Bank Account", value: detailsReceipt.bankAccount?.name },
+                { label: "Reference", value: detailsReceipt.transactionRef },
+                {
+                  label: "Against Invoice",
+                  value: detailsReceipt.invoice?.invoiceNumber,
+                },
+                { label: "Notes", value: detailsReceipt.notes, full: true },
+              ],
+            },
+          ]}
+          actions={
+            <Button
+              variant="outline"
+              onClick={() => handlePrintReceipt(detailsReceipt)}
+            >
+              <Printer className="mr-2 h-4 w-4" />
+              Print
+            </Button>
+          }
+        />
+      )}
     </div>
   );
 }

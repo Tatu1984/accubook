@@ -1,9 +1,76 @@
+import { randomUUID } from "node:crypto";
 import { Prisma } from "@/generated/prisma";
 import { D, sum } from "@/backend/utils/money";
 
 export type Tx = Prisma.TransactionClient;
 
 type LedgerRef = { id: string };
+
+
+/**
+ * Create a ledger, tolerating a concurrent creator.
+ *
+ * These helpers all ran `findFirst` then `create`. At Postgres's default READ
+ * COMMITTED isolation that is a time-of-check / time-of-use race: two requests
+ * posting the first invoice for the same new party both see no ledger, both
+ * insert, and `@@unique([organizationId, name])` rejects the loser with P2002.
+ * In Postgres a constraint violation poisons the surrounding transaction, so
+ * the loser does not merely fail to create a ledger — the whole invoice or
+ * payment posting it was part of is aborted. The user sees an intermittent
+ * "failed to create invoice" with no reproducible pattern.
+ *
+ * Catch-and-retry cannot fix it for the same reason: once the transaction is
+ * poisoned every later statement in it fails too. The insert has to not raise
+ * in the first place, which means `ON CONFLICT`.
+ *
+ * Prisma's `upsert` is not sufficient here — with the driver adapter in use it
+ * resolves as a select followed by an insert rather than a single
+ * `INSERT ... ON CONFLICT`, so it loses exactly the same race. (An integration
+ * test proves this: swap this implementation for `tx.ledger.upsert` and
+ * `tests/integration/ledger-concurrency.test.ts` fails with P2002.)
+ *
+ * `DO UPDATE SET "name" = EXCLUDED."name"` is a deliberate no-op write: plain
+ * `DO NOTHING` returns no row on conflict, whereas updating a column to its own
+ * value makes `RETURNING` yield the winning row either way, so one statement
+ * covers both the create and the found case.
+ *
+ * `id` and `updatedAt` are supplied explicitly because Prisma generates both
+ * client-side — the columns have no database default.
+ */
+async function upsertLedgerByName(
+  tx: Tx,
+  organizationId: string,
+  name: string,
+  data: {
+    groupId: string;
+    partyId?: string;
+    bankAccountId?: string;
+    isBillwise?: boolean;
+  }
+): Promise<LedgerRef> {
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    INSERT INTO "ledgers" (
+      "id", "organizationId", "groupId", "partyId", "bankAccountId",
+      "name", "isBillwise", "updatedAt"
+    )
+    VALUES (
+      ${randomUUID()}, ${organizationId}, ${data.groupId},
+      ${data.partyId ?? null}, ${data.bankAccountId ?? null},
+      ${name}, ${data.isBillwise ?? false}, NOW()
+    )
+    ON CONFLICT ("organizationId", "name")
+      DO UPDATE SET "name" = EXCLUDED."name"
+    RETURNING "id"
+  `;
+
+  const ledger = rows[0];
+  if (!ledger) {
+    throw new Error(
+      `Failed to find or create ledger "${name}" for organization ${organizationId}`
+    );
+  }
+  return ledger;
+}
 
 /**
  * Find the party's accounts ledger; create it if it doesn't exist.
@@ -40,15 +107,10 @@ export async function getOrCreatePartyLedger(
     );
   }
 
-  return tx.ledger.create({
-    data: {
-      organizationId,
-      partyId,
-      groupId: group.id,
-      name: partyName,
-      isBillwise: true,
-    },
-    select: { id: true },
+  return upsertLedgerByName(tx, organizationId, partyName, {
+    groupId: group.id,
+    partyId,
+    isBillwise: true,
   });
 }
 
@@ -73,9 +135,9 @@ export async function getOrCreateBankLedger(
     throw new Error('Ledger group "Cash & Bank" is not configured for this organization.');
   }
 
-  return tx.ledger.create({
-    data: { organizationId, bankAccountId, groupId: group.id, name: bankAccountName },
-    select: { id: true },
+  return upsertLedgerByName(tx, organizationId, bankAccountName, {
+    groupId: group.id,
+    bankAccountId,
   });
 }
 
@@ -107,10 +169,7 @@ export async function getOrCreateNamedLedger(
     );
   }
 
-  return tx.ledger.create({
-    data: { organizationId, groupId: group.id, name },
-    select: { id: true },
-  });
+  return upsertLedgerByName(tx, organizationId, name, { groupId: group.id });
 }
 
 /** Find or create the "Cash in Hand" ledger. */
@@ -129,9 +188,8 @@ export async function getCashLedger(tx: Tx, organizationId: string): Promise<Led
     throw new Error('Ledger group "Cash & Bank" is not configured for this organization.');
   }
 
-  return tx.ledger.create({
-    data: { organizationId, groupId: group.id, name: "Cash in Hand" },
-    select: { id: true },
+  return upsertLedgerByName(tx, organizationId, "Cash in Hand", {
+    groupId: group.id,
   });
 }
 
@@ -181,10 +239,7 @@ async function findOrCreateDutiesAndTaxesLedger(
     );
   }
 
-  return tx.ledger.create({
-    data: { organizationId, groupId: group.id, name },
-    select: { id: true },
-  });
+  return upsertLedgerByName(tx, organizationId, name, { groupId: group.id });
 }
 
 /** Find the fiscal year covering `date` for the given organization. */

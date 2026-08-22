@@ -66,6 +66,10 @@ import { Tabs, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
 import { Textarea } from "@/frontend/components/ui/textarea";
 import { cn } from "@/shared/utils/common.util";
 import { useOrganization } from "@/frontend/hooks/use-organization";
+import { RecordDetailsDialog } from "@/frontend/components/ui/record-details-dialog";
+import { downloadCsv } from "@/frontend/utils/export-csv";
+import { printDocument } from "@/frontend/utils/print-document";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 interface Item {
@@ -115,7 +119,28 @@ function formatCurrency(amount: number | null) {
   }).format(amount);
 }
 
+const emptyItemForm = {
+  name: "",
+  sku: "",
+  barcode: "",
+  description: "",
+  type: "GOODS",
+  categoryId: "",
+  primaryUnitId: "",
+  hsnCode: "",
+  valuationMethod: "FIFO",
+  purchasePrice: "",
+  sellingPrice: "",
+  mrp: "",
+  reorderLevel: "",
+  salesTaxId: "",
+  trackBatch: false,
+  trackSerial: false,
+  trackExpiry: false,
+};
+
 export default function ItemsPage() {
+  const router = useRouter();
   const { organizationId, isLoading: orgLoading } = useOrganization();
   const [items, setItems] = React.useState<Item[]>([]);
   const [categories, setCategories] = React.useState<Category[]>([]);
@@ -126,27 +151,13 @@ export default function ItemsPage() {
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [selectedType, setSelectedType] = React.useState<string>("all");
   const [deleteItemId, setDeleteItemId] = React.useState<string | null>(null);
+  const [editingItem, setEditingItem] = React.useState<Item | null>(null);
+  const [detailsItem, setDetailsItem] = React.useState<Item | null>(null);
+  const [isImporting, setIsImporting] = React.useState(false);
+  const importInputRef = React.useRef<HTMLInputElement>(null);
 
   // Form state
-  const [formData, setFormData] = React.useState({
-    name: "",
-    sku: "",
-    barcode: "",
-    description: "",
-    type: "GOODS",
-    categoryId: "",
-    primaryUnitId: "",
-    hsnCode: "",
-    valuationMethod: "FIFO",
-    purchasePrice: "",
-    sellingPrice: "",
-    mrp: "",
-    reorderLevel: "",
-    salesTaxId: "",
-    trackBatch: false,
-    trackSerial: false,
-    trackExpiry: false,
-  });
+  const [formData, setFormData] = React.useState(emptyItemForm);
 
   const fetchItems = React.useCallback(async () => {
     if (!organizationId) return;
@@ -204,7 +215,37 @@ export default function ItemsPage() {
     }
   }, [organizationId, fetchItems, fetchCategories, fetchUnits, fetchTaxConfigs]);
 
-  const handleCreateItem = async () => {
+  const openCreateDialog = () => {
+    setEditingItem(null);
+    setFormData(emptyItemForm);
+    setIsDialogOpen(true);
+  };
+
+  const openEditDialog = (item: Item) => {
+    setEditingItem(item);
+    setFormData({
+      name: item.name,
+      sku: item.sku ?? "",
+      barcode: item.barcode ?? "",
+      description: "",
+      type: item.type,
+      categoryId: item.category?.id ?? "",
+      primaryUnitId: item.primaryUnit?.id ?? "",
+      hsnCode: item.hsnCode ?? "",
+      valuationMethod: item.valuationMethod ?? "FIFO",
+      purchasePrice: item.purchasePrice != null ? String(item.purchasePrice) : "",
+      sellingPrice: item.sellingPrice != null ? String(item.sellingPrice) : "",
+      mrp: item.mrp != null ? String(item.mrp) : "",
+      reorderLevel: item.reorderLevel != null ? String(item.reorderLevel) : "",
+      salesTaxId: "",
+      trackBatch: item.trackBatch,
+      trackSerial: item.trackSerial,
+      trackExpiry: item.trackExpiry,
+    });
+    setIsDialogOpen(true);
+  };
+
+  const handleSaveItem = async () => {
     if (!organizationId) return;
     if (!formData.name || !formData.primaryUnitId) {
       toast.error("Name and unit are required");
@@ -213,8 +254,12 @@ export default function ItemsPage() {
 
     setIsSubmitting(true);
     try {
-      const response = await fetch(`/api/organizations/${organizationId}/items`, {
-        method: "POST",
+      const url = editingItem
+        ? `/api/organizations/${organizationId}/items/${editingItem.id}`
+        : `/api/organizations/${organizationId}/items`;
+
+      const response = await fetch(url, {
+        method: editingItem ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...formData,
@@ -229,36 +274,215 @@ export default function ItemsPage() {
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || "Failed to create item");
+        throw new Error(
+          error.error || `Failed to ${editingItem ? "update" : "create"} item`
+        );
       }
 
-      toast.success("Item created successfully");
+      toast.success(editingItem ? "Item updated successfully" : "Item created successfully");
       setIsDialogOpen(false);
-      setFormData({
-        name: "",
-        sku: "",
-        barcode: "",
-        description: "",
-        type: "GOODS",
-        categoryId: "",
-        primaryUnitId: "",
-        hsnCode: "",
-        valuationMethod: "FIFO",
-        purchasePrice: "",
-        sellingPrice: "",
-        mrp: "",
-        reorderLevel: "",
-        salesTaxId: "",
-        trackBatch: false,
-        trackSerial: false,
-        trackExpiry: false,
-      });
+      setEditingItem(null);
+      setFormData(emptyItemForm);
       fetchItems();
     } catch (error) {
-      console.error("Error creating item:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to create item");
+      console.error("Error saving item:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to save item");
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleExport = () => {
+    if (filteredItems.length === 0) {
+      toast.error("Nothing to export");
+      return;
+    }
+    downloadCsv(
+      `items-${new Date().toISOString().slice(0, 10)}`,
+      filteredItems.map((item) => ({
+        Name: item.name,
+        SKU: item.sku ?? "",
+        Barcode: item.barcode ?? "",
+        Type: item.type,
+        Category: item.category?.name ?? "",
+        Unit: item.primaryUnit?.symbol ?? "",
+        HSN: item.hsnCode ?? "",
+        PurchasePrice: item.purchasePrice ?? "",
+        SellingPrice: item.sellingPrice ?? "",
+        MRP: item.mrp ?? "",
+        StockOnHand: item.totalStock,
+        ReorderLevel: item.reorderLevel ?? "",
+        ValuationMethod: item.valuationMethod,
+        Status: item.isActive ? "Active" : "Inactive",
+      }))
+    );
+    toast.success(`Exported ${filteredItems.length} items`);
+  };
+
+  /**
+   * CSV import. Expected header row (case-insensitive):
+   * name, sku, barcode, type, unit, hsn, purchasePrice, sellingPrice, mrp, reorderLevel
+   * `unit` matches a unit of measure by symbol or name.
+   */
+  const handleImportFile = async (file: File) => {
+    if (!organizationId) return;
+    setIsImporting(true);
+    try {
+      const text = await file.text();
+      const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
+      if (lines.length < 2) {
+        toast.error("The file has no data rows");
+        return;
+      }
+
+      const parseLine = (line: string): string[] => {
+        const cells: string[] = [];
+        let current = "";
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          if (inQuotes) {
+            if (char === '"' && line[i + 1] === '"') {
+              current += '"';
+              i++;
+            } else if (char === '"') {
+              inQuotes = false;
+            } else {
+              current += char;
+            }
+          } else if (char === '"') {
+            inQuotes = true;
+          } else if (char === ",") {
+            cells.push(current);
+            current = "";
+          } else {
+            current += char;
+          }
+        }
+        cells.push(current);
+        return cells.map((c) => c.trim());
+      };
+
+      const headers = parseLine(lines[0]).map((h) => h.toLowerCase());
+      const col = (row: string[], ...names: string[]) => {
+        for (const name of names) {
+          const index = headers.indexOf(name);
+          if (index !== -1 && row[index] !== undefined && row[index] !== "") {
+            return row[index];
+          }
+        }
+        return "";
+      };
+
+      const defaultUnit = units[0];
+      let created = 0;
+      const failures: string[] = [];
+
+      for (const line of lines.slice(1)) {
+        const row = parseLine(line);
+        const name = col(row, "name", "item", "item name");
+        if (!name) continue;
+
+        const unitText = col(row, "unit", "uom", "unit of measure").toLowerCase();
+        const unit =
+          units.find(
+            (u) =>
+              u.symbol.toLowerCase() === unitText || u.name.toLowerCase() === unitText
+          ) ?? defaultUnit;
+
+        if (!unit) {
+          failures.push(`${name}: no unit of measure available`);
+          continue;
+        }
+
+        const categoryName = col(row, "category").toLowerCase();
+        const category = categories.find(
+          (c) => c.name.toLowerCase() === categoryName
+        );
+        const numeric = (value: string) => {
+          const parsed = parseFloat(value);
+          return Number.isFinite(parsed) ? parsed : undefined;
+        };
+
+        try {
+          const response = await fetch(
+            `/api/organizations/${organizationId}/items`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                name,
+                sku: col(row, "sku") || undefined,
+                barcode: col(row, "barcode") || undefined,
+                type: col(row, "type").toUpperCase() === "SERVICES" ? "SERVICES" : "GOODS",
+                primaryUnitId: unit.id,
+                categoryId: category?.id,
+                hsnCode: col(row, "hsn", "hsncode", "hsn code") || undefined,
+                purchasePrice: numeric(col(row, "purchaseprice", "purchase price")),
+                sellingPrice: numeric(col(row, "sellingprice", "selling price")),
+                mrp: numeric(col(row, "mrp")),
+                reorderLevel: numeric(col(row, "reorderlevel", "reorder level")),
+              }),
+            }
+          );
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            failures.push(`${name}: ${error.error ?? response.statusText}`);
+          } else {
+            created++;
+          }
+        } catch {
+          failures.push(`${name}: request failed`);
+        }
+      }
+
+      if (created > 0) toast.success(`Imported ${created} items`);
+      if (failures.length > 0) {
+        toast.error(
+          `${failures.length} rows failed. First: ${failures[0]}`,
+          { duration: 8000 }
+        );
+      }
+      if (created === 0 && failures.length === 0) {
+        toast.error("No importable rows found — a 'name' column is required");
+      }
+      fetchItems();
+    } catch (error) {
+      console.error("Error importing items:", error);
+      toast.error("Failed to read the import file");
+    } finally {
+      setIsImporting(false);
+      if (importInputRef.current) importInputRef.current.value = "";
+    }
+  };
+
+  const handlePrintBarcode = async (item: Item) => {
+    if (!organizationId) return;
+    try {
+      const response = await fetch(
+        `/api/organizations/${organizationId}/barcode?view=generate&itemId=${item.id}`
+      );
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || "Failed to generate barcode");
+      }
+      const data = await response.json();
+      printDocument({
+        title: "Item Barcode",
+        subtitle: item.name,
+        fields: [
+          { label: "Item", value: item.name },
+          { label: "SKU", value: item.sku ?? "-" },
+          { label: "Barcode", value: data.barcodeText },
+          { label: "Format", value: data.format },
+        ],
+        images: [{ src: data.image, caption: data.barcodeText }],
+      });
+    } catch (error) {
+      console.error("Error printing barcode:", error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to generate barcode"
+      );
     }
   };
 
@@ -460,20 +684,24 @@ export default function ItemsPage() {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuLabel>Actions</DropdownMenuLabel>
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setDetailsItem(row.original)}>
               <Eye className="mr-2 h-4 w-4" />
               View Details
             </DropdownMenuItem>
-            <DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() =>
+                router.push(`/inventory/movements?itemId=${row.original.id}`)
+              }
+            >
               <Package className="mr-2 h-4 w-4" />
               Stock Movement
             </DropdownMenuItem>
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handlePrintBarcode(row.original)}>
               <Barcode className="mr-2 h-4 w-4" />
               Print Barcode
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={() => openEditDialog(row.original)}>
               <Pencil className="mr-2 h-4 w-4" />
               Edit
             </DropdownMenuItem>
@@ -516,26 +744,57 @@ export default function ItemsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline">
-            <Upload className="mr-2 h-4 w-4" />
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleImportFile(file);
+            }}
+          />
+          <Button
+            variant="outline"
+            disabled={isImporting}
+            onClick={() => importInputRef.current?.click()}
+          >
+            {isImporting ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Upload className="mr-2 h-4 w-4" />
+            )}
             Import
           </Button>
-          <Button variant="outline">
+          <Button variant="outline" onClick={handleExport}>
             <Download className="mr-2 h-4 w-4" />
             Export
           </Button>
-          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+          <Dialog
+            open={isDialogOpen}
+            onOpenChange={(open) => {
+              setIsDialogOpen(open);
+              if (!open) {
+                setEditingItem(null);
+                setFormData(emptyItemForm);
+              }
+            }}
+          >
             <DialogTrigger asChild>
-              <Button>
+              <Button onClick={openCreateDialog}>
                 <Plus className="mr-2 h-4 w-4" />
                 Add Item
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
-                <DialogTitle>Create New Item</DialogTitle>
+                <DialogTitle>
+                  {editingItem ? "Edit Item" : "Create New Item"}
+                </DialogTitle>
                 <DialogDescription>
-                  Add a new product or service to your inventory
+                  {editingItem
+                    ? "Update this item's details"
+                    : "Add a new product or service to your inventory"}
                 </DialogDescription>
               </DialogHeader>
               <div className="grid gap-4 py-4">
@@ -801,9 +1060,9 @@ export default function ItemsPage() {
                 >
                   Cancel
                 </Button>
-                <Button onClick={handleCreateItem} disabled={isSubmitting}>
+                <Button onClick={handleSaveItem} disabled={isSubmitting}>
                   {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Create Item
+                  {editingItem ? "Save Changes" : "Create Item"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -889,6 +1148,69 @@ export default function ItemsPage() {
           )}
         </CardContent>
       </Card>
+
+      {detailsItem && (
+        <RecordDetailsDialog
+          open={!!detailsItem}
+          onOpenChange={(open) => !open && setDetailsItem(null)}
+          title={detailsItem.name}
+          description={detailsItem.sku ? `SKU ${detailsItem.sku}` : undefined}
+          status={{
+            label: detailsItem.isActive ? "Active" : "Inactive",
+            variant: detailsItem.isActive ? "default" : "secondary",
+          }}
+          sections={[
+            {
+              title: "Identification",
+              fields: [
+                { label: "Type", value: detailsItem.type },
+                { label: "Category", value: detailsItem.category?.name },
+                { label: "SKU", value: detailsItem.sku },
+                { label: "Barcode", value: detailsItem.barcode },
+                { label: "HSN / SAC", value: detailsItem.hsnCode },
+                {
+                  label: "Unit",
+                  value: detailsItem.primaryUnit
+                    ? `${detailsItem.primaryUnit.name} (${detailsItem.primaryUnit.symbol})`
+                    : null,
+                },
+              ],
+            },
+            {
+              title: "Pricing",
+              fields: [
+                { label: "Purchase Price", value: formatCurrency(detailsItem.purchasePrice) },
+                { label: "Selling Price", value: formatCurrency(detailsItem.sellingPrice) },
+                { label: "MRP", value: formatCurrency(detailsItem.mrp) },
+                { label: "Valuation Method", value: detailsItem.valuationMethod },
+              ],
+            },
+            {
+              title: "Stock",
+              fields: [
+                { label: "Stock on Hand", value: detailsItem.totalStock },
+                { label: "Reorder Level", value: detailsItem.reorderLevel },
+                { label: "Batch Tracking", value: detailsItem.trackBatch ? "Yes" : "No" },
+                { label: "Serial Tracking", value: detailsItem.trackSerial ? "Yes" : "No" },
+                { label: "Expiry Tracking", value: detailsItem.trackExpiry ? "Yes" : "No" },
+              ],
+            },
+          ]}
+          actions={
+            <Button
+              variant="outline"
+              onClick={() => {
+                const item = detailsItem;
+                setDetailsItem(null);
+                openEditDialog(item);
+              }}
+            >
+              <Pencil className="mr-2 h-4 w-4" />
+              Edit
+            </Button>
+          }
+        />
+      )}
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={!!deleteItemId} onOpenChange={() => setDeleteItemId(null)}>

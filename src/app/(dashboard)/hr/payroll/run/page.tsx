@@ -75,6 +75,15 @@ export default function PayrollRunPage() {
   const [month, setMonth] = React.useState(lastMonth.getUTCMonth() + 1);
   const [year, setYear] = React.useState(lastMonth.getUTCFullYear());
 
+  // "Process Payroll" on a run row links here with the period it selected.
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const m = Number(params.get("month"));
+    const y = Number(params.get("year"));
+    if (m >= 1 && m <= 12) setMonth(m);
+    if (y >= 2000 && y <= 2100) setYear(y);
+  }, []);
+
   const [bankAccounts, setBankAccounts] = React.useState<BankAccount[]>([]);
   const [bankAccountId, setBankAccountId] = React.useState<string>("");
 

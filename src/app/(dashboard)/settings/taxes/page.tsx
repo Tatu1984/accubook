@@ -50,6 +50,8 @@ import {
   FileText,
   Percent,
   AlertCircle,
+  Loader2,
+  Copy,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -87,68 +89,17 @@ function splitOf(tax: TaxConfig) {
 }
 
 /**
- * A short reference list of common codes, not the organization's own data
- * and not the full HSN/SAC schedule. `/api/hsn-search` is the live lookup.
+ * HSN/SAC are a national schedule, not organization data — there is no model
+ * to create rows in, which is why "Add HSN"/"Add SAC" had nothing to do. The
+ * two tabs are now a live lookup over `/api/hsn-search`, the same library the
+ * invoice and item forms auto-complete against.
  */
-const hsnCodes = [
-  {
-    code: "8471",
-    description: "Automatic data processing machines and units",
-    gstRate: 18,
-    category: "Electronics",
-  },
-  {
-    code: "7308",
-    description: "Structures and parts of structures of iron or steel",
-    gstRate: 18,
-    category: "Metals",
-  },
-  {
-    code: "3926",
-    description: "Articles of plastics and articles of other materials",
-    gstRate: 18,
-    category: "Plastics",
-  },
-  {
-    code: "8544",
-    description: "Insulated wire, cable and other insulated electric conductors",
-    gstRate: 18,
-    category: "Electrical",
-  },
-  {
-    code: "9403",
-    description: "Furniture and parts thereof",
-    gstRate: 18,
-    category: "Furniture",
-  },
-];
-
-const sacCodes = [
-  {
-    code: "998311",
-    description: "Management consulting and management services",
-    gstRate: 18,
-    category: "Professional Services",
-  },
-  {
-    code: "998312",
-    description: "Business consulting services",
-    gstRate: 18,
-    category: "Professional Services",
-  },
-  {
-    code: "998313",
-    description: "Information technology consulting and support services",
-    gstRate: 18,
-    category: "IT Services",
-  },
-  {
-    code: "998314",
-    description: "IT design and development services",
-    gstRate: 18,
-    category: "IT Services",
-  },
-];
+interface CodeEntry {
+  code: string;
+  description: string;
+  defaultGstRate: number;
+  type: "HSN" | "SAC";
+}
 
 const EMPTY_FORM = { name: "", code: "", taxType: "GST", rate: "", description: "", isActive: true };
 
@@ -163,6 +114,117 @@ export default function TaxesPage() {
   /** The row being edited, or null when the dialog is creating a new rate. */
   const [editing, setEditing] = useState<TaxConfig | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
+
+  const [hsnQuery, setHsnQuery] = useState("");
+  const [hsnResults, setHsnResults] = useState<CodeEntry[]>([]);
+  const [hsnLoading, setHsnLoading] = useState(false);
+  const [sacQuery, setSacQuery] = useState("");
+  const [sacResults, setSacResults] = useState<CodeEntry[]>([]);
+  const [sacLoading, setSacLoading] = useState(false);
+
+  const searchCodes = React.useCallback(
+    async (type: "HSN" | "SAC", query: string) => {
+      const setResults = type === "HSN" ? setHsnResults : setSacResults;
+      const setBusy = type === "HSN" ? setHsnLoading : setSacLoading;
+      if (query.trim().length < 2) {
+        setResults([]);
+        return;
+      }
+      setBusy(true);
+      try {
+        const r = await fetch(
+          `/api/hsn-search?q=${encodeURIComponent(query.trim())}&type=${type}&limit=25`
+        );
+        if (!r.ok) throw new Error("Lookup failed");
+        const body = await r.json();
+        setResults((body.results ?? []) as CodeEntry[]);
+      } catch {
+        setResults([]);
+        toast.error(`${type} lookup failed`);
+      } finally {
+        setBusy(false);
+      }
+    },
+    []
+  );
+
+  // Debounced so a lookup fires as the user types rather than on a button.
+  React.useEffect(() => {
+    const id = setTimeout(() => searchCodes("HSN", hsnQuery), 300);
+    return () => clearTimeout(id);
+  }, [hsnQuery, searchCodes]);
+
+  React.useEffect(() => {
+    const id = setTimeout(() => searchCodes("SAC", sacQuery), 300);
+    return () => clearTimeout(id);
+  }, [sacQuery, searchCodes]);
+
+  const copyCode = async (code: string) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      toast.success(`Copied ${code}`);
+    } catch {
+      toast.error("Clipboard is unavailable in this browser");
+    }
+  };
+
+  const [gstSettings, setGstSettings] = useState({
+    gstNo: "",
+    state: "",
+    compositionScheme: false,
+    compositionRate: "",
+  });
+  const [gstLoaded, setGstLoaded] = useState(false);
+  const [savingGst, setSavingGst] = useState(false);
+
+  React.useEffect(() => {
+    if (!organizationId) return;
+    (async () => {
+      try {
+        const r = await fetch(`/api/organizations/${organizationId}`);
+        if (!r.ok) return;
+        const body = await r.json();
+        const org = body.data ?? body;
+        setGstSettings({
+          gstNo: org.gstNo ?? "",
+          state: org.state ?? "",
+          compositionScheme: Boolean(org.compositionScheme),
+          compositionRate:
+            org.compositionRate != null ? String(org.compositionRate) : "",
+        });
+      } catch {
+        // Leave the form blank rather than showing a placeholder GSTIN.
+      } finally {
+        setGstLoaded(true);
+      }
+    })();
+  }, [organizationId]);
+
+  const handleSaveGstSettings = async () => {
+    if (!organizationId) return;
+    setSavingGst(true);
+    try {
+      const r = await fetch(`/api/organizations/${organizationId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          gstNo: gstSettings.gstNo || null,
+          state: gstSettings.state || null,
+          compositionScheme: gstSettings.compositionScheme,
+          compositionRate: gstSettings.compositionScheme
+            ? Number(gstSettings.compositionRate) || null
+            : null,
+        }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || "Failed to save GST settings");
+      toast.success("GST settings saved");
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to save GST settings");
+    } finally {
+      setSavingGst(false);
+    }
+  };
 
   /**
    * This page used to render a hardcoded list of seven invented rates and
@@ -371,8 +433,10 @@ export default function TaxesPage() {
             <Receipt className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{hsnCodes.length}</div>
-            <p className="text-xs text-muted-foreground">Reference list, for goods</p>
+            <div className="text-2xl font-bold">{hsnResults.length}</div>
+            <p className="text-xs text-muted-foreground">
+              Matches for the current lookup
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -381,8 +445,10 @@ export default function TaxesPage() {
             <FileText className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{sacCodes.length}</div>
-            <p className="text-xs text-muted-foreground">Reference list, for services</p>
+            <div className="text-2xl font-bold">{sacResults.length}</div>
+            <p className="text-xs text-muted-foreground">
+              Matches for the current lookup
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -533,48 +599,61 @@ export default function TaxesPage() {
                   <div className="relative">
                     <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                     <Input
-                      placeholder="Search HSN codes..."
-                      className="pl-8 w-[250px]"
+                      placeholder="Search by code or description…"
+                      className="pl-8 w-[280px]"
+                      value={hsnQuery}
+                      onChange={(e) => setHsnQuery(e.target.value)}
                     />
                   </div>
-                  <Button>
-                    <Plus className="mr-2 h-4 w-4" />
-                    Add HSN
-                  </Button>
                 </div>
               </div>
             </CardHeader>
             <CardContent>
+              {hsnLoading ? (
+                <div className="flex items-center justify-center py-10">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : hsnResults.length === 0 ? (
+                <div className="py-10 text-center text-sm text-muted-foreground">
+                  {hsnQuery.trim().length < 2
+                    ? "Type at least two characters to search the HSN schedule."
+                    : "No HSN codes matched that search."}
+                </div>
+              ) : (
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>HSN Code</TableHead>
                     <TableHead>Description</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead className="text-right">GST Rate</TableHead>
+                    <TableHead className="text-right">Default GST Rate</TableHead>
                     <TableHead className="w-[50px]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {hsnCodes.map((hsn) => (
-                    <TableRow key={hsn.code}>
+                  {hsnResults.map((entry) => (
+                    <TableRow key={entry.code}>
                       <TableCell className="font-mono font-medium">
-                        {hsn.code}
+                        {entry.code}
                       </TableCell>
-                      <TableCell>{hsn.description}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{hsn.category}</Badge>
+                      <TableCell>{entry.description}</TableCell>
+                      <TableCell className="text-right">
+                        {entry.defaultGstRate}%
                       </TableCell>
-                      <TableCell className="text-right">{hsn.gstRate}%</TableCell>
                       <TableCell>
-                        <Button variant="ghost" size="icon">
-                          <Edit className="h-4 w-4" />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Copy ${entry.code}`}
+                          onClick={() => copyCode(entry.code)}
+                        >
+                          <Copy className="h-4 w-4" />
                         </Button>
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -593,48 +672,61 @@ export default function TaxesPage() {
                   <div className="relative">
                     <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                     <Input
-                      placeholder="Search SAC codes..."
-                      className="pl-8 w-[250px]"
+                      placeholder="Search by code or description…"
+                      className="pl-8 w-[280px]"
+                      value={sacQuery}
+                      onChange={(e) => setSacQuery(e.target.value)}
                     />
                   </div>
-                  <Button>
-                    <Plus className="mr-2 h-4 w-4" />
-                    Add SAC
-                  </Button>
                 </div>
               </div>
             </CardHeader>
             <CardContent>
+              {sacLoading ? (
+                <div className="flex items-center justify-center py-10">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : sacResults.length === 0 ? (
+                <div className="py-10 text-center text-sm text-muted-foreground">
+                  {sacQuery.trim().length < 2
+                    ? "Type at least two characters to search the SAC schedule."
+                    : "No SAC codes matched that search."}
+                </div>
+              ) : (
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>SAC Code</TableHead>
                     <TableHead>Description</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead className="text-right">GST Rate</TableHead>
+                    <TableHead className="text-right">Default GST Rate</TableHead>
                     <TableHead className="w-[50px]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sacCodes.map((sac) => (
-                    <TableRow key={sac.code}>
+                  {sacResults.map((entry) => (
+                    <TableRow key={entry.code}>
                       <TableCell className="font-mono font-medium">
-                        {sac.code}
+                        {entry.code}
                       </TableCell>
-                      <TableCell>{sac.description}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{sac.category}</Badge>
+                      <TableCell>{entry.description}</TableCell>
+                      <TableCell className="text-right">
+                        {entry.defaultGstRate}%
                       </TableCell>
-                      <TableCell className="text-right">{sac.gstRate}%</TableCell>
                       <TableCell>
-                        <Button variant="ghost" size="icon">
-                          <Edit className="h-4 w-4" />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Copy ${entry.code}`}
+                          onClick={() => copyCode(entry.code)}
+                        >
+                          <Copy className="h-4 w-4" />
                         </Button>
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -650,12 +742,27 @@ export default function TaxesPage() {
             <CardContent className="space-y-6">
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>GSTIN</Label>
-                  <Input defaultValue="27DEMO12345A1ZA" />
+                  <Label htmlFor="org-gstin">GSTIN</Label>
+                  <Input
+                    id="org-gstin"
+                    placeholder="27AAAAA0000A1Z5"
+                    value={gstSettings.gstNo}
+                    onChange={(e) =>
+                      setGstSettings({ ...gstSettings, gstNo: e.target.value })
+                    }
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>GST Registration Type</Label>
-                  <Select defaultValue="regular">
+                  <Select
+                    value={gstSettings.compositionScheme ? "composition" : "regular"}
+                    onValueChange={(value) =>
+                      setGstSettings({
+                        ...gstSettings,
+                        compositionScheme: value === "composition",
+                      })
+                    }
+                  >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -670,7 +777,12 @@ export default function TaxesPage() {
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label>State</Label>
-                  <Select defaultValue="MH">
+                  <Select
+                    value={gstSettings.state || undefined}
+                    onValueChange={(value) =>
+                      setGstSettings({ ...gstSettings, state: value })
+                    }
+                  >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -757,8 +869,37 @@ export default function TaxesPage() {
                   <Switch />
                 </div>
               </div>
+              {gstSettings.compositionScheme && (
+                <div className="space-y-2 max-w-xs">
+                  <Label htmlFor="composition-rate">Composition Rate (%)</Label>
+                  <Input
+                    id="composition-rate"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="1"
+                    value={gstSettings.compositionRate}
+                    onChange={(e) =>
+                      setGstSettings({
+                        ...gstSettings,
+                        compositionRate: e.target.value,
+                      })
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Required under the composition scheme — 1% trader/manufacturer,
+                    5% restaurant, 6% service.
+                  </p>
+                </div>
+              )}
               <div className="flex justify-end">
-                <Button>Save Settings</Button>
+                <Button
+                  onClick={handleSaveGstSettings}
+                  disabled={savingGst || !gstLoaded}
+                >
+                  {savingGst && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Save Settings
+                </Button>
               </div>
             </CardContent>
           </Card>

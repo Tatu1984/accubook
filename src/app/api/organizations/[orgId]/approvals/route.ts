@@ -402,3 +402,129 @@ export const DELETE = withOrgAuth(async (request, { orgId, orgUser }) => {
     );
   }
 });
+
+/**
+ * PUT — update a workflow (rename, retarget, toggle active, replace its steps).
+ *
+ * The workflows table offered Edit and Activate/Deactivate with only POST and
+ * DELETE on this route, so neither action had anywhere to go. Steps are
+ * replaced wholesale when supplied: they are ordered and numbered, so patching
+ * them individually would let the sequence drift.
+ */
+const updateWorkflowSchema = z
+  .object({
+    workflowId: z.string().min(1, "Workflow ID is required"),
+    name: optional(z.string().min(1)),
+    entityType: optional(
+      z.enum(["VOUCHER", "BILL", "INVOICE", "PURCHASE_ORDER", "EXPENSE_CLAIM", "LEAVE"])
+    ),
+    isActive: optional(z.boolean()),
+    steps: optional(
+      z
+        .array(
+          z
+            .object({
+              stepNumber: z.number().int().min(1),
+              approverType: z.enum(["ROLE", "USER", "MANAGER"]),
+              approverId: optional(z.string()),
+              amountLimit: optional(z.number().nonnegative()),
+              isRequired: z.boolean().default(true),
+            })
+            .strict()
+        )
+        .min(1, "At least one step is required")
+    ),
+  })
+  .strict();
+
+export const PUT = withOrgAuth(async (request, { orgId, orgUser }) => {
+  if (!hasPermission(orgUser, "organization", "approvals", "write")) {
+    return forbidden("You don't have permission to manage approval workflows");
+  }
+  try {
+    const body = await request.json();
+    const data = updateWorkflowSchema.parse(body);
+
+    const workflow = await prisma.approvalWorkflow.findFirst({
+      where: { id: data.workflowId, organizationId: orgId },
+    });
+    if (!workflow) return notFound("Workflow not found");
+
+    // Same cross-tenant guard the create path applies: a USER step must name a
+    // member of this organization, a ROLE step a role somebody here holds.
+    if (data.steps) {
+      const userIds = data.steps
+        .filter((s) => s.approverType === "USER" && s.approverId)
+        .map((s) => s.approverId!);
+      if (userIds.length > 0) {
+        const found = await prisma.organizationUser.findMany({
+          where: { organizationId: orgId, userId: { in: userIds } },
+          select: { userId: true },
+        });
+        const foundSet = new Set(found.map((u) => u.userId));
+        const stranger = userIds.find((id) => !foundSet.has(id));
+        if (stranger) {
+          return badRequest(
+            `USER step approverId ${stranger} is not a member of this organization`
+          );
+        }
+      }
+
+      const roleIds = data.steps
+        .filter((s) => s.approverType === "ROLE" && s.approverId)
+        .map((s) => s.approverId!);
+      if (roleIds.length > 0) {
+        const holders = await prisma.organizationUser.findMany({
+          where: { organizationId: orgId, roleId: { in: roleIds }, isActive: true },
+          select: { roleId: true },
+        });
+        const holderSet = new Set(holders.map((h) => h.roleId));
+        const unusable = roleIds.find((id) => !holderSet.has(id));
+        if (unusable) {
+          return badRequest(
+            `No active member of this organization holds role ${unusable}, so that step could never be routed`
+          );
+        }
+      }
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      if (data.steps) {
+        await tx.approvalWorkflowStep.deleteMany({
+          where: { workflowId: data.workflowId },
+        });
+        await tx.approvalWorkflowStep.createMany({
+          data: data.steps.map((step) => ({
+            workflowId: data.workflowId,
+            stepNumber: step.stepNumber,
+            approverType: step.approverType,
+            approverId: step.approverId,
+            amountLimit: step.amountLimit,
+            isRequired: step.isRequired,
+          })),
+        });
+      }
+
+      return tx.approvalWorkflow.update({
+        where: { id: data.workflowId },
+        data: {
+          name: data.name,
+          entityType: data.entityType,
+          isActive: data.isActive,
+        },
+        include: { steps: { orderBy: { stepNumber: "asc" } } },
+      });
+    });
+
+    return NextResponse.json(updated);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return badRequest("Validation failed", error.issues);
+    }
+    logger.error({ err: error }, "Error updating workflow");
+    return NextResponse.json(
+      { error: "Failed to update workflow" },
+      { status: 500 }
+    );
+  }
+});

@@ -52,6 +52,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useOrganization } from "@/frontend/hooks/use-organization";
 import { toast } from "sonner";
+import { printDocument } from "@/frontend/utils/print-document";
 import { downloadCsv } from "@/frontend/utils/export-csv";
 
 // Types matching API response
@@ -158,6 +159,75 @@ export default function VouchersPage() {
   const [selectedType, setSelectedType] = React.useState<string>(initialType);
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [voucherToDelete, setVoucherToDelete] = React.useState<string | null>(null);
+  const [duplicatingId, setDuplicatingId] = React.useState<string | null>(null);
+
+  const handlePrintVoucher = (voucher: Voucher) => {
+    printDocument({
+      title: voucher.voucherType?.name ?? "Voucher",
+      subtitle: voucher.voucherNumber,
+      fields: [
+        { label: "Date", value: new Date(voucher.date).toLocaleDateString("en-IN") },
+        { label: "Type", value: voucher.voucherType?.name },
+        { label: "Reference", value: voucher.referenceNo ?? "-" },
+        { label: "Status", value: voucher.status },
+      ],
+      table: {
+        columns: ["Ledger", "Debit", "Credit", "Narration"],
+        rows: (voucher.entries ?? []).map((entry) => [
+          entry.ledger?.name ?? "",
+          Number(entry.debitAmount) ? Number(entry.debitAmount).toFixed(2) : "",
+          Number(entry.creditAmount) ? Number(entry.creditAmount).toFixed(2) : "",
+          entry.narration ?? "",
+        ]),
+      },
+      totals: [
+        { label: "Total Debit", value: Number(voucher.totalDebit).toFixed(2) },
+        { label: "Total Credit", value: Number(voucher.totalCredit).toFixed(2) },
+      ],
+      notes: voucher.narration ?? null,
+    });
+  };
+
+  /**
+   * Duplicating posts a fresh DRAFT carrying the same lines. Vouchers are
+   * numbered by the server, so copying one cannot reuse its number.
+   */
+  const handleDuplicateVoucher = async (voucher: Voucher) => {
+    if (!organizationId) return;
+    if (!voucher.entries || voucher.entries.length < 2) {
+      toast.error("This voucher has too few entries to copy");
+      return;
+    }
+    setDuplicatingId(voucher.id);
+    try {
+      const r = await fetch(`/api/organizations/${organizationId}/vouchers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          voucherTypeId: voucher.voucherType.id,
+          date: new Date().toISOString().split("T")[0],
+          narration: voucher.narration,
+          referenceNo: voucher.referenceNo,
+          entries: voucher.entries.map((entry) => ({
+            ledgerId: entry.ledgerId,
+            debitAmount: Number(entry.debitAmount),
+            creditAmount: Number(entry.creditAmount),
+            narration: entry.narration,
+          })),
+        }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || "Failed to duplicate voucher");
+      toast.success(
+        `Duplicated as ${body.voucherNumber ?? "a new draft"}`
+      );
+      fetchVouchers();
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to duplicate voucher");
+    } finally {
+      setDuplicatingId(null);
+    }
+  };
   const [pagination, setPagination] = React.useState({
     page: 1,
     limit: 50,
@@ -417,11 +487,14 @@ export default function VouchersPage() {
                   View Details
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handlePrintVoucher(voucher)}>
                 <Printer className="mr-2 h-4 w-4" />
-                Print
+                Print / Save as PDF
               </DropdownMenuItem>
-              <DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={duplicatingId === voucher.id}
+                onClick={() => handleDuplicateVoucher(voucher)}
+              >
                 <Copy className="mr-2 h-4 w-4" />
                 Duplicate
               </DropdownMenuItem>

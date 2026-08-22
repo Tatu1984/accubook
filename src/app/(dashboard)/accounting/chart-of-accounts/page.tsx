@@ -156,7 +156,19 @@ function TreeItem({
         onClick={() => hasChildren && setIsExpanded(!isExpanded)}
       >
         {hasChildren ? (
-          <Button variant="ghost" size="icon" className="h-5 w-5 p-0">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-5 w-5 p-0"
+            aria-label={isExpanded ? "Collapse group" : "Expand group"}
+            aria-expanded={isExpanded}
+            onClick={(e) => {
+              // The row already toggles on click; stop the bubble so the two
+              // handlers don't fire in succession and cancel each other out.
+              e.stopPropagation();
+              setIsExpanded(!isExpanded);
+            }}
+          >
             {isExpanded ? (
               <ChevronDown className="h-4 w-4" />
             ) : (

@@ -75,6 +75,7 @@ import {
   DropdownMenuTrigger,
 } from "@/frontend/components/ui/dropdown-menu";
 import { useOrganization } from "@/frontend/hooks/use-organization";
+import { downloadCsv } from "@/frontend/utils/export-csv";
 import { toast } from "sonner";
 
 interface Party {
@@ -281,6 +282,31 @@ export default function PartiesPage() {
   };
 
   // Filter parties by search term
+  const exportParties = (rows: Party[], label: string) => {
+    if (rows.length === 0) {
+      toast.error("Nothing to export");
+      return;
+    }
+    downloadCsv(
+      `${label}-${new Date().toISOString().slice(0, 10)}`,
+      rows.map((party) => ({
+        Name: party.name,
+        Type: party.type,
+        Email: party.email ?? "",
+        Phone: party.phone ?? "",
+        GSTIN: party.gstNo ?? "",
+        PAN: party.panNo ?? "",
+        City: party.billingCity ?? "",
+        State: party.billingState ?? "",
+        CreditLimit: party.creditLimit ?? "",
+        CreditDays: party.creditDays ?? "",
+        OpeningBalance: party.openingBalance ?? "",
+        OpeningBalanceType: party.openingBalanceType ?? "",
+      }))
+    );
+    toast.success(`Exported ${rows.length} records`);
+  };
+
   const filteredCustomers = React.useMemo(() => {
     if (!searchTerm) return customers;
     const term = searchTerm.toLowerCase();
@@ -628,7 +654,12 @@ export default function PartiesPage() {
                       onChange={(e) => setSearchTerm(e.target.value)}
                     />
                   </div>
-                  <Button variant="outline" size="icon">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    aria-label="Export customers to CSV"
+                    onClick={() => exportParties(filteredCustomers, "customers")}
+                  >
                     <Download className="h-4 w-4" />
                   </Button>
                 </div>
@@ -771,7 +802,12 @@ export default function PartiesPage() {
                       onChange={(e) => setSearchTerm(e.target.value)}
                     />
                   </div>
-                  <Button variant="outline" size="icon">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    aria-label="Export vendors to CSV"
+                    onClick={() => exportParties(filteredVendors, "vendors")}
+                  >
                     <Download className="h-4 w-4" />
                   </Button>
                 </div>

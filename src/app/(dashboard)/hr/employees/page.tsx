@@ -65,6 +65,9 @@ import { Tabs, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/frontend/components/ui/avatar";
 import { cn } from "@/shared/utils/common.util";
 import { useOrganization } from "@/frontend/hooks/use-organization";
+import { RecordDetailsDialog } from "@/frontend/components/ui/record-details-dialog";
+import { downloadCsv } from "@/frontend/utils/export-csv";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 // Types
@@ -127,8 +130,18 @@ function getInitials(firstName: string, lastName: string) {
   return `${firstName[0]}${lastName[0]}`.toUpperCase();
 }
 
-// Column definitions
-const columns: ColumnDef<Employee>[] = [
+interface EmployeeActions {
+  onViewProfile: (employee: Employee) => void;
+  onViewPayslips: (employee: Employee) => void;
+  onViewAttendance: (employee: Employee) => void;
+  onEdit: (employee: Employee) => void;
+  onDeactivate: (employee: Employee) => void;
+}
+
+// Column definitions — built per render so the row menu reaches the page's
+// handlers. As a module-level constant none of its actions could be wired.
+function buildColumns(actions: EmployeeActions): ColumnDef<Employee>[] {
+  return [
   {
     id: "select",
     header: ({ table }) => (
@@ -253,6 +266,7 @@ const columns: ColumnDef<Employee>[] = [
   {
     id: "actions",
     cell: ({ row }) => {
+      const employee = row.original;
       return (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -263,24 +277,27 @@ const columns: ColumnDef<Employee>[] = [
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuLabel>Actions</DropdownMenuLabel>
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={() => actions.onViewProfile(employee)}>
               <Eye className="mr-2 h-4 w-4" />
               View Profile
             </DropdownMenuItem>
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={() => actions.onViewPayslips(employee)}>
               <FileText className="mr-2 h-4 w-4" />
               View Payslips
             </DropdownMenuItem>
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={() => actions.onViewAttendance(employee)}>
               <Calendar className="mr-2 h-4 w-4" />
               Attendance
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={() => actions.onEdit(employee)}>
               <Pencil className="mr-2 h-4 w-4" />
               Edit
             </DropdownMenuItem>
-            <DropdownMenuItem className="text-red-600">
+            <DropdownMenuItem
+              className="text-red-600"
+              onClick={() => actions.onDeactivate(employee)}
+            >
               <Trash2 className="mr-2 h-4 w-4" />
               Deactivate
             </DropdownMenuItem>
@@ -289,7 +306,8 @@ const columns: ColumnDef<Employee>[] = [
       );
     },
   },
-];
+  ];
+}
 
 const initialFormData = {
   employeeCode: "",
@@ -307,7 +325,11 @@ const initialFormData = {
 };
 
 export default function EmployeesPage() {
+  const router = useRouter();
   const { organizationId, isLoading: orgLoading } = useOrganization();
+  const [detailsEmployee, setDetailsEmployee] = React.useState<Employee | null>(null);
+  const [isImporting, setIsImporting] = React.useState(false);
+  const importInputRef = React.useRef<HTMLInputElement>(null);
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
   const [selectedStatus, setSelectedStatus] = React.useState<string>("all");
   const [employeesData, setEmployeesData] = React.useState<Employee[]>([]);
@@ -329,10 +351,16 @@ export default function EmployeesPage() {
     if (!organizationId) return;
     setIsLoading(true);
     try {
-      const response = await fetch(`/api/organizations/${organizationId}/employees`);
+      const response = await fetch(`/api/organizations/${organizationId}/employees?limit=500`);
       if (response.ok) {
-        const data = await response.json();
-        if (data.length > 0) {
+        const payload = await response.json();
+        /**
+         * The endpoint answers `{ data, pagination }`. This read the envelope
+         * itself as the array, so `data.length` was always undefined and the
+         * roster rendered empty no matter how many employees existed.
+         */
+        const data = payload.data ?? [];
+        {
           type ApiEmployee = {
             id: string;
             employeeCode: string;
@@ -385,7 +413,7 @@ export default function EmployeesPage() {
     setIsSaving(true);
     try {
       const url = editingEmployee
-        ? `/api/organizations/${organizationId}/employees?id=${editingEmployee.id}`
+        ? `/api/organizations/${organizationId}/employees/${editingEmployee.id}`
         : `/api/organizations/${organizationId}/employees`;
 
       const response = await fetch(url, {
@@ -438,10 +466,12 @@ export default function EmployeesPage() {
 
     try {
       const response = await fetch(
-        `/api/organizations/${organizationId}/employees?id=${employeeToDelete.id}`,
-        { method: "DELETE" }
+        `/api/organizations/${organizationId}/employees/${employeeToDelete.id}`,
+        { method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "TERMINATED" }) }
       );
-      if (!response.ok) throw new Error("Failed to delete");
+      if (!response.ok) throw new Error("Failed to deactivate");
       toast.success("Employee deactivated successfully");
       fetchEmployees();
     } catch {
@@ -456,6 +486,163 @@ export default function EmployeesPage() {
     if (selectedStatus === "all") return employeesData;
     return employeesData.filter((emp) => emp.status === selectedStatus);
   }, [selectedStatus, employeesData]);
+
+  const columns = React.useMemo(
+    () =>
+      buildColumns({
+        onViewProfile: setDetailsEmployee,
+        onViewPayslips: (employee) =>
+          router.push(`/hr/payroll?employeeCode=${encodeURIComponent(employee.employeeCode)}`),
+        onViewAttendance: (employee) =>
+          router.push(`/hr/attendance?employeeCode=${encodeURIComponent(employee.employeeCode)}`),
+        onEdit: handleEdit,
+        onDeactivate: (employee) => {
+          setEmployeeToDelete(employee);
+          setDeleteDialogOpen(true);
+        },
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [router]
+  );
+
+  const handleExport = () => {
+    if (filteredEmployees.length === 0) {
+      toast.error("Nothing to export");
+      return;
+    }
+    downloadCsv(
+      `employees-${new Date().toISOString().slice(0, 10)}`,
+      filteredEmployees.map((emp) => ({
+        Code: emp.employeeCode,
+        FirstName: emp.firstName,
+        LastName: emp.lastName,
+        Email: emp.email,
+        Phone: emp.phone,
+        Department: emp.department,
+        Designation: emp.designation,
+        JoiningDate: formatDate(emp.joiningDate),
+        EmploymentType: emp.employmentType,
+        CTC: emp.ctc,
+        Status: emp.status,
+      }))
+    );
+    toast.success(`Exported ${filteredEmployees.length} employees`);
+  };
+
+  /**
+   * CSV import. Header row (case-insensitive) must contain at least
+   * `employeeCode`, `firstName` and `joiningDate`.
+   */
+  const handleImportFile = async (file: File) => {
+    if (!organizationId) return;
+    setIsImporting(true);
+    try {
+      const text = await file.text();
+      const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
+      if (lines.length < 2) {
+        toast.error("The file has no data rows");
+        return;
+      }
+
+      const parseLine = (line: string): string[] => {
+        const cells: string[] = [];
+        let current = "";
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          if (inQuotes) {
+            if (char === '"' && line[i + 1] === '"') {
+              current += '"';
+              i++;
+            } else if (char === '"') {
+              inQuotes = false;
+            } else {
+              current += char;
+            }
+          } else if (char === '"') {
+            inQuotes = true;
+          } else if (char === ",") {
+            cells.push(current);
+            current = "";
+          } else {
+            current += char;
+          }
+        }
+        cells.push(current);
+        return cells.map((c) => c.trim());
+      };
+
+      const headers = parseLine(lines[0]).map((h) => h.toLowerCase().replace(/\s+/g, ""));
+      const col = (row: string[], ...names: string[]) => {
+        for (const name of names) {
+          const index = headers.indexOf(name);
+          if (index !== -1 && row[index]) return row[index];
+        }
+        return "";
+      };
+
+      let created = 0;
+      const failures: string[] = [];
+
+      for (const line of lines.slice(1)) {
+        const row = parseLine(line);
+        const employeeCode = col(row, "employeecode", "code");
+        const firstName = col(row, "firstname", "name");
+        const joiningDate = col(row, "joiningdate", "dateofjoining");
+        if (!employeeCode || !firstName || !joiningDate) continue;
+
+        try {
+          const response = await fetch(
+            `/api/organizations/${organizationId}/employees`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                employeeCode,
+                firstName,
+                lastName: col(row, "lastname") || undefined,
+                email: col(row, "email") || undefined,
+                phone: col(row, "phone") || undefined,
+                joiningDate,
+                employmentType:
+                  col(row, "employmenttype").toUpperCase() || "FULL_TIME",
+                ctc: Number(col(row, "ctc")) || undefined,
+                panNo: col(row, "panno", "pan") || undefined,
+                aadharNo: col(row, "aadharno", "aadhar") || undefined,
+              }),
+            }
+          );
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            failures.push(`${employeeCode}: ${error.error ?? response.statusText}`);
+          } else {
+            created++;
+          }
+        } catch {
+          failures.push(`${employeeCode}: request failed`);
+        }
+      }
+
+      if (created > 0) toast.success(`Imported ${created} employees`);
+      if (failures.length > 0) {
+        toast.error(`${failures.length} rows failed. First: ${failures[0]}`, {
+          duration: 8000,
+        });
+      }
+      if (created === 0 && failures.length === 0) {
+        toast.error(
+          "No importable rows — employeeCode, firstName and joiningDate are required"
+        );
+      }
+      fetchEmployees();
+    } catch (error) {
+      console.error("Error importing employees:", error);
+      toast.error("Failed to read the import file");
+    } finally {
+      setIsImporting(false);
+      if (importInputRef.current) importInputRef.current.value = "";
+    }
+  };
 
   // Summary stats
   const stats = React.useMemo(() => {
@@ -479,11 +666,29 @@ export default function EmployeesPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline">
-            <Upload className="mr-2 h-4 w-4" />
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleImportFile(file);
+            }}
+          />
+          <Button
+            variant="outline"
+            disabled={isImporting}
+            onClick={() => importInputRef.current?.click()}
+          >
+            {isImporting ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Upload className="mr-2 h-4 w-4" />
+            )}
             Import
           </Button>
-          <Button variant="outline">
+          <Button variant="outline" onClick={handleExport}>
             <Download className="mr-2 h-4 w-4" />
             Export
           </Button>
@@ -751,6 +956,59 @@ export default function EmployeesPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {detailsEmployee && (
+        <RecordDetailsDialog
+          open={!!detailsEmployee}
+          onOpenChange={(open) => !open && setDetailsEmployee(null)}
+          title={`${detailsEmployee.firstName} ${detailsEmployee.lastName}`.trim()}
+          description={detailsEmployee.employeeCode}
+          status={{
+            label: statusConfig[detailsEmployee.status]?.label ?? detailsEmployee.status,
+          }}
+          sections={[
+            {
+              title: "Contact",
+              fields: [
+                { label: "Email", value: detailsEmployee.email },
+                { label: "Phone", value: detailsEmployee.phone },
+              ],
+            },
+            {
+              title: "Employment",
+              fields: [
+                { label: "Department", value: detailsEmployee.department },
+                { label: "Designation", value: detailsEmployee.designation },
+                {
+                  label: "Employment Type",
+                  value:
+                    employmentTypeConfig[detailsEmployee.employmentType]?.label ??
+                    detailsEmployee.employmentType,
+                },
+                {
+                  label: "Joining Date",
+                  value: formatDate(detailsEmployee.joiningDate),
+                },
+                { label: "CTC", value: formatCurrency(detailsEmployee.ctc) },
+                { label: "Reporting To", value: detailsEmployee.reportingTo },
+              ],
+            },
+          ]}
+          actions={
+            <Button
+              variant="outline"
+              onClick={() => {
+                const employee = detailsEmployee;
+                setDetailsEmployee(null);
+                handleEdit(employee);
+              }}
+            >
+              <Pencil className="mr-2 h-4 w-4" />
+              Edit
+            </Button>
+          }
+        />
+      )}
     </div>
   );
 }

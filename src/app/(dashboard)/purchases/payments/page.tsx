@@ -69,6 +69,8 @@ import { DataTable } from "@/frontend/components/ui/data-table";
 import { Tabs, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
 import { cn } from "@/shared/utils/common.util";
 import { useOrganization } from "@/frontend/hooks/use-organization";
+import { RecordDetailsDialog } from "@/frontend/components/ui/record-details-dialog";
+import { printDocument } from "@/frontend/utils/print-document";
 import { toast } from "sonner";
 import { downloadCsv } from "@/frontend/utils/export-csv";
 
@@ -147,7 +149,7 @@ function formatDate(dateStr: string) {
 }
 
 export default function PaymentsPage() {
-  const { organizationId } = useOrganization();
+  const { organizationId, organizationName } = useOrganization();
   const [payments, setPayments] = React.useState<Payment[]>([]);
   const [parties, setParties] = React.useState<Party[]>([]);
   const [bankAccounts, setBankAccounts] = React.useState<BankAccount[]>([]);
@@ -156,6 +158,9 @@ export default function PaymentsPage() {
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [paymentToDelete, setPaymentToDelete] = React.useState<Payment | null>(null);
+  const [detailsPayment, setDetailsPayment] = React.useState<Payment | null>(null);
+  /** Set when the bills screen links here with ?billId=&partyId= to pay a bill. */
+  const [prefillBillId, setPrefillBillId] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
 
   const [formData, setFormData] = React.useState({
@@ -167,6 +172,23 @@ export default function PaymentsPage() {
     transactionRef: "",
     notes: "",
   });
+
+  /**
+   * "Record Payment" on a bill navigates here with the bill and vendor in the
+   * query string; open the dialog already pointed at that bill.
+   */
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const billId = params.get("billId");
+    const partyId = params.get("partyId");
+    if (!billId && !partyId) return;
+    setPrefillBillId(billId);
+    if (partyId) {
+      setFormData((prev) => ({ ...prev, partyId }));
+    }
+    setDialogOpen(true);
+    window.history.replaceState(null, "", "/purchases/payments");
+  }, []);
 
   const fetchPayments = React.useCallback(async () => {
     if (!organizationId) return;
@@ -222,7 +244,10 @@ export default function PaymentsPage() {
       const response = await fetch(`/api/organizations/${organizationId}/payments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          billId: prefillBillId ?? undefined,
+        }),
       });
 
       if (!response.ok) {
@@ -232,6 +257,7 @@ export default function PaymentsPage() {
 
       toast.success("Payment created successfully");
       setDialogOpen(false);
+      setPrefillBillId(null);
       setFormData({
         partyId: "",
         date: new Date().toISOString().split("T")[0],
@@ -277,6 +303,27 @@ export default function PaymentsPage() {
     } catch (error) {
       toast.error((error as Error).message || "Failed to cancel payment");
     }
+  };
+
+  const handlePrintVoucher = (payment: Payment) => {
+    printDocument({
+      title: "Payment Voucher",
+      subtitle: payment.paymentNumber,
+      issuer: organizationName ?? undefined,
+      fields: [
+        { label: "Paid To", value: payment.party?.name },
+        { label: "Date", value: formatDate(payment.date) },
+        { label: "Payment Mode", value: payment.paymentMode.replace("_", " ") },
+        { label: "Against Bill", value: payment.bill?.billNumber ?? "-" },
+        { label: "Bank Account", value: payment.bankAccount?.name ?? "-" },
+        { label: "Reference", value: payment.transactionRef ?? "-" },
+        { label: "Status", value: payment.status },
+      ],
+      totals: [
+        { label: "Amount Paid", value: formatCurrency(Number(payment.amount)) },
+      ],
+      notes: payment.notes ?? null,
+    });
   };
 
   const filteredPayments = React.useMemo(() => {
@@ -422,17 +469,13 @@ export default function PaymentsPage() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuLabel>Actions</DropdownMenuLabel>
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setDetailsPayment(payment)}>
                 <Eye className="mr-2 h-4 w-4" />
                 View Details
               </DropdownMenuItem>
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handlePrintVoucher(payment)}>
                 <Printer className="mr-2 h-4 w-4" />
-                Print Voucher
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <Download className="mr-2 h-4 w-4" />
-                Download PDF
+                Print / Save as PDF
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               {payment.status !== "CANCELLED" && (
@@ -731,6 +774,52 @@ export default function PaymentsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {detailsPayment && (
+        <RecordDetailsDialog
+          open={!!detailsPayment}
+          onOpenChange={(open) => !open && setDetailsPayment(null)}
+          title={`Payment ${detailsPayment.paymentNumber}`}
+          description={detailsPayment.party?.name}
+          status={{ label: detailsPayment.status }}
+          sections={[
+            {
+              title: "Payment",
+              fields: [
+                { label: "Vendor", value: detailsPayment.party?.name },
+                { label: "Email", value: detailsPayment.party?.email },
+                { label: "Date", value: formatDate(detailsPayment.date) },
+                {
+                  label: "Amount",
+                  value: formatCurrency(Number(detailsPayment.amount)),
+                },
+              ],
+            },
+            {
+              title: "Settlement",
+              fields: [
+                {
+                  label: "Mode",
+                  value: detailsPayment.paymentMode.replace("_", " "),
+                },
+                { label: "Bank Account", value: detailsPayment.bankAccount?.name },
+                { label: "Reference", value: detailsPayment.transactionRef },
+                { label: "Against Bill", value: detailsPayment.bill?.billNumber },
+                { label: "Notes", value: detailsPayment.notes, full: true },
+              ],
+            },
+          ]}
+          actions={
+            <Button
+              variant="outline"
+              onClick={() => handlePrintVoucher(detailsPayment)}
+            >
+              <Printer className="mr-2 h-4 w-4" />
+              Print
+            </Button>
+          }
+        />
+      )}
     </div>
   );
 }

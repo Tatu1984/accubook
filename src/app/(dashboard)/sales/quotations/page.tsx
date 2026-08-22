@@ -69,6 +69,10 @@ import { DataTable } from "@/frontend/components/ui/data-table";
 import { Tabs, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
 import { cn } from "@/shared/utils/common.util";
 import { useOrganization } from "@/frontend/hooks/use-organization";
+import { RecordDetailsDialog } from "@/frontend/components/ui/record-details-dialog";
+import { downloadCsv } from "@/frontend/utils/export-csv";
+import { printDocument } from "@/frontend/utils/print-document";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 interface QuotationItem {
@@ -149,8 +153,13 @@ function isExpired(validUntil: string): boolean {
 }
 
 export default function QuotationsPage() {
-  const { organizationId } = useOrganization();
+  const router = useRouter();
+  const { organizationId, organizationName } = useOrganization();
   const [quotations, setQuotations] = React.useState<Quotation[]>([]);
+  const [detailsQuotation, setDetailsQuotation] =
+    React.useState<Quotation | null>(null);
+  /** Id of the quotation currently running a menu action, to disable re-entry. */
+  const [actionId, setActionId] = React.useState<string | null>(null);
   const [parties, setParties] = React.useState<Party[]>([]);
   const [items, setItems] = React.useState<Item[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -286,6 +295,158 @@ export default function QuotationsPage() {
       console.error("Error deleting quotation:", error);
       toast.error("Failed to delete quotation");
     }
+  };
+
+  const handlePrint = (quotation: Quotation) => {
+    printDocument({
+      title: "Quotation",
+      subtitle: quotation.quotationNumber,
+      issuer: organizationName ?? undefined,
+      fields: [
+        { label: "Customer", value: quotation.party?.name },
+        { label: "Date", value: formatDate(quotation.date) },
+        { label: "Valid Until", value: formatDate(quotation.validUntil) },
+        { label: "Status", value: quotation.status },
+      ],
+      table: {
+        columns: ["#", "Item", "Qty", "Rate", "Amount"],
+        rows: (quotation.items ?? []).map((line, index) => [
+          index + 1,
+          line.item?.name ?? "",
+          Number(line.quantity),
+          formatCurrency(Number(line.unitPrice)),
+          formatCurrency(Number(line.totalAmount)),
+        ]),
+      },
+      totals: [
+        { label: "Subtotal", value: formatCurrency(Number(quotation.subtotal)) },
+        { label: "Tax", value: formatCurrency(Number(quotation.taxAmount)) },
+        { label: "Total", value: formatCurrency(Number(quotation.totalAmount)) },
+      ],
+      notes: [quotation.notes, quotation.terms].filter(Boolean).join("\n\n") || null,
+    });
+  };
+
+  const handleDuplicate = async (quotation: Quotation) => {
+    if (!organizationId) return;
+    setActionId(quotation.id);
+    try {
+      const response = await fetch(
+        `/api/organizations/${organizationId}/quotations`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            partyId: quotation.partyId,
+            date: new Date().toISOString().split("T")[0],
+            validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+              .toISOString()
+              .split("T")[0],
+            status: "DRAFT",
+            notes: quotation.notes,
+            terms: quotation.terms,
+            items: (quotation.items ?? []).map((line) => ({
+              itemId: line.item?.id ?? "",
+              quantity: Number(line.quantity),
+              unitPrice: Number(line.unitPrice),
+              discountPercent: 0,
+              description: undefined,
+            })),
+          }),
+        }
+      );
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || "Failed to duplicate quotation");
+      }
+      const created = await response.json();
+      toast.success(`Duplicated as ${created.quotationNumber}`);
+      fetchQuotations();
+    } catch (error) {
+      console.error("Error duplicating quotation:", error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to duplicate quotation"
+      );
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const handleSendToCustomer = async (quotation: Quotation) => {
+    if (!organizationId) return;
+    setActionId(quotation.id);
+    try {
+      const response = await fetch(
+        `/api/organizations/${organizationId}/documents/send`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "quotation", id: quotation.id }),
+        }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Failed to send quotation");
+
+      toast.success(
+        data.delivered
+          ? `Quotation emailed to ${data.recipient}`
+          : `Logged for ${data.recipient} — no email provider configured yet`
+      );
+      fetchQuotations();
+    } catch (error) {
+      console.error("Error sending quotation:", error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to send quotation"
+      );
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const handleConvertToOrder = async (quotation: Quotation) => {
+    if (!organizationId) return;
+    setActionId(quotation.id);
+    try {
+      const response = await fetch(
+        `/api/organizations/${organizationId}/quotations/${quotation.id}/convert`,
+        { method: "POST" }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Failed to convert quotation");
+
+      toast.success(`Converted to sales order ${data.orderNumber}`);
+      fetchQuotations();
+      router.push("/sales/orders");
+    } catch (error) {
+      console.error("Error converting quotation:", error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to convert quotation"
+      );
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const handleExport = () => {
+    if (filteredQuotations.length === 0) {
+      toast.error("Nothing to export");
+      return;
+    }
+    downloadCsv(
+      `quotations-${new Date().toISOString().slice(0, 10)}`,
+      filteredQuotations.map((q) => ({
+        Number: q.quotationNumber,
+        Date: formatDate(q.date),
+        ValidUntil: formatDate(q.validUntil),
+        Customer: q.party?.name ?? "",
+        Email: q.party?.email ?? "",
+        Subtotal: Number(q.subtotal),
+        Tax: Number(q.taxAmount),
+        Total: Number(q.totalAmount),
+        Status: q.status,
+      }))
+    );
+    toast.success(`Exported ${filteredQuotations.length} quotations`);
   };
 
   const addItem = () => {
@@ -459,31 +620,36 @@ export default function QuotationsPage() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuLabel>Actions</DropdownMenuLabel>
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setDetailsQuotation(quotation)}>
                 <Eye className="mr-2 h-4 w-4" />
                 View Details
               </DropdownMenuItem>
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handlePrint(quotation)}>
                 <Printer className="mr-2 h-4 w-4" />
-                Print
+                Print / Save as PDF
               </DropdownMenuItem>
-              <DropdownMenuItem>
-                <Download className="mr-2 h-4 w-4" />
-                Download PDF
-              </DropdownMenuItem>
-              <DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={actionId === quotation.id}
+                onClick={() => handleDuplicate(quotation)}
+              >
                 <Copy className="mr-2 h-4 w-4" />
                 Duplicate
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               {quotation.status === "DRAFT" && (
-                <DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={actionId === quotation.id}
+                  onClick={() => handleSendToCustomer(quotation)}
+                >
                   <Send className="mr-2 h-4 w-4" />
                   Send to Customer
                 </DropdownMenuItem>
               )}
               {(quotation.status === "SENT" || quotation.status === "ACCEPTED") && (
-                <DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={actionId === quotation.id}
+                  onClick={() => handleConvertToOrder(quotation)}
+                >
                   <ArrowRight className="mr-2 h-4 w-4" />
                   Convert to Order
                 </DropdownMenuItem>
@@ -524,7 +690,7 @@ export default function QuotationsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline">
+          <Button variant="outline" onClick={handleExport}>
             <Download className="mr-2 h-4 w-4" />
             Export
           </Button>
@@ -799,6 +965,77 @@ export default function QuotationsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {detailsQuotation && (
+        <RecordDetailsDialog
+          open={!!detailsQuotation}
+          onOpenChange={(open) => !open && setDetailsQuotation(null)}
+          title={`Quotation ${detailsQuotation.quotationNumber}`}
+          description={detailsQuotation.party?.name}
+          status={{ label: detailsQuotation.status }}
+          sections={[
+            {
+              title: "Details",
+              fields: [
+                { label: "Customer", value: detailsQuotation.party?.name },
+                { label: "Email", value: detailsQuotation.party?.email },
+                { label: "Date", value: formatDate(detailsQuotation.date) },
+                {
+                  label: "Valid Until",
+                  value: formatDate(detailsQuotation.validUntil),
+                },
+              ],
+            },
+            {
+              title: "Amounts",
+              fields: [
+                {
+                  label: "Subtotal",
+                  value: formatCurrency(Number(detailsQuotation.subtotal)),
+                },
+                {
+                  label: "Tax",
+                  value: formatCurrency(Number(detailsQuotation.taxAmount)),
+                },
+                {
+                  label: "Total",
+                  value: formatCurrency(Number(detailsQuotation.totalAmount)),
+                },
+              ],
+            },
+            ...(detailsQuotation.notes || detailsQuotation.terms
+              ? [
+                  {
+                    title: "Notes & Terms",
+                    fields: [
+                      { label: "Notes", value: detailsQuotation.notes, full: true },
+                      { label: "Terms", value: detailsQuotation.terms, full: true },
+                    ],
+                  },
+                ]
+              : []),
+          ]}
+          table={{
+            title: "Line Items",
+            columns: ["Item", "Qty", "Rate", "Amount"],
+            rows: (detailsQuotation.items ?? []).map((line) => [
+              line.item?.name ?? "-",
+              Number(line.quantity),
+              formatCurrency(Number(line.unitPrice)),
+              formatCurrency(Number(line.totalAmount)),
+            ]),
+          }}
+          actions={
+            <Button
+              variant="outline"
+              onClick={() => handlePrint(detailsQuotation)}
+            >
+              <Printer className="mr-2 h-4 w-4" />
+              Print
+            </Button>
+          }
+        />
+      )}
     </div>
   );
 }

@@ -3,6 +3,8 @@
 import * as React from "react";
 import { useState } from "react";
 import { useOrganization } from "@/frontend/hooks/use-organization";
+import { downloadCsv } from "@/frontend/utils/export-csv";
+import { toast } from "sonner";
 import { cn } from "@/shared/utils/common.util";
 import { Button } from "@/frontend/components/ui/button";
 import { Input } from "@/frontend/components/ui/input";
@@ -128,16 +130,15 @@ export default function ReconciliationPage() {
     })();
   }, [organizationId]);
 
-  React.useEffect(() => {
+  const loadReconciliation = React.useCallback(async (signal?: AbortSignal) => {
     if (!organizationId || !accountId) return;
-    const controller = new AbortController();
-    (async () => {
+    {
       setLoading(true);
       setError(null);
       try {
         const r = await fetch(
           `/api/organizations/${organizationId}/bank-reconciliation?bankAccountId=${accountId}&view=unreconciled`,
-          { signal: controller.signal }
+          { signal }
         );
         if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Failed to load reconciliation");
         const json = await r.json();
@@ -159,14 +160,169 @@ export default function ReconciliationPage() {
       } finally {
         setLoading(false);
       }
-    })();
-    return () => controller.abort();
+    }
   }, [organizationId, accountId]);
 
-  const [selectedBank, setSelectedBank] = useState("");
+  React.useEffect(() => {
+    if (!organizationId || !accountId) return;
+    const controller = new AbortController();
+    loadReconciliation(controller.signal);
+    return () => controller.abort();
+  }, [organizationId, accountId, loadReconciliation]);
+
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedBankTxns, setSelectedBankTxns] = useState<string[]>([]);
   const [selectedBookTxns, setSelectedBookTxns] = useState<string[]>([]);
+
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  const [fromDate, setFromDate] = useState(monthStart.toISOString().slice(0, 10));
+  const [toDate, setToDate] = useState(new Date().toISOString().slice(0, 10));
+  const [autoMatching, setAutoMatching] = useState(false);
+  const [matching, setMatching] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importBank, setImportBank] = useState("GENERIC");
+  const [importAccountId, setImportAccountId] = useState("");
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const importInputRef = React.useRef<HTMLInputElement>(null);
+
+  /** Rows are filtered to the chosen window; the endpoint returns everything unreconciled. */
+  const inRange = React.useCallback(
+    (dateStr: string) => {
+      const when = new Date(dateStr);
+      if (fromDate && when < new Date(`${fromDate}T00:00:00`)) return false;
+      if (toDate && when > new Date(`${toDate}T23:59:59`)) return false;
+      return true;
+    },
+    [fromDate, toDate]
+  );
+
+  const visibleBankTxns = React.useMemo(
+    () => bankTransactions.filter((t) => inRange(t.date)),
+    [bankTransactions, inRange]
+  );
+  const visibleBookTxns = React.useMemo(
+    () => bookTransactions.filter((t) => inRange(t.date)),
+    [bookTransactions, inRange]
+  );
+
+  const handleAutoMatch = async () => {
+    if (!organizationId || !accountId) {
+      toast.error("Select a bank account first");
+      return;
+    }
+    setAutoMatching(true);
+    try {
+      const r = await fetch(
+        `/api/organizations/${organizationId}/banking/reconcile?bankAccountId=${accountId}&from=${fromDate}&to=${toDate}`,
+        { method: "POST" }
+      );
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || "Auto match failed");
+      const matched = body.matched ?? body.result?.matched ?? 0;
+      toast.success(
+        matched > 0
+          ? `Auto-matched ${matched} transaction(s)`
+          : "No confident matches were found"
+      );
+      loadReconciliation();
+    } catch (e) {
+      toast.error((e as Error).message || "Auto match failed");
+    } finally {
+      setAutoMatching(false);
+    }
+  };
+
+  const handleMatchSelected = async () => {
+    if (!organizationId) return;
+    if (selectedBankTxns.length !== 1 || selectedBookTxns.length !== 1) {
+      toast.error("Select exactly one bank line and one book entry to match");
+      return;
+    }
+    setMatching(true);
+    try {
+      const r = await fetch(
+        `/api/organizations/${organizationId}/bank-reconciliation`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "match",
+            bankTransactionId: selectedBankTxns[0],
+            voucherId: selectedBookTxns[0],
+          }),
+        }
+      );
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || "Failed to match");
+      toast.success("Transaction matched");
+      setSelectedBankTxns([]);
+      setSelectedBookTxns([]);
+      loadReconciliation();
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to match");
+    } finally {
+      setMatching(false);
+    }
+  };
+
+  const handleImportStatement = async () => {
+    if (!organizationId) return;
+    const targetAccount = importAccountId || accountId;
+    if (!targetAccount) {
+      toast.error("Select the bank account to import into");
+      return;
+    }
+    if (!importFile) {
+      toast.error("Choose a statement CSV to import");
+      return;
+    }
+    setImporting(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", importFile);
+      formData.append("bankAccountId", targetAccount);
+      formData.append("bank", importBank);
+
+      const r = await fetch(
+        `/api/organizations/${organizationId}/banking/import-statement`,
+        { method: "POST", body: formData }
+      );
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || "Import failed");
+      toast.success(
+        `Imported ${body.imported ?? body.created ?? 0} transaction(s)` +
+          (body.skipped ? `, ${body.skipped} already present` : "")
+      );
+      setIsDialogOpen(false);
+      setImportFile(null);
+      if (importInputRef.current) importInputRef.current.value = "";
+      if (targetAccount === accountId) loadReconciliation();
+      else setAccountId(targetAccount);
+    } catch (e) {
+      toast.error((e as Error).message || "Import failed");
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleExportBookEntries = () => {
+    if (visibleBookTxns.length === 0) {
+      toast.error("Nothing to export");
+      return;
+    }
+    downloadCsv(
+      `book-entries-${new Date().toISOString().slice(0, 10)}`,
+      visibleBookTxns.map((t) => ({
+        Date: new Date(t.date).toLocaleDateString("en-IN"),
+        Description: t.description,
+        Type: t.voucherType,
+        Debit: t.debit,
+        Credit: t.credit,
+      }))
+    );
+    toast.success(`Exported ${visibleBookTxns.length} book entries`);
+  };
 
   const matchedCount = bankTransactions.filter((t) => t.matched).length;
   const totalCount = bankTransactions.length;
@@ -229,37 +385,58 @@ export default function ReconciliationPage() {
               </DialogHeader>
               <div className="grid gap-4 py-4">
                 <div className="space-y-2">
-                  <Label>Bank Account</Label>
-                  <Select>
+                  <Label>Bank Account *</Label>
+                  <Select
+                    value={importAccountId || accountId}
+                    onValueChange={setImportAccountId}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select account" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="hdfc">HDFC Bank - Current (****5678)</SelectItem>
-                      <SelectItem value="icici">ICICI Bank - Savings (****9012)</SelectItem>
+                      {accounts.map((account) => (
+                        <SelectItem key={account.id} value={account.id}>
+                          {account.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Statement Format</Label>
-                  <Select>
+                  <Label>Statement Layout *</Label>
+                  <Select value={importBank} onValueChange={setImportBank}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Select format" />
+                      <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="csv">CSV</SelectItem>
-                      <SelectItem value="xlsx">Excel (XLSX)</SelectItem>
-                      <SelectItem value="ofx">OFX/QFX</SelectItem>
-                      <SelectItem value="pdf">PDF (Auto-extract)</SelectItem>
+                      <SelectItem value="HDFC">HDFC CSV</SelectItem>
+                      <SelectItem value="ICICI">ICICI CSV</SelectItem>
+                      <SelectItem value="SBI">SBI CSV</SelectItem>
+                      <SelectItem value="AXIS">Axis CSV</SelectItem>
+                      <SelectItem value="GENERIC">Generic CSV</SelectItem>
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-muted-foreground">
+                    CSV only. Re-importing the same statement adds no duplicates.
+                  </p>
                 </div>
                 <div className="border-2 border-dashed rounded-lg p-8 text-center">
                   <FileSpreadsheet className="mx-auto h-12 w-12 text-muted-foreground" />
                   <p className="mt-2 text-sm text-muted-foreground">
-                    Drag and drop your statement file here, or click to browse
+                    {importFile ? importFile.name : "Choose your statement CSV"}
                   </p>
-                  <Button variant="outline" className="mt-4">
+                  <input
+                    ref={importInputRef}
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="hidden"
+                    onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
+                  />
+                  <Button
+                    variant="outline"
+                    className="mt-4"
+                    onClick={() => importInputRef.current?.click()}
+                  >
                     Choose File
                   </Button>
                 </div>
@@ -268,12 +445,19 @@ export default function ReconciliationPage() {
                 <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
                   Cancel
                 </Button>
-                <Button onClick={() => setIsDialogOpen(false)}>Import</Button>
+                <Button onClick={handleImportStatement} disabled={importing}>
+                  {importing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Import
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
-          <Button>
-            <RefreshCcw className="mr-2 h-4 w-4" />
+          <Button onClick={handleAutoMatch} disabled={autoMatching || !accountId}>
+            {autoMatching ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCcw className="mr-2 h-4 w-4" />
+            )}
             Auto Match
           </Button>
         </div>
@@ -341,27 +525,49 @@ export default function ReconciliationPage() {
           <div className="flex items-center gap-4">
             <div className="flex-1">
               <Label className="text-sm text-muted-foreground">Bank Account</Label>
-              <Select value={selectedBank} onValueChange={setSelectedBank}>
+              <Select value={accountId} onValueChange={setAccountId}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select bank account" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="hdfc">HDFC Bank - Current Account (****5678)</SelectItem>
-                  <SelectItem value="icici">ICICI Bank - Savings Account (****9012)</SelectItem>
-                  <SelectItem value="sbi">SBI - Current Account (****3456)</SelectItem>
+                  {accounts.length === 0 ? (
+                    <div className="px-2 py-3 text-sm text-muted-foreground">
+                      No bank accounts — add one in Banking → Accounts
+                    </div>
+                  ) : (
+                    accounts.map((account) => (
+                      <SelectItem key={account.id} value={account.id}>
+                        {account.name}
+                      </SelectItem>
+                    ))
+                  )}
                 </SelectContent>
               </Select>
             </div>
             <div>
               <Label className="text-sm text-muted-foreground">From Date</Label>
-              <Input type="date" defaultValue="2024-03-01" className="w-[150px]" />
+              <Input
+                type="date"
+                className="w-[150px]"
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+              />
             </div>
             <div>
               <Label className="text-sm text-muted-foreground">To Date</Label>
-              <Input type="date" defaultValue="2024-03-15" className="w-[150px]" />
+              <Input
+                type="date"
+                className="w-[150px]"
+                value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+              />
             </div>
             <div className="pt-6">
-              <Button variant="outline">
+              <Button
+                variant="outline"
+                disabled={loading || !accountId}
+                onClick={() => loadReconciliation()}
+              >
                 <Search className="mr-2 h-4 w-4" />
                 Load Transactions
               </Button>
@@ -398,7 +604,7 @@ export default function ReconciliationPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {bankTransactions.map((txn) => (
+                {visibleBankTxns.map((txn) => (
                   <TableRow
                     key={txn.id}
                     className={txn.matched ? "bg-green-50" : ""}
@@ -455,7 +661,11 @@ export default function ReconciliationPage() {
                 <CardTitle className="text-lg">Book Entries</CardTitle>
                 <CardDescription>Transactions from accounting</CardDescription>
               </div>
-              <Button variant="outline" size="sm">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExportBookEntries}
+              >
                 <Download className="mr-2 h-4 w-4" />
                 Export
               </Button>
@@ -474,7 +684,7 @@ export default function ReconciliationPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {bookTransactions.map((txn) => (
+                {visibleBookTxns.map((txn) => (
                   <TableRow
                     key={txn.id}
                     className={txn.matched ? "bg-green-50" : ""}
@@ -533,9 +743,18 @@ export default function ReconciliationPage() {
                 Selected: {selectedBankTxns.length} bank, {selectedBookTxns.length} book
               </span>
               <Button
-                disabled={selectedBankTxns.length === 0 || selectedBookTxns.length === 0}
+                disabled={
+                  matching ||
+                  selectedBankTxns.length !== 1 ||
+                  selectedBookTxns.length !== 1
+                }
+                onClick={handleMatchSelected}
               >
-                <ArrowRightLeft className="mr-2 h-4 w-4" />
+                {matching ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <ArrowRightLeft className="mr-2 h-4 w-4" />
+                )}
                 Match Selected
               </Button>
               <Button

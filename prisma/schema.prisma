@@ -135,6 +135,17 @@ model Organization {
   compositionScheme Boolean @default(false)
   /** Effective composition rate as percent, e.g. "1", "5", "6". Required when compositionScheme=true. */
   compositionRate  Decimal? @db.Decimal(5, 2)
+  /**
+   * Payroll configuration for the HR module: EPF establishment code and wage
+   * ceiling, ESI code, TAN, default tax regime and which statutory components
+   * are switched on.
+   *
+   * Held as JSON because the shape is a settings sheet rather than something
+   * queried or joined on; it is validated by zod at the API boundary. Before
+   * this column existed the Payroll → Settings tab had no store at all, so
+   * "Save Payroll Settings" had nowhere to write.
+   */
+  payrollSettings  Json?
   isActive         Boolean  @default(true)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt

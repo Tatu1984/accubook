@@ -20,6 +20,8 @@ import {
   PackageMinus,
   CheckCircle2,
 } from "lucide-react";
+import { downloadCsv } from "@/frontend/utils/export-csv";
+import { toast } from "sonner";
 import { useOrganization } from "@/frontend/hooks/use-organization";
 import { Button } from "@/frontend/components/ui/button";
 import {
@@ -390,6 +392,27 @@ export default function AuditLogsPage() {
 
   const filteredLogs = logs;
 
+  const handleExportLogs = () => {
+    if (filteredLogs.length === 0) {
+      toast.error("Nothing to export");
+      return;
+    }
+    downloadCsv(
+      `audit-logs-${new Date().toISOString().slice(0, 10)}`,
+      filteredLogs.map((log) => ({
+        Timestamp: new Date(log.createdAt).toLocaleString("en-IN"),
+        User: log.userName,
+        Email: log.userEmail,
+        Action: log.action,
+        EntityType: log.entityType,
+        EntityId: log.entityId ?? "",
+        IpAddress: log.ipAddress ?? "",
+        UserAgent: log.userAgent ?? "",
+      }))
+    );
+    toast.success(`Exported ${filteredLogs.length} log entries`);
+  };
+
   const stats = React.useMemo(() => {
     const today = new Date().toDateString();
     return {
@@ -427,7 +450,7 @@ export default function AuditLogsPage() {
             Track all system activities and changes
           </p>
         </div>
-        <Button variant="outline">
+        <Button variant="outline" onClick={handleExportLogs}>
           <Download className="mr-2 h-4 w-4" />
           Export Logs
         </Button>

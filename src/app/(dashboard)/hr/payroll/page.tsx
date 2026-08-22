@@ -40,6 +40,18 @@ import { Label } from "@/frontend/components/ui/label";
 import { Badge } from "@/frontend/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
 import { Switch } from "@/frontend/components/ui/switch";
+import { RecordDetailsDialog } from "@/frontend/components/ui/record-details-dialog";
+import { downloadCsv } from "@/frontend/utils/export-csv";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+
+function formatCurrency(amount: number) {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
 import {
   
   
@@ -133,19 +145,19 @@ interface SalaryStructure {
  * have no model behind them, so that tab says so.
  */
 export default function PayrollPage() {
+  const router = useRouter();
   const { organizationId, isLoading: orgLoading } = useOrganization();
   const [salarySlips, setSalarySlips] = React.useState<SalarySlip[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
-  React.useEffect(() => {
+  const loadPayroll = React.useCallback(async (signal?: AbortSignal) => {
     if (!organizationId) return;
-    const controller = new AbortController();
-    (async () => {
+    {
       setLoading(true);
       setError(null);
       try {
-        const r = await fetch(`/api/organizations/${organizationId}/payroll?limit=300`, { signal: controller.signal });
+        const r = await fetch(`/api/organizations/${organizationId}/payroll?limit=300`, { signal });
         if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Failed to load payroll");
         const json = await r.json();
         type Comp = { component?: string; name?: string; amount: number | string };
@@ -185,9 +197,17 @@ export default function PayrollPage() {
       } finally {
         setLoading(false);
       }
-    })();
-    return () => controller.abort();
+    }
   }, [organizationId]);
+
+  React.useEffect(() => {
+    if (!organizationId) return;
+    const controller = new AbortController();
+    loadPayroll(controller.signal);
+    return () => controller.abort();
+  }, [organizationId, loadPayroll]);
+
+  const reloadPayroll = React.useCallback(() => loadPayroll(), [loadPayroll]);
 
   /** One row per month that has payslips — how post-month/pay-month group them. */
   const payrollRuns = React.useMemo(() => {
@@ -225,6 +245,144 @@ export default function PayrollPage() {
     hraPercent: "40",
     pfPercent: "12",
   });
+
+  type PayrollRun = (typeof payrollRuns)[number];
+  const [detailsRun, setDetailsRun] = useState<PayrollRun | null>(null);
+  const [runBusyId, setRunBusyId] = useState<string | null>(null);
+
+  const DEFAULT_PAYROLL_SETTINGS = {
+    epfEstablishmentCode: "",
+    epfWageCeiling: "15000",
+    includeEmployerPfInCtc: true,
+    allowVpf: false,
+    esiCode: "",
+    tanNumber: "",
+    defaultTaxRegime: "new",
+    financialYear: "2025-26",
+    componentsEnabled: {
+      pf: true,
+      esi: true,
+      professionalTax: true,
+      tds: true,
+      lwf: false,
+      gratuity: true,
+    },
+  };
+
+  const setComponent = (
+    key: "pf" | "esi" | "professionalTax" | "tds" | "lwf" | "gratuity",
+    checked: boolean
+  ) =>
+    setPayrollSettings((prev) => ({
+      ...prev,
+      componentsEnabled: { ...prev.componentsEnabled, [key]: checked },
+    }));
+  const [payrollSettings, setPayrollSettings] = useState(DEFAULT_PAYROLL_SETTINGS);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
+
+  React.useEffect(() => {
+    if (!organizationId) return;
+    (async () => {
+      try {
+        const r = await fetch(
+          `/api/organizations/${organizationId}/payroll/settings`
+        );
+        if (r.ok) {
+          const body = await r.json();
+          if (body.data) setPayrollSettings({ ...DEFAULT_PAYROLL_SETTINGS, ...body.data });
+        }
+      } catch {
+        // Fall back to the statutory defaults already in state.
+      } finally {
+        setSettingsLoaded(true);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [organizationId]);
+
+  const handleSavePayrollSettings = async () => {
+    if (!organizationId) return;
+    setSavingSettings(true);
+    try {
+      const r = await fetch(`/api/organizations/${organizationId}/payroll/settings`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payrollSettings),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || "Failed to save payroll settings");
+      toast.success("Payroll settings saved");
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to save payroll settings");
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const handleResetPayrollSettings = () => {
+    setPayrollSettings(DEFAULT_PAYROLL_SETTINGS);
+    toast.message("Reset to statutory defaults — press Save to apply");
+  };
+
+  const parsePeriod = (period: string) => {
+    const [year, month] = period.split("-");
+    return { year: Number(year), month: Number(month) };
+  };
+
+  const slipsForRun = (run: PayrollRun) =>
+    salarySlips.filter(
+      (s) => `${s.year}-${String(s.month).padStart(2, "0")}` === run.period
+    );
+
+  const handleGenerateSlips = async (run: PayrollRun) => {
+    if (!organizationId) return;
+    const { month, year } = parsePeriod(run.period);
+    setRunBusyId(run.id);
+    try {
+      const r = await fetch(`/api/organizations/${organizationId}/payroll/calculate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "generate-payslips", month, year }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || "Failed to generate payslips");
+      toast.success(
+        `Payslips generated for ${new Date(year, month - 1, 1).toLocaleString("en-IN", { month: "long" })} ${year}`
+      );
+      await reloadPayroll();
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to generate payslips");
+    } finally {
+      setRunBusyId(null);
+    }
+  };
+
+  const handleDownloadRunReport = (run: PayrollRun) => {
+    const slips = slipsForRun(run);
+    if (slips.length === 0) {
+      toast.error("This run has no payslips to report on");
+      return;
+    }
+    downloadCsv(
+      `payroll-${run.period}`,
+      slips.map((s) => ({
+        Employee: s.employee,
+        EmployeeCode: s.empId,
+        Department: s.department,
+        Basic: s.basic,
+        HRA: s.hra,
+        Allowances: s.allowances,
+        Gross: s.grossSalary,
+        PF: s.pf,
+        TDS: s.tax,
+        TotalDeductions: s.deductions,
+        Net: s.netSalary,
+        Status: s.status,
+      }))
+    );
+    toast.success(`Exported ${slips.length} payslips`);
+  };
 
   const handleViewSlip = (slip: SalarySlip) => {
     setSelectedSlip(slip);
@@ -559,20 +717,32 @@ Generated on: ${new Date().toLocaleDateString()}
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => setDetailsRun(run)}>
                               <Eye className="mr-2 h-4 w-4" />
                               View Details
                             </DropdownMenuItem>
-                            <DropdownMenuItem>
+                            <DropdownMenuItem
+                              disabled={runBusyId === run.id}
+                              onClick={() => handleGenerateSlips(run)}
+                            >
                               <FileText className="mr-2 h-4 w-4" />
                               Generate Slips
                             </DropdownMenuItem>
-                            <DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleDownloadRunReport(run)}
+                            >
                               <Download className="mr-2 h-4 w-4" />
                               Download Report
                             </DropdownMenuItem>
                             {run.status === "DRAFT" && (
-                              <DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  const { month, year } = parsePeriod(run.period);
+                                  router.push(
+                                    `/hr/payroll/run?month=${month}&year=${year}`
+                                  );
+                                }}
+                              >
                                 <CheckCircle className="mr-2 h-4 w-4" />
                                 Process Payroll
                               </DropdownMenuItem>
@@ -1014,7 +1184,10 @@ Generated on: ${new Date().toLocaleDateString()}
                       12% of Basic (both employer & employee)
                     </p>
                   </div>
-                  <Switch defaultChecked />
+                  <Switch
+                    checked={payrollSettings.componentsEnabled.pf}
+                    onCheckedChange={(checked) => setComponent("pf", checked)}
+                  />
                 </div>
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
@@ -1023,7 +1196,10 @@ Generated on: ${new Date().toLocaleDateString()}
                       0.75% Employee + 3.25% Employer (if gross ≤ ₹21,000)
                     </p>
                   </div>
-                  <Switch defaultChecked />
+                  <Switch
+                    checked={payrollSettings.componentsEnabled.esi}
+                    onCheckedChange={(checked) => setComponent("esi", checked)}
+                  />
                 </div>
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
@@ -1032,7 +1208,10 @@ Generated on: ${new Date().toLocaleDateString()}
                       State-wise slab (max ₹2,500/year)
                     </p>
                   </div>
-                  <Switch defaultChecked />
+                  <Switch
+                    checked={payrollSettings.componentsEnabled.professionalTax}
+                    onCheckedChange={(checked) => setComponent("professionalTax", checked)}
+                  />
                 </div>
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
@@ -1041,7 +1220,10 @@ Generated on: ${new Date().toLocaleDateString()}
                       As per income tax slabs
                     </p>
                   </div>
-                  <Switch defaultChecked />
+                  <Switch
+                    checked={payrollSettings.componentsEnabled.tds}
+                    onCheckedChange={(checked) => setComponent("tds", checked)}
+                  />
                 </div>
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
@@ -1050,7 +1232,10 @@ Generated on: ${new Date().toLocaleDateString()}
                       State-specific contribution
                     </p>
                   </div>
-                  <Switch />
+                  <Switch
+                    checked={payrollSettings.componentsEnabled.lwf}
+                    onCheckedChange={(checked) => setComponent("lwf", checked)}
+                  />
                 </div>
               </CardContent>
             </Card>
@@ -1110,7 +1295,7 @@ Generated on: ${new Date().toLocaleDateString()}
                           <Badge className="bg-yellow-100 text-yellow-800">Partially Exempt</Badge>
                         </TableCell>
                         <TableCell>
-                          <Switch defaultChecked />
+                          <Switch defaultChecked disabled />
                         </TableCell>
                       </TableRow>
                       <TableRow>
@@ -1125,7 +1310,7 @@ Generated on: ${new Date().toLocaleDateString()}
                           <Badge className="bg-green-100 text-green-800">Exempt upto ₹1,600</Badge>
                         </TableCell>
                         <TableCell>
-                          <Switch defaultChecked />
+                          <Switch defaultChecked disabled />
                         </TableCell>
                       </TableRow>
                       <TableRow>
@@ -1140,7 +1325,7 @@ Generated on: ${new Date().toLocaleDateString()}
                           <Badge className="bg-red-100 text-red-800">Fully Taxable</Badge>
                         </TableCell>
                         <TableCell>
-                          <Switch defaultChecked />
+                          <Switch defaultChecked disabled />
                         </TableCell>
                       </TableRow>
                     </TableBody>
@@ -1173,7 +1358,7 @@ Generated on: ${new Date().toLocaleDateString()}
                           <Badge className="bg-green-100 text-green-800">80C Deduction</Badge>
                         </TableCell>
                         <TableCell>
-                          <Switch defaultChecked />
+                          <Switch defaultChecked disabled />
                         </TableCell>
                       </TableRow>
                       <TableRow>
@@ -1188,7 +1373,7 @@ Generated on: ${new Date().toLocaleDateString()}
                           <Badge className="bg-gray-100 text-gray-800">N/A</Badge>
                         </TableCell>
                         <TableCell>
-                          <Switch defaultChecked />
+                          <Switch defaultChecked disabled />
                         </TableCell>
                       </TableRow>
                       <TableRow>
@@ -1203,7 +1388,7 @@ Generated on: ${new Date().toLocaleDateString()}
                           <Badge className="bg-green-100 text-green-800">Deductible from Income</Badge>
                         </TableCell>
                         <TableCell>
-                          <Switch defaultChecked />
+                          <Switch defaultChecked disabled />
                         </TableCell>
                       </TableRow>
                       <TableRow>
@@ -1218,7 +1403,7 @@ Generated on: ${new Date().toLocaleDateString()}
                           <Badge className="bg-gray-100 text-gray-800">Tax Payment</Badge>
                         </TableCell>
                         <TableCell>
-                          <Switch defaultChecked />
+                          <Switch defaultChecked disabled />
                         </TableCell>
                       </TableRow>
                     </TableBody>
@@ -1247,7 +1432,7 @@ Generated on: ${new Date().toLocaleDateString()}
                           EPS capped at ₹15,000 wage ceiling
                         </TableCell>
                         <TableCell>
-                          <Switch defaultChecked />
+                          <Switch defaultChecked disabled />
                         </TableCell>
                       </TableRow>
                       <TableRow>
@@ -1259,7 +1444,7 @@ Generated on: ${new Date().toLocaleDateString()}
                           Applicable if employee gross ≤ ₹21,000
                         </TableCell>
                         <TableCell>
-                          <Switch defaultChecked />
+                          <Switch defaultChecked disabled />
                         </TableCell>
                       </TableRow>
                       <TableRow>
@@ -1271,7 +1456,7 @@ Generated on: ${new Date().toLocaleDateString()}
                           Payable after 5 years of service
                         </TableCell>
                         <TableCell>
-                          <Switch defaultChecked />
+                          <Switch defaultChecked disabled />
                         </TableCell>
                       </TableRow>
                     </TableBody>
@@ -1293,12 +1478,27 @@ Generated on: ${new Date().toLocaleDateString()}
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>EPF Establishment Code</Label>
-                    <Input placeholder="MHBAN00123450000" />
+                    <Label htmlFor="epf-code">EPF Establishment Code</Label>
+                    <Input
+                      id="epf-code"
+                      placeholder="MHBAN00123450000"
+                      value={payrollSettings.epfEstablishmentCode}
+                      onChange={(e) =>
+                        setPayrollSettings({
+                          ...payrollSettings,
+                          epfEstablishmentCode: e.target.value,
+                        })
+                      }
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>EPF Wage Ceiling</Label>
-                    <Select defaultValue="15000">
+                    <Select
+                      value={payrollSettings.epfWageCeiling}
+                      onValueChange={(value) =>
+                        setPayrollSettings({ ...payrollSettings, epfWageCeiling: value })
+                      }
+                    >
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
@@ -1316,7 +1516,15 @@ Generated on: ${new Date().toLocaleDateString()}
                       Employer&apos;s 12% contribution shown as part of CTC
                     </p>
                   </div>
-                  <Switch defaultChecked />
+                  <Switch
+                    checked={payrollSettings.includeEmployerPfInCtc}
+                    onCheckedChange={(checked) =>
+                      setPayrollSettings({
+                        ...payrollSettings,
+                        includeEmployerPfInCtc: checked,
+                      })
+                    }
+                  />
                 </div>
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
@@ -1325,7 +1533,12 @@ Generated on: ${new Date().toLocaleDateString()}
                       Employees can contribute more than 12%
                     </p>
                   </div>
-                  <Switch />
+                  <Switch
+                    checked={payrollSettings.allowVpf}
+                    onCheckedChange={(checked) =>
+                      setPayrollSettings({ ...payrollSettings, allowVpf: checked })
+                    }
+                  />
                 </div>
               </CardContent>
             </Card>
@@ -1340,8 +1553,18 @@ Generated on: ${new Date().toLocaleDateString()}
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>ESI Code</Label>
-                    <Input placeholder="31-00-123456-000-0001" />
+                    <Label htmlFor="esi-code">ESI Code</Label>
+                    <Input
+                      id="esi-code"
+                      placeholder="31-00-123456-000-0001"
+                      value={payrollSettings.esiCode}
+                      onChange={(e) =>
+                        setPayrollSettings({
+                          ...payrollSettings,
+                          esiCode: e.target.value,
+                        })
+                      }
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>ESI Wage Limit</Label>
@@ -1373,12 +1596,30 @@ Generated on: ${new Date().toLocaleDateString()}
             <CardContent className="space-y-4">
               <div className="grid gap-4 md:grid-cols-3">
                 <div className="space-y-2">
-                  <Label>TAN Number</Label>
-                  <Input placeholder="MUMB12345A" />
+                  <Label htmlFor="tan-number">TAN Number</Label>
+                  <Input
+                    id="tan-number"
+                    placeholder="MUMB12345A"
+                    value={payrollSettings.tanNumber}
+                    onChange={(e) =>
+                      setPayrollSettings({
+                        ...payrollSettings,
+                        tanNumber: e.target.value,
+                      })
+                    }
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>Default Tax Regime</Label>
-                  <Select defaultValue="new">
+                  <Select
+                    value={payrollSettings.defaultTaxRegime}
+                    onValueChange={(value) =>
+                      setPayrollSettings({
+                        ...payrollSettings,
+                        defaultTaxRegime: value,
+                      })
+                    }
+                  >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -1390,13 +1631,22 @@ Generated on: ${new Date().toLocaleDateString()}
                 </div>
                 <div className="space-y-2">
                   <Label>Financial Year</Label>
-                  <Select defaultValue="2024-25">
+                  <Select
+                    value={payrollSettings.financialYear}
+                    onValueChange={(value) =>
+                      setPayrollSettings({
+                        ...payrollSettings,
+                        financialYear: value,
+                      })
+                    }
+                  >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="2024-25">FY 2024-25</SelectItem>
                       <SelectItem value="2025-26">FY 2025-26</SelectItem>
+                      <SelectItem value="2026-27">FY 2026-27</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1435,11 +1685,71 @@ Generated on: ${new Date().toLocaleDateString()}
 
           {/* Save Button */}
           <div className="flex justify-end gap-2">
-            <Button variant="outline">Reset to Defaults</Button>
-            <Button>Save Payroll Settings</Button>
+            <Button
+              variant="outline"
+              onClick={handleResetPayrollSettings}
+              disabled={savingSettings || !settingsLoaded}
+            >
+              Reset to Defaults
+            </Button>
+            <Button
+              onClick={handleSavePayrollSettings}
+              disabled={savingSettings || !settingsLoaded}
+            >
+              {savingSettings && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save Payroll Settings
+            </Button>
           </div>
         </TabsContent>
       </Tabs>
+
+      {detailsRun && (
+        <RecordDetailsDialog
+          open={!!detailsRun}
+          onOpenChange={(open) => !open && setDetailsRun(null)}
+          title={`Payroll Run ${detailsRun.period}`}
+          description={`${detailsRun.employees} employee(s)`}
+          status={{ label: detailsRun.status }}
+          sections={[
+            {
+              title: "Summary",
+              fields: [
+                { label: "Period", value: detailsRun.period },
+                { label: "Employees", value: detailsRun.employees },
+                {
+                  label: "Gross",
+                  value: formatCurrency(detailsRun.grossAmount),
+                },
+                {
+                  label: "Deductions",
+                  value: formatCurrency(detailsRun.deductions),
+                },
+                { label: "Net Payable", value: formatCurrency(detailsRun.netAmount) },
+              ],
+            },
+          ]}
+          table={{
+            title: "Payslips",
+            columns: ["Employee", "Gross", "Deductions", "Net", "Status"],
+            rows: slipsForRun(detailsRun).map((slip) => [
+              `${slip.employee} (${slip.empId})`,
+              formatCurrency(slip.grossSalary),
+              formatCurrency(slip.deductions),
+              formatCurrency(slip.netSalary),
+              slip.status,
+            ]),
+          }}
+          actions={
+            <Button
+              variant="outline"
+              onClick={() => handleDownloadRunReport(detailsRun)}
+            >
+              <Download className="mr-2 h-4 w-4" />
+              Download Report
+            </Button>
+          }
+        />
+      )}
     </div>
   );
 }

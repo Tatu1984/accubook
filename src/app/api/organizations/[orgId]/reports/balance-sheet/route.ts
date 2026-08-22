@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth } from "@/backend/utils/with-org-auth";
 import { D, sum } from "@/backend/utils/money";
+import { valueClosingStock } from "@/backend/services/inventory/valuation";
 import { Prisma } from "@/generated/prisma";
 import { logger } from "@/backend/utils/logger";
 
@@ -132,29 +133,89 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       },
     });
 
-    const plEntries = await prisma.voucherEntry.findMany({
-      where: {
-        ledgerId: { in: plLedgers.map((l) => l.id) },
-        voucher: {
-          organizationId: orgId,
-          date: { gte: fyStart, lte: asOfDate },
-          status: "APPROVED",
+    /*
+     * Profit is needed over two windows, not one.
+     *
+     * This previously read only the current fiscal year and added that to
+     * equity. Nothing closes a year — there is no closing voucher, and profit
+     * is never posted into an equity ledger — so from the second year onward
+     * the assets earned in year one carried forward while the equity that
+     * balanced them did not, and the statement stopped balancing.
+     *
+     * Retained earnings are therefore derived: everything earned before this
+     * fiscal year is brought forward, and this year's profit is shown
+     * separately, exactly as a closing entry would have left them.
+     */
+    const [plEntriesAllTime, plEntriesThisYear] = await Promise.all([
+      prisma.voucherEntry.findMany({
+        where: {
+          ledgerId: { in: plLedgers.map((l) => l.id) },
+          voucher: {
+            organizationId: orgId,
+            date: { lte: asOfDate },
+            status: "APPROVED",
+          },
         },
-      },
-    });
+      }),
+      prisma.voucherEntry.findMany({
+        where: {
+          ledgerId: { in: plLedgers.map((l) => l.id) },
+          voucher: {
+            organizationId: orgId,
+            date: { gte: fyStart, lte: asOfDate },
+            status: "APPROVED",
+          },
+        },
+      }),
+    ]);
 
-    // Calculate net profit for current year
-    let currentYearProfit = D(0);
-    plLedgers.forEach((ledger) => {
-      const ledgerEntries = plEntries.filter((e) => e.ledgerId === ledger.id);
-      const debit = sum(ledgerEntries.map((e) => e.debitAmount));
-      const credit = sum(ledgerEntries.map((e) => e.creditAmount));
-      if (ledger.group.nature === "INCOME") {
-        currentYearProfit = currentYearProfit.plus(credit.minus(debit));
-      } else {
-        currentYearProfit = currentYearProfit.minus(debit.minus(credit));
-      }
-    });
+    const ledgerProfit = (
+      entries: {
+        ledgerId: string;
+        debitAmount: Prisma.Decimal;
+        creditAmount: Prisma.Decimal;
+      }[]
+    ) => {
+      let profit = D(0);
+      plLedgers.forEach((ledger) => {
+        const ledgerEntries = entries.filter((e) => e.ledgerId === ledger.id);
+        const debit = sum(ledgerEntries.map((e) => e.debitAmount));
+        const credit = sum(ledgerEntries.map((e) => e.creditAmount));
+        if (ledger.group.nature === "INCOME") {
+          profit = profit.plus(credit.minus(debit));
+        } else {
+          profit = profit.minus(debit.minus(credit));
+        }
+      });
+      return profit;
+    };
+
+    /*
+     * Closing stock, the other half of the periodic costing model.
+     *
+     * Purchases are expensed on the bill, so unsold goods have to be added back
+     * as an asset and as profit. Valued at two dates: now, and the instant
+     * before this fiscal year opened, so the year's movement lands in this
+     * year's profit and the rest in retained earnings.
+     */
+    const [closingStockNow, closingStockAtFyStart] = await Promise.all([
+      valueClosingStock(orgId, asOfDate),
+      valueClosingStock(orgId, new Date(fyStart.getTime() - 1)),
+    ]);
+    const stockNow = D(closingStockNow.total);
+    const stockBrought = D(closingStockAtFyStart.total);
+
+    const profitAllTime = ledgerProfit(plEntriesAllTime);
+    const profitThisYearFromLedgers = ledgerProfit(plEntriesThisYear);
+
+    const currentYearProfit = profitThisYearFromLedgers
+      .plus(stockNow)
+      .minus(stockBrought);
+
+    /** Everything earned in closed years, which a closing voucher would have moved to equity. */
+    const retainedEarningsBroughtForward = profitAllTime
+      .minus(profitThisYearFromLedgers)
+      .plus(stockBrought);
 
     // Calculate balances for each ledger
     const calculateBalance = (
@@ -256,12 +317,17 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
     const equity = buildGroupStructure("EQUITY", voucherEntries);
 
     // Calculate totals
-    const totalAssets = sum(assets.map((g) => g.total));
+    const assetLedgerTotal = sum(assets.map((g) => g.total));
+    // Stock-in-Hand is derived from the inventory, not from a ledger — the
+    // matching credit is the closing-stock adjustment inside profit below, so
+    // adding it to both sides keeps the statement balanced.
+    const totalAssets = assetLedgerTotal.plus(stockNow);
     const totalLiabilities = sum(liabilities.map((g) => g.total));
     const totalEquity = sum(equity.map((g) => g.total));
 
-    // Add current year profit to equity
-    const totalEquityWithProfit = totalEquity.plus(currentYearProfit);
+    const totalEquityWithProfit = totalEquity
+      .plus(retainedEarningsBroughtForward)
+      .plus(currentYearProfit);
     const totalLiabilitiesAndEquity = totalLiabilities.plus(totalEquityWithProfit);
 
     // Previous totals
@@ -275,6 +341,11 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       previousAsOfDate: compareWithPrevious ? prevAsOfDate.toISOString() : null,
       assets: {
         groups: assets,
+        ledgerTotal: assetLedgerTotal,
+        stockInHand: {
+          value: stockNow,
+          items: closingStockNow.items,
+        },
         total: totalAssets,
         previousTotal: compareWithPrevious ? prevTotalAssets : undefined,
       },
@@ -285,7 +356,8 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       },
       equity: {
         groups: equity,
-        retainedEarnings: currentYearProfit,
+        retainedEarnings: retainedEarningsBroughtForward,
+        currentYearProfit,
         total: totalEquity,
         totalWithProfit: totalEquityWithProfit,
         previousTotal: compareWithPrevious ? prevTotalEquity : undefined,

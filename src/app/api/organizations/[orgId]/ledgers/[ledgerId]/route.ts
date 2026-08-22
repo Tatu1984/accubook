@@ -19,7 +19,14 @@ const updateLedgerSchema = z.object({
   isActive: optional(z.boolean()),
 }).strict();
 
-export const GET = withOrgAuth<{ ledgerId: string }>(async (_request, { orgId, params }) => {
+/**
+ * GET ?view=transactions returns the posted voucher entries hitting this
+ * ledger, newest first, with a running balance.
+ *
+ * The ledgers screen offered "View Transactions" with nothing to call — the
+ * only per-ledger read returned the master record and its group.
+ */
+export const GET = withOrgAuth<{ ledgerId: string }>(async (request, { orgId, params }) => {
   try {
     const { ledgerId } = params;
 
@@ -35,6 +42,58 @@ export const GET = withOrgAuth<{ ledgerId: string }>(async (_request, { orgId, p
 
     if (!ledger) {
       return notFound("Ledger not found");
+    }
+
+    const { searchParams } = new URL(request.url);
+    if (searchParams.get("view") === "transactions") {
+      const limit = Math.min(
+        parseInt(searchParams.get("limit") || "100", 10) || 100,
+        500
+      );
+
+      const entries = await prisma.voucherEntry.findMany({
+        where: {
+          ledgerId,
+          voucher: { organizationId: orgId, isPosted: true },
+        },
+        include: {
+          voucher: {
+            select: {
+              id: true,
+              voucherNumber: true,
+              date: true,
+              narration: true,
+              voucherType: { select: { name: true } },
+            },
+          },
+        },
+        orderBy: [{ voucher: { date: "desc" } }, { createdAt: "desc" }],
+        take: limit,
+      });
+
+      // Running balance is computed oldest-to-newest, then presented newest first.
+      const chronological = [...entries].reverse();
+      let running = Number(ledger.openingBalance ?? 0);
+      const withBalance = chronological.map((entry) => {
+        running += Number(entry.debitAmount) - Number(entry.creditAmount);
+        return {
+          id: entry.id,
+          date: entry.voucher.date,
+          voucherNumber: entry.voucher.voucherNumber,
+          voucherType: entry.voucher.voucherType?.name ?? "Voucher",
+          narration: entry.narration ?? entry.voucher.narration,
+          debitAmount: entry.debitAmount,
+          creditAmount: entry.creditAmount,
+          balance: running,
+        };
+      });
+
+      return NextResponse.json({
+        ledger: { id: ledger.id, name: ledger.name, code: ledger.code },
+        openingBalance: ledger.openingBalance,
+        closingBalance: running,
+        data: withBalance.reverse(),
+      });
     }
 
     return NextResponse.json(ledger);

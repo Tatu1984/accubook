@@ -69,6 +69,9 @@ import {
   DropdownMenuTrigger,
 } from "@/frontend/components/ui/dropdown-menu";
 import { useOrganization } from "@/frontend/hooks/use-organization";
+import { RecordDetailsDialog } from "@/frontend/components/ui/record-details-dialog";
+import { downloadCsv } from "@/frontend/utils/export-csv";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 interface SalesOrderItem {
@@ -131,6 +134,7 @@ function formatCurrency(amount: number) {
 }
 
 export default function SalesOrdersPage() {
+  const router = useRouter();
   const { organizationId } = useOrganization();
   const [salesOrders, setSalesOrders] = React.useState<SalesOrder[]>([]);
   const [parties, setParties] = React.useState<Party[]>([]);
@@ -142,6 +146,9 @@ export default function SalesOrdersPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [orderToDelete, setOrderToDelete] = React.useState<SalesOrder | null>(null);
   const [saving, setSaving] = React.useState(false);
+  const [editingOrder, setEditingOrder] = React.useState<SalesOrder | null>(null);
+  const [detailsOrder, setDetailsOrder] = React.useState<SalesOrder | null>(null);
+  const [actionId, setActionId] = React.useState<string | null>(null);
 
   const [formData, setFormData] = React.useState({
     partyId: "",
@@ -197,6 +204,43 @@ export default function SalesOrdersPage() {
     fetchItems();
   }, [fetchSalesOrders, fetchParties, fetchItems]);
 
+  const resetForm = () => {
+    setEditingOrder(null);
+    setFormData({
+      partyId: "",
+      date: new Date().toISOString().split("T")[0],
+      expectedDate: "",
+      notes: "",
+      terms: "",
+      items: [{ itemId: "", quantity: 1, unitPrice: 0, discountPercent: 0 }],
+    });
+  };
+
+  const openEditDialog = (order: SalesOrder) => {
+    if (order.status === "FULFILLED" || order.status === "CANCELLED") {
+      toast.error(`A ${order.status.toLowerCase()} order cannot be edited`);
+      return;
+    }
+    setEditingOrder(order);
+    setFormData({
+      partyId: order.partyId,
+      date: order.date.split("T")[0],
+      expectedDate: order.expectedDate ? order.expectedDate.split("T")[0] : "",
+      notes: "",
+      terms: "",
+      items:
+        order.items && order.items.length > 0
+          ? order.items.map((line) => ({
+              itemId: line.itemId,
+              quantity: Number(line.quantity),
+              unitPrice: Number(line.unitPrice),
+              discountPercent: 0,
+            }))
+          : [{ itemId: "", quantity: 1, unitPrice: 0, discountPercent: 0 }],
+    });
+    setDialogOpen(true);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!organizationId) return;
@@ -210,37 +254,128 @@ export default function SalesOrdersPage() {
         return;
       }
 
-      const response = await fetch(`/api/organizations/${organizationId}/sales-orders`, {
-        method: "POST",
+      const url = editingOrder
+        ? `/api/organizations/${organizationId}/sales-orders/${editingOrder.id}`
+        : `/api/organizations/${organizationId}/sales-orders`;
+
+      const response = await fetch(url, {
+        method: editingOrder ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...formData,
+          expectedDate: formData.expectedDate || undefined,
           items: validItems,
         }),
       });
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || "Failed to create sales order");
+        throw new Error(
+          error.error || `Failed to ${editingOrder ? "update" : "create"} sales order`
+        );
       }
 
-      toast.success("Sales order created successfully");
+      toast.success(
+        editingOrder
+          ? "Sales order updated successfully"
+          : "Sales order created successfully"
+      );
       setDialogOpen(false);
-      setFormData({
-        partyId: "",
-        date: new Date().toISOString().split("T")[0],
-        expectedDate: "",
-        notes: "",
-        terms: "",
-        items: [{ itemId: "", quantity: 1, unitPrice: 0, discountPercent: 0 }],
-      });
+      resetForm();
       fetchSalesOrders();
     } catch (error) {
-      console.error("Error creating sales order:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to create sales order");
+      console.error("Error saving sales order:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to save sales order");
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleConvertToInvoice = async (order: SalesOrder) => {
+    if (!organizationId) return;
+    if (!order.items || order.items.length === 0) {
+      toast.error("This order has no line items to invoice");
+      return;
+    }
+    setActionId(order.id);
+    try {
+      const today = new Date();
+      const dueDate = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+      /**
+       * Routed through the invoices endpoint rather than a bespoke converter
+       * so the invoice picks up GST place-of-supply handling, numbering and
+       * ledger posting exactly as a hand-entered invoice would.
+       */
+      const response = await fetch(
+        `/api/organizations/${organizationId}/invoices`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            partyId: order.partyId,
+            date: today.toISOString().split("T")[0],
+            dueDate: dueDate.toISOString().split("T")[0],
+            salesOrderId: order.id,
+            status: "DRAFT",
+            items: order.items.map((line) => ({
+              itemId: line.itemId,
+              description: line.item?.name ?? "Item",
+              quantity: Number(line.quantity),
+              unitPrice: Number(line.unitPrice),
+              discountPercent: 0,
+            })),
+          }),
+        }
+      );
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Failed to create invoice");
+
+      await fetch(
+        `/api/organizations/${organizationId}/sales-orders/${order.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "FULFILLED" }),
+        }
+      );
+
+      toast.success(
+        `Invoice ${data.invoiceNumber ?? ""} created from ${order.orderNumber}`.trim()
+      );
+      fetchSalesOrders();
+      router.push("/sales/invoices");
+    } catch (error) {
+      console.error("Error converting sales order:", error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to convert sales order"
+      );
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const handleExport = () => {
+    if (filteredOrders.length === 0) {
+      toast.error("Nothing to export");
+      return;
+    }
+    downloadCsv(
+      `sales-orders-${new Date().toISOString().slice(0, 10)}`,
+      filteredOrders.map((order) => ({
+        Number: order.orderNumber,
+        Date: new Date(order.date).toLocaleDateString("en-IN"),
+        ExpectedDate: order.expectedDate
+          ? new Date(order.expectedDate).toLocaleDateString("en-IN")
+          : "",
+        Customer: order.party?.name ?? "",
+        Items: order.items?.length ?? 0,
+        Total: Number(order.totalAmount),
+        Status: order.status,
+      }))
+    );
+    toast.success(`Exported ${filteredOrders.length} sales orders`);
   };
 
   const handleDelete = async () => {
@@ -341,18 +476,30 @@ export default function SalesOrdersPage() {
           <h1 className="text-3xl font-bold tracking-tight">Sales Orders</h1>
           <p className="text-muted-foreground">Manage sales orders</p>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <Dialog
+          open={dialogOpen}
+          onOpenChange={(open) => {
+            setDialogOpen(open);
+            if (!open) resetForm();
+          }}
+        >
           <DialogTrigger asChild>
-            <Button>
+            <Button onClick={resetForm}>
               <Plus className="mr-2 h-4 w-4" />
               New Order
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Create Sales Order</DialogTitle>
+              <DialogTitle>
+                {editingOrder
+                  ? `Edit Sales Order ${editingOrder.orderNumber}`
+                  : "Create Sales Order"}
+              </DialogTitle>
               <DialogDescription>
-                Create a new sales order for a customer
+                {editingOrder
+                  ? "Update this order's customer, dates and line items"
+                  : "Create a new sales order for a customer"}
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -461,7 +608,7 @@ export default function SalesOrdersPage() {
                 </Button>
                 <Button type="submit" disabled={saving || !formData.partyId}>
                   {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Create Order
+                  {editingOrder ? "Save Changes" : "Create Order"}
                 </Button>
               </DialogFooter>
             </form>
@@ -542,7 +689,12 @@ export default function SalesOrdersPage() {
                   <SelectItem value="CANCELLED">Cancelled</SelectItem>
                 </SelectContent>
               </Select>
-              <Button variant="outline" size="icon">
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label="Export sales orders to CSV"
+                onClick={handleExport}
+              >
                 <Download className="h-4 w-4" />
               </Button>
             </div>
@@ -613,15 +765,22 @@ export default function SalesOrdersPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setDetailsOrder(order)}>
                             <Eye className="mr-2 h-4 w-4" />
                             View
                           </DropdownMenuItem>
-                          <DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => openEditDialog(order)}>
                             <Edit className="mr-2 h-4 w-4" />
                             Edit
                           </DropdownMenuItem>
-                          <DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={
+                              actionId === order.id ||
+                              order.status === "CANCELLED" ||
+                              order.status === "FULFILLED"
+                            }
+                            onClick={() => handleConvertToInvoice(order)}
+                          >
                             <ArrowRight className="mr-2 h-4 w-4" />
                             Convert to Invoice
                           </DropdownMenuItem>
@@ -663,6 +822,62 @@ export default function SalesOrdersPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {detailsOrder && (
+        <RecordDetailsDialog
+          open={!!detailsOrder}
+          onOpenChange={(open) => !open && setDetailsOrder(null)}
+          title={`Sales Order ${detailsOrder.orderNumber}`}
+          description={detailsOrder.party?.name}
+          status={{ label: detailsOrder.status }}
+          sections={[
+            {
+              title: "Details",
+              fields: [
+                { label: "Customer", value: detailsOrder.party?.name },
+                { label: "Email", value: detailsOrder.party?.email },
+                {
+                  label: "Order Date",
+                  value: new Date(detailsOrder.date).toLocaleDateString("en-IN"),
+                },
+                {
+                  label: "Expected Date",
+                  value: detailsOrder.expectedDate
+                    ? new Date(detailsOrder.expectedDate).toLocaleDateString("en-IN")
+                    : null,
+                },
+                {
+                  label: "Order Total",
+                  value: formatCurrency(Number(detailsOrder.totalAmount)),
+                },
+              ],
+            },
+          ]}
+          table={{
+            title: "Line Items",
+            columns: ["Item", "Qty", "Rate", "Amount"],
+            rows: (detailsOrder.items ?? []).map((line) => [
+              line.item?.name ?? "-",
+              Number(line.quantity),
+              formatCurrency(Number(line.unitPrice)),
+              formatCurrency(Number(line.totalAmount)),
+            ]),
+          }}
+          actions={
+            <Button
+              variant="outline"
+              onClick={() => {
+                const order = detailsOrder;
+                setDetailsOrder(null);
+                openEditDialog(order);
+              }}
+            >
+              <Edit className="mr-2 h-4 w-4" />
+              Edit
+            </Button>
+          }
+        />
+      )}
     </div>
   );
 }

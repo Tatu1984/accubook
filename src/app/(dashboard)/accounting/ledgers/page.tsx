@@ -58,6 +58,7 @@ import { DataTable } from "@/frontend/components/ui/data-table";
 import { Tabs, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
 import { cn } from "@/shared/utils/common.util";
 import { useOrganization } from "@/frontend/hooks/use-organization";
+import { RecordDetailsDialog } from "@/frontend/components/ui/record-details-dialog";
 import { toast } from "sonner";
 import { downloadCsv } from "@/frontend/utils/export-csv";
 
@@ -106,6 +107,39 @@ export default function LedgersPage() {
   const [selectedNature, setSelectedNature] = React.useState<string>("all");
   const [deleteLedgerId, setDeleteLedgerId] = React.useState<string | null>(null);
   const [editingLedger, setEditingLedger] = React.useState<Ledger | null>(null);
+
+  interface LedgerTxn {
+    id: string;
+    date: string;
+    voucherNumber: string;
+    voucherType: string;
+    narration: string | null;
+    debitAmount: string | number;
+    creditAmount: string | number;
+    balance: number;
+  }
+  const [txnLedger, setTxnLedger] = React.useState<Ledger | null>(null);
+  const [txns, setTxns] = React.useState<LedgerTxn[]>([]);
+  const [txnsLoading, setTxnsLoading] = React.useState(false);
+
+  const openTransactions = async (ledger: Ledger) => {
+    if (!organizationId) return;
+    setTxnLedger(ledger);
+    setTxns([]);
+    setTxnsLoading(true);
+    try {
+      const r = await fetch(
+        `/api/organizations/${organizationId}/ledgers/${ledger.id}?view=transactions&limit=200`
+      );
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || "Failed to load transactions");
+      setTxns((body.data ?? []) as LedgerTxn[]);
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to load transactions");
+    } finally {
+      setTxnsLoading(false);
+    }
+  };
 
   // Form state
   const [formData, setFormData] = React.useState({
@@ -386,7 +420,7 @@ export default function LedgersPage() {
               <Eye className="mr-2 h-4 w-4" />
               View Details
             </DropdownMenuItem>
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={() => openTransactions(row.original)}>
               <FileText className="mr-2 h-4 w-4" />
               View Transactions
             </DropdownMenuItem>
@@ -668,6 +702,55 @@ export default function LedgersPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {txnLedger && (
+        <RecordDetailsDialog
+          open={!!txnLedger}
+          onOpenChange={(open) => !open && setTxnLedger(null)}
+          title={`${txnLedger.name} — Transactions`}
+          description={
+            txnsLoading
+              ? "Loading posted entries…"
+              : `${txns.length} posted entr${txns.length === 1 ? "y" : "ies"}`
+          }
+          sections={[]}
+          table={{
+            columns: ["Date", "Voucher", "Type", "Debit", "Credit", "Balance"],
+            rows: txns.map((t) => [
+              new Date(t.date).toLocaleDateString("en-IN"),
+              t.voucherNumber,
+              t.voucherType,
+              Number(t.debitAmount) ? formatCurrency(Number(t.debitAmount)) : "-",
+              Number(t.creditAmount) ? formatCurrency(Number(t.creditAmount)) : "-",
+              formatCurrency(Number(t.balance)),
+            ]),
+          }}
+          actions={
+            txns.length > 0 ? (
+              <Button
+                variant="outline"
+                onClick={() =>
+                  downloadCsv(
+                    `ledger-${txnLedger.name.replace(/\s+/g, "-").toLowerCase()}`,
+                    txns.map((t) => ({
+                      Date: new Date(t.date).toLocaleDateString("en-IN"),
+                      Voucher: t.voucherNumber,
+                      Type: t.voucherType,
+                      Narration: t.narration ?? "",
+                      Debit: Number(t.debitAmount),
+                      Credit: Number(t.creditAmount),
+                      Balance: t.balance,
+                    }))
+                  )
+                }
+              >
+                <Download className="mr-2 h-4 w-4" />
+                Export
+              </Button>
+            ) : null
+          }
+        />
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/backend/database/client";
 import { withOrgAuth } from "@/backend/utils/with-org-auth";
 import { D, sum, toNumber } from "@/backend/utils/money";
+import { valueClosingStock } from "@/backend/services/inventory/valuation";
 import { Prisma } from "@/generated/prisma";
 import { logger } from "@/backend/utils/logger";
 
@@ -191,9 +192,32 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       }
     });
 
+    /*
+     * Closing and opening stock complete the periodic costing model.
+     *
+     * Purchases are expensed the moment a bill posts, so without these two
+     * adjustments the statement charged an entire period's buying against that
+     * period's selling and reported a gross profit that was wrong by the value
+     * of everything still unsold.
+     *
+     *   cost of goods sold = opening stock + purchases − closing stock
+     *
+     * Both figures are derived from the inventory rather than posted as
+     * vouchers — see `services/inventory/valuation.ts` for why.
+     */
+    const [closingStock, openingStock] = await Promise.all([
+      valueClosingStock(orgId, periodEnd),
+      valueClosingStock(orgId, new Date(periodStart.getTime() - 1)),
+    ]);
+    const closingStockValue = D(closingStock.total);
+    const openingStockValue = D(openingStock.total);
+
     // Calculate totals
     const totalIncome = sum(incomeGroups.map((g) => g.total));
-    const totalDirectExpenses = sum(directExpenseGroups.map((g) => g.total));
+    const purchasesAndDirect = sum(directExpenseGroups.map((g) => g.total));
+    const totalDirectExpenses = purchasesAndDirect
+      .plus(openingStockValue)
+      .minus(closingStockValue);
     const totalIndirectExpenses = sum(indirectExpenseGroups.map((g) => g.total));
     const grossProfit = totalIncome.minus(totalDirectExpenses);
     const netProfit = grossProfit.minus(totalIndirectExpenses);
@@ -228,9 +252,18 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
       },
       directExpenses: {
         groups: directExpenseGroups,
+        /** Purchases and direct expenses before the stock adjustment. */
+        purchases: purchasesAndDirect,
+        openingStock: openingStockValue,
+        closingStock: closingStockValue,
         total: totalDirectExpenses,
         previousTotal: compareWithPrevious ? prevTotalDirectExpenses : undefined,
         label: "Cost of Goods Sold / Direct Expenses",
+      },
+      closingStock: {
+        value: closingStockValue,
+        openingValue: openingStockValue,
+        items: closingStock.items,
       },
       grossProfit: {
         amount: grossProfit,

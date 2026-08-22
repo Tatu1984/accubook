@@ -69,6 +69,8 @@ import {
   DropdownMenuTrigger,
 } from "@/frontend/components/ui/dropdown-menu";
 import { useOrganization } from "@/frontend/hooks/use-organization";
+import { RecordDetailsDialog } from "@/frontend/components/ui/record-details-dialog";
+import { downloadCsv } from "@/frontend/utils/export-csv";
 import { toast } from "sonner";
 
 interface PurchaseOrderItem {
@@ -142,6 +144,13 @@ export default function PurchaseOrdersPage() {
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [orderToDelete, setOrderToDelete] = React.useState<PurchaseOrder | null>(null);
+  const [detailsOrder, setDetailsOrder] = React.useState<PurchaseOrder | null>(null);
+  const [editingOrder, setEditingOrder] = React.useState<PurchaseOrder | null>(null);
+  const [receivingOrder, setReceivingOrder] = React.useState<PurchaseOrder | null>(null);
+  const [receiveWarehouseId, setReceiveWarehouseId] = React.useState("none");
+  const [warehouses, setWarehouses] = React.useState<
+    { id: string; name: string }[]
+  >([]);
   const [saving, setSaving] = React.useState(false);
 
   const [formData, setFormData] = React.useState({
@@ -198,6 +207,59 @@ export default function PurchaseOrdersPage() {
     fetchItems();
   }, [fetchPurchaseOrders, fetchParties, fetchItems]);
 
+  const fetchWarehouses = React.useCallback(async () => {
+    if (!organizationId) return;
+    try {
+      const response = await fetch(`/api/organizations/${organizationId}/warehouses`);
+      if (!response.ok) throw new Error("Failed to fetch warehouses");
+      const data = await response.json();
+      setWarehouses(Array.isArray(data) ? data : data.data || []);
+    } catch (error) {
+      console.error("Error fetching warehouses:", error);
+    }
+  }, [organizationId]);
+
+  React.useEffect(() => {
+    fetchWarehouses();
+  }, [fetchWarehouses]);
+
+  const resetForm = () => {
+    setEditingOrder(null);
+    setFormData({
+      partyId: "",
+      date: new Date().toISOString().split("T")[0],
+      expectedDate: "",
+      notes: "",
+      terms: "",
+      items: [{ itemId: "", quantity: 1, unitPrice: 0, discountPercent: 0 }],
+    });
+  };
+
+  const openEditDialog = (order: PurchaseOrder) => {
+    if (order.status === "RECEIVED" || order.status === "CANCELLED") {
+      toast.error(`A ${order.status.toLowerCase()} order cannot be edited`);
+      return;
+    }
+    setEditingOrder(order);
+    setFormData({
+      partyId: order.partyId,
+      date: order.date.split("T")[0],
+      expectedDate: order.expectedDate ? order.expectedDate.split("T")[0] : "",
+      notes: "",
+      terms: "",
+      items:
+        order.items && order.items.length > 0
+          ? order.items.map((line) => ({
+              itemId: line.itemId,
+              quantity: Number(line.quantity),
+              unitPrice: Number(line.unitPrice),
+              discountPercent: 0,
+            }))
+          : [{ itemId: "", quantity: 1, unitPrice: 0, discountPercent: 0 }],
+    });
+    setDialogOpen(true);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!organizationId) return;
@@ -211,37 +273,100 @@ export default function PurchaseOrdersPage() {
         return;
       }
 
-      const response = await fetch(`/api/organizations/${organizationId}/purchase-orders`, {
-        method: "POST",
+      const url = editingOrder
+        ? `/api/organizations/${organizationId}/purchase-orders/${editingOrder.id}`
+        : `/api/organizations/${organizationId}/purchase-orders`;
+
+      const response = await fetch(url, {
+        method: editingOrder ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...formData,
+          expectedDate: formData.expectedDate || undefined,
           items: validItems,
         }),
       });
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || "Failed to create purchase order");
+        throw new Error(
+          error.error ||
+            `Failed to ${editingOrder ? "update" : "create"} purchase order`
+        );
       }
 
-      toast.success("Purchase order created successfully");
+      toast.success(
+        editingOrder
+          ? "Purchase order updated successfully"
+          : "Purchase order created successfully"
+      );
       setDialogOpen(false);
-      setFormData({
-        partyId: "",
-        date: new Date().toISOString().split("T")[0],
-        expectedDate: "",
-        notes: "",
-        terms: "",
-        items: [{ itemId: "", quantity: 1, unitPrice: 0, discountPercent: 0 }],
-      });
+      resetForm();
       fetchPurchaseOrders();
     } catch (error) {
-      console.error("Error creating purchase order:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to create purchase order");
+      console.error("Error saving purchase order:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to save purchase order");
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleMarkReceived = async () => {
+    if (!organizationId || !receivingOrder) return;
+    setSaving(true);
+    try {
+      const response = await fetch(
+        `/api/organizations/${organizationId}/purchase-orders/${receivingOrder.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            status: "RECEIVED",
+            receiveIntoWarehouseId:
+              receiveWarehouseId === "none" ? undefined : receiveWarehouseId,
+          }),
+        }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Failed to receive order");
+
+      toast.success(
+        receiveWarehouseId && receiveWarehouseId !== "none"
+          ? "Order received and stock updated"
+          : "Order marked as received"
+      );
+      setReceivingOrder(null);
+      fetchPurchaseOrders();
+    } catch (error) {
+      console.error("Error receiving purchase order:", error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to receive purchase order"
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleExport = () => {
+    if (filteredOrders.length === 0) {
+      toast.error("Nothing to export");
+      return;
+    }
+    downloadCsv(
+      `purchase-orders-${new Date().toISOString().slice(0, 10)}`,
+      filteredOrders.map((order) => ({
+        Number: order.orderNumber,
+        Date: new Date(order.date).toLocaleDateString("en-IN"),
+        ExpectedDate: order.expectedDate
+          ? new Date(order.expectedDate).toLocaleDateString("en-IN")
+          : "",
+        Vendor: order.party?.name ?? "",
+        Items: order.items?.length ?? 0,
+        Total: Number(order.totalAmount),
+        Status: order.status,
+      }))
+    );
+    toast.success(`Exported ${filteredOrders.length} purchase orders`);
   };
 
   const handleDelete = async () => {
@@ -344,16 +469,26 @@ export default function PurchaseOrdersPage() {
             Manage purchase orders and vendor procurement
           </p>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <Dialog
+          open={dialogOpen}
+          onOpenChange={(open) => {
+            setDialogOpen(open);
+            if (!open) resetForm();
+          }}
+        >
           <DialogTrigger asChild>
-            <Button>
+            <Button onClick={resetForm}>
               <Plus className="mr-2 h-4 w-4" />
               New Purchase Order
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Create Purchase Order</DialogTitle>
+              <DialogTitle>
+                {editingOrder
+                  ? `Edit Purchase Order ${editingOrder.orderNumber}`
+                  : "Create Purchase Order"}
+              </DialogTitle>
               <DialogDescription>
                 Create a new purchase order for a vendor
               </DialogDescription>
@@ -464,7 +599,7 @@ export default function PurchaseOrdersPage() {
                 </Button>
                 <Button type="submit" disabled={saving || !formData.partyId}>
                   {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Create Order
+                  {editingOrder ? "Save Changes" : "Create Order"}
                 </Button>
               </DialogFooter>
             </form>
@@ -549,7 +684,12 @@ export default function PurchaseOrdersPage() {
                   <SelectItem value="CANCELLED">Cancelled</SelectItem>
                 </SelectContent>
               </Select>
-              <Button variant="outline" size="icon">
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label="Export purchase orders to CSV"
+                onClick={handleExport}
+              >
                 <Download className="h-4 w-4" />
               </Button>
             </div>
@@ -620,15 +760,24 @@ export default function PurchaseOrdersPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setDetailsOrder(order)}>
                             <Eye className="mr-2 h-4 w-4" />
                             View
                           </DropdownMenuItem>
-                          <DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => openEditDialog(order)}>
                             <Edit className="mr-2 h-4 w-4" />
                             Edit
                           </DropdownMenuItem>
-                          <DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={
+                              order.status === "RECEIVED" ||
+                              order.status === "CANCELLED"
+                            }
+                            onClick={() => {
+                              setReceivingOrder(order);
+                              setReceiveWarehouseId("none");
+                            }}
+                          >
                             <CheckCircle className="mr-2 h-4 w-4" />
                             Mark as Received
                           </DropdownMenuItem>
@@ -670,6 +819,110 @@ export default function PurchaseOrdersPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {detailsOrder && (
+        <RecordDetailsDialog
+          open={!!detailsOrder}
+          onOpenChange={(open) => !open && setDetailsOrder(null)}
+          title={`Purchase Order ${detailsOrder.orderNumber}`}
+          description={detailsOrder.party?.name}
+          status={{ label: detailsOrder.status }}
+          sections={[
+            {
+              title: "Details",
+              fields: [
+                { label: "Vendor", value: detailsOrder.party?.name },
+                { label: "Email", value: detailsOrder.party?.email },
+                {
+                  label: "Order Date",
+                  value: new Date(detailsOrder.date).toLocaleDateString("en-IN"),
+                },
+                {
+                  label: "Expected Date",
+                  value: detailsOrder.expectedDate
+                    ? new Date(detailsOrder.expectedDate).toLocaleDateString("en-IN")
+                    : null,
+                },
+                {
+                  label: "Order Total",
+                  value: formatCurrency(Number(detailsOrder.totalAmount)),
+                },
+              ],
+            },
+          ]}
+          table={{
+            title: "Line Items",
+            columns: ["Item", "Qty", "Rate", "Amount"],
+            rows: (detailsOrder.items ?? []).map((line) => [
+              line.item?.name ?? "-",
+              Number(line.quantity),
+              formatCurrency(Number(line.unitPrice)),
+              formatCurrency(Number(line.totalAmount)),
+            ]),
+          }}
+          actions={
+            <Button
+              variant="outline"
+              onClick={() => {
+                const order = detailsOrder;
+                setDetailsOrder(null);
+                openEditDialog(order);
+              }}
+            >
+              <Edit className="mr-2 h-4 w-4" />
+              Edit
+            </Button>
+          }
+        />
+      )}
+
+      <Dialog
+        open={!!receivingOrder}
+        onOpenChange={(open) => !open && setReceivingOrder(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Receive {receivingOrder?.orderNumber}</DialogTitle>
+            <DialogDescription>
+              Mark this order as received. Choose a warehouse to book the ordered
+              quantities into stock as a goods receipt, or record the status only
+              if stock is handled elsewhere.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <Label>Receive stock into</Label>
+            <Select
+              value={receiveWarehouseId}
+              onValueChange={setReceiveWarehouseId}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Do not update stock</SelectItem>
+                {warehouses.map((warehouse) => (
+                  <SelectItem key={warehouse.id} value={warehouse.id}>
+                    {warehouse.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setReceivingOrder(null)}
+              disabled={saving}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleMarkReceived} disabled={saving}>
+              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Mark as Received
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

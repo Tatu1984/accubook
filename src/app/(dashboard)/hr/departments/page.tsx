@@ -39,6 +39,16 @@ import { Label } from "@/frontend/components/ui/label";
 import { Textarea } from "@/frontend/components/ui/textarea";
 import { DataTable } from "@/frontend/components/ui/data-table";
 import { useOrganization } from "@/frontend/hooks/use-organization";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/frontend/components/ui/alert-dialog";
 import { toast } from "sonner";
 
 interface Department {
@@ -58,6 +68,12 @@ export default function DepartmentsPage() {
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
 
+  const [editingDepartment, setEditingDepartment] =
+    React.useState<Department | null>(null);
+  const [deleteDepartmentId, setDeleteDepartmentId] = React.useState<
+    string | null
+  >(null);
+
   const [formData, setFormData] = React.useState({
     name: "",
     code: "",
@@ -66,6 +82,7 @@ export default function DepartmentsPage() {
 
   const resetForm = () => {
     setFormData({ name: "", code: "", description: "" });
+    setEditingDepartment(null);
   };
 
   const fetchDepartments = React.useCallback(async () => {
@@ -76,10 +93,10 @@ export default function DepartmentsPage() {
       );
       if (!response.ok) throw new Error("Failed to fetch departments");
       const data = await response.json();
-      setDepartments(data.data || data || []);
+      setDepartments(data.data || []);
     } catch (error) {
       console.error("Error fetching departments:", error);
-      // Don't show error - API might not exist yet
+      toast.error("Failed to load departments");
     }
   }, [organizationId]);
 
@@ -99,15 +116,74 @@ export default function DepartmentsPage() {
 
     setIsSubmitting(true);
     try {
-      toast.success("Department created successfully");
+      /**
+       * This used to pop a success toast without issuing a request at all, so
+       * every "created" department vanished on the next refresh.
+       */
+      const url = editingDepartment
+        ? `/api/organizations/${organizationId}/departments/${editingDepartment.id}`
+        : `/api/organizations/${organizationId}/departments`;
+
+      const response = await fetch(url, {
+        method: editingDepartment ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: formData.name,
+          code: formData.code || undefined,
+          description: formData.description || undefined,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Failed to save department");
+
+      toast.success(
+        editingDepartment
+          ? "Department updated successfully"
+          : "Department created successfully"
+      );
       setIsDialogOpen(false);
       resetForm();
       fetchDepartments();
     } catch (error) {
       console.error("Error saving department:", error);
-      toast.error("Failed to save department");
+      toast.error(
+        error instanceof Error ? error.message : "Failed to save department"
+      );
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const openEditDialog = (department: Department) => {
+    setEditingDepartment(department);
+    setFormData({
+      name: department.name,
+      code: department.code ?? "",
+      description: department.description ?? "",
+    });
+    setIsDialogOpen(true);
+  };
+
+  const handleDelete = async () => {
+    if (!organizationId || !deleteDepartmentId) return;
+    try {
+      const response = await fetch(
+        `/api/organizations/${organizationId}/departments/${deleteDepartmentId}`,
+        { method: "DELETE" }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Failed to delete department");
+      toast.success(
+        data.softDeleted
+          ? "Department deactivated (it still has employees)"
+          : "Department deleted"
+      );
+      setDeleteDepartmentId(null);
+      fetchDepartments();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to delete department"
+      );
     }
   };
 
@@ -167,12 +243,15 @@ export default function DepartmentsPage() {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuLabel>Actions</DropdownMenuLabel>
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={() => openEditDialog(row.original)}>
               <Pencil className="mr-2 h-4 w-4" />
               Edit
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-red-600">
+            <DropdownMenuItem
+              className="text-red-600"
+              onClick={() => setDeleteDepartmentId(row.original.id)}
+            >
               <Trash2 className="mr-2 h-4 w-4" />
               Delete
             </DropdownMenuItem>
@@ -219,7 +298,9 @@ export default function DepartmentsPage() {
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Add New Department</DialogTitle>
+              <DialogTitle>
+                {editingDepartment ? "Edit Department" : "Add New Department"}
+              </DialogTitle>
               <DialogDescription>
                 Create a new department in your organization
               </DialogDescription>
@@ -303,6 +384,30 @@ export default function DepartmentsPage() {
           )}
         </CardContent>
       </Card>
+
+      <AlertDialog
+        open={!!deleteDepartmentId}
+        onOpenChange={() => setDeleteDepartmentId(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Department</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete this department? If employees are still assigned to it, it
+              is deactivated instead so their records stay intact.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
