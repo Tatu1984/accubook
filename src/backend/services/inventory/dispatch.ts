@@ -50,6 +50,204 @@ export interface DispatchResult {
   invoiceNumbers: string[];
 }
 
+/** One item's share of a "the whole invoice has left" dispatch. */
+export interface DispatchPlanLine {
+  itemId: string;
+  itemName: string;
+  sku: string | null;
+  unit: string | null;
+  quantity: number;
+  warehouseId: string;
+  warehouseName: string;
+  /** What that warehouse holds right now, for the confirm screen. */
+  onHand: number;
+}
+
+export interface DispatchPlan {
+  invoiceId: string;
+  invoiceNumber: string;
+  partyName: string;
+  invoiceDate: Date;
+  lines: DispatchPlanLine[];
+  units: number;
+  /** Items the shelves cannot cover. Non-empty means the invoice cannot complete. */
+  shortfalls: {
+    itemId: string;
+    itemName: string;
+    unit: string | null;
+    pending: number;
+    available: number;
+  }[];
+}
+
+/**
+ * Where each pending item would be picked from if the whole invoice went out now.
+ *
+ * The warehouse manager marking an invoice complete is saying "this order has
+ * left the building", not "line 3 leaves from the Andheri godown" — so the
+ * source warehouse is chosen here rather than asked for: the caller's preferred
+ * warehouse if it can cover the line, else the default warehouse, else the
+ * warehouse holding most, splitting across several only when no single one is
+ * enough.
+ *
+ * Returned rather than posted so the same allocation can be shown for
+ * confirmation and then executed, instead of the screen guessing at one
+ * allocation and the server performing another.
+ */
+export async function planInvoiceDispatch(
+  orgId: string,
+  invoiceId: string,
+  preferredWarehouseId?: string
+): Promise<DispatchPlan> {
+  const pendingLines = await loadPendingLines(orgId, prisma, {
+    invoiceIds: [invoiceId],
+  });
+
+  if (pendingLines.length === 0) {
+    throw new DispatchError(
+      "This invoice has nothing left to dispatch — it has already gone out in full, is not issued, or does not belong to this organization"
+    );
+  }
+
+  const head = pendingLines[0];
+  const itemIds = [...new Set(pendingLines.map((l) => l.itemId))];
+
+  const stocks = await prisma.stock.findMany({
+    where: {
+      itemId: { in: itemIds },
+      item: { organizationId: orgId },
+      warehouse: { organizationId: orgId },
+    },
+    select: {
+      itemId: true,
+      quantity: true,
+      warehouse: { select: { id: true, name: true, isDefault: true, isActive: true } },
+    },
+  });
+
+  const shelvesByItem = new Map<
+    string,
+    { warehouseId: string; warehouseName: string; quantity: number; isDefault: boolean }[]
+  >();
+  for (const stock of stocks) {
+    const quantity = toNumber(stock.quantity);
+    if (quantity <= 0 || !stock.warehouse.isActive) continue;
+    const list = shelvesByItem.get(stock.itemId) ?? [];
+    list.push({
+      warehouseId: stock.warehouse.id,
+      warehouseName: stock.warehouse.name,
+      quantity,
+      isDefault: stock.warehouse.isDefault,
+    });
+    shelvesByItem.set(stock.itemId, list);
+  }
+
+  const lines: DispatchPlanLine[] = [];
+  const shortfalls: DispatchPlan["shortfalls"] = [];
+  const totals = pendingByInvoiceItem(pendingLines);
+  const metaByItem = new Map(pendingLines.map((l) => [l.itemId, l] as const));
+
+  for (const itemId of itemIds) {
+    const meta = metaByItem.get(itemId)!;
+    let remaining = totals.get(`${invoiceId}:${itemId}`) ?? 0;
+    if (remaining <= 0) continue;
+
+    const shelves = [...(shelvesByItem.get(itemId) ?? [])].sort((a, b) => {
+      if (a.warehouseId === preferredWarehouseId) return -1;
+      if (b.warehouseId === preferredWarehouseId) return 1;
+      // A single warehouse that covers the line beats a bigger one that also
+      // would, only insofar as the default is the house's usual answer.
+      if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
+      return b.quantity - a.quantity;
+    });
+
+    const available = shelves.reduce((sum, s) => sum + s.quantity, 0);
+
+    for (const shelf of shelves) {
+      if (remaining <= 1e-9) break;
+      const take = Math.min(shelf.quantity, remaining);
+      if (take <= 0) continue;
+      lines.push({
+        itemId,
+        itemName: meta.itemName,
+        sku: meta.sku,
+        unit: meta.unit,
+        quantity: take,
+        warehouseId: shelf.warehouseId,
+        warehouseName: shelf.warehouseName,
+        onHand: shelf.quantity,
+      });
+      remaining -= take;
+    }
+
+    if (remaining > 1e-9) {
+      shortfalls.push({
+        itemId,
+        itemName: meta.itemName,
+        unit: meta.unit,
+        pending: totals.get(`${invoiceId}:${itemId}`) ?? 0,
+        available,
+      });
+    }
+  }
+
+  return {
+    invoiceId,
+    invoiceNumber: head.invoiceNumber,
+    partyName: head.partyName,
+    invoiceDate: head.invoiceDate,
+    lines,
+    units: lines.reduce((sum, l) => sum + l.quantity, 0),
+    shortfalls,
+  };
+}
+
+/**
+ * Mark an invoice complete: everything still pending on it leaves the warehouse
+ * now.
+ *
+ * Refuses a partial completion — if the shelves cannot cover every line, the
+ * invoice is not complete, and saying otherwise would leave stock the books
+ * think has shipped. Those cases belong in the dispatch queue, line by line.
+ */
+export async function completeInvoiceDispatch(
+  orgId: string,
+  userId: string,
+  input: {
+    invoiceId: string;
+    warehouseId?: string;
+    date?: Date;
+    narration?: string;
+  }
+): Promise<DispatchResult & { plan: DispatchPlan }> {
+  const plan = await planInvoiceDispatch(
+    orgId,
+    input.invoiceId,
+    input.warehouseId
+  );
+
+  if (plan.shortfalls.length > 0) {
+    const worst = plan.shortfalls[0];
+    throw new DispatchError(
+      `${plan.invoiceNumber} cannot be completed — ${worst.itemName} needs ${worst.pending}${worst.unit ? ` ${worst.unit}` : ""} but only ${worst.available} is on hand${plan.shortfalls.length > 1 ? `, and ${plan.shortfalls.length - 1} other item${plan.shortfalls.length > 2 ? "s are" : " is"} short too` : ""}. Receive the stock first, or dispatch what you have from the queue.`
+    );
+  }
+
+  const result = await postDispatch(orgId, userId, {
+    lines: plan.lines.map((line) => ({
+      invoiceId: plan.invoiceId,
+      itemId: line.itemId,
+      warehouseId: line.warehouseId,
+      quantity: line.quantity,
+    })),
+    date: input.date,
+    narration:
+      input.narration ?? `${plan.invoiceNumber} dispatched in full`,
+  });
+
+  return { ...result, plan };
+}
+
 /** Merge duplicate (invoice, item, warehouse) triples so a double-click cannot double-ship. */
 function mergeLines(lines: DispatchLineInput[]): DispatchLineInput[] {
   const merged = new Map<string, DispatchLineInput>();

@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Truck, FileText, ArrowRight } from "lucide-react";
+import { Truck, FileText, ArrowRight, Eye, PackageCheck } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -58,6 +58,10 @@ interface InProgressSheetProps {
   onOpenChange: (open: boolean) => void;
   /** Opens the dispatch queue focused on this invoice. */
   onGoToDispatch: (invoiceId: string) => void;
+  /** Pops the invoice itself open over this panel. */
+  onViewInvoice: (invoiceId: string) => void;
+  /** The goods have physically left: close this invoice out in full. */
+  onMarkComplete: (invoiceId: string) => void;
 }
 
 function daysSince(dateStr: string): number {
@@ -71,10 +75,14 @@ function daysSince(dateStr: string): number {
  * Slides over the stock table rather than replacing it, so the table stays put
  * and several items can be checked in sequence without losing your place.
  *
- * Confirming a dispatch is deliberately not done from here: this panel answers
- * "what is this number made of", and the act of shipping belongs with the
- * warehouse's pick list, where a source warehouse and a picked quantity get
- * chosen. Each row therefore hands off to the dispatch queue instead.
+ * A row can be closed out from here — "mark complete" ships everything still
+ * pending on that invoice, which is the warehouse's ordinary case. Anything
+ * partial still hands off to the dispatch queue, where a picked quantity and a
+ * source warehouse can be entered line by line.
+ *
+ * Each row also opens the invoice itself in a dialog, because the next question
+ * after "which invoice is holding these units" is usually "what exactly did we
+ * sell them" — and answering it should not cost you this panel.
  */
 export function InProgressSheet({
   position,
@@ -82,6 +90,8 @@ export function InProgressSheet({
   loading,
   onOpenChange,
   onGoToDispatch,
+  onViewInvoice,
+  onMarkComplete,
 }: InProgressSheetProps) {
   const totalPending = lines.reduce((sum, l) => sum + l.pendingQty, 0);
   const oldest = lines.reduce(
@@ -174,11 +184,9 @@ export function InProgressSheet({
                 const age = daysSince(line.invoiceDate);
                 const partial = line.dispatchedQty > 0;
                 return (
-                  <button
+                  <div
                     key={line.lineId}
-                    type="button"
-                    onClick={() => onGoToDispatch(line.invoiceId)}
-                    className="w-full rounded-lg border p-3 text-left transition-colors hover:bg-muted/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="w-full rounded-lg border p-3 text-left"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
@@ -211,12 +219,38 @@ export function InProgressSheet({
                             {line.dispatchedQty} of {line.invoicedQty} shipped
                           </p>
                         )}
-                        <span className="mt-1 inline-flex items-center text-[11px] text-muted-foreground">
-                          Dispatch <ArrowRight className="ml-0.5 h-3 w-3" />
-                        </span>
                       </div>
                     </div>
-                  </button>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => onViewInvoice(line.invoiceId)}
+                      >
+                        <Eye className="mr-1.5 h-3.5 w-3.5" />
+                        View invoice
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => onMarkComplete(line.invoiceId)}
+                      >
+                        <PackageCheck className="mr-1.5 h-3.5 w-3.5" />
+                        Mark complete
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => onGoToDispatch(line.invoiceId)}
+                      >
+                        Part-ship
+                        <ArrowRight className="ml-1 h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
                 );
               })}
             </div>

@@ -55,6 +55,7 @@ import {
   FileText,
   Info,
   ChevronRight,
+  PackageCheck,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -77,6 +78,8 @@ import {
   type WarehouseAvailability,
 } from "@/frontend/components/features/inventory/dispatch-queue";
 import { ConfirmDispatchDialog } from "@/frontend/components/features/inventory/confirm-dispatch-dialog";
+import { CompleteInvoiceDialog } from "@/frontend/components/features/inventory/complete-invoice-dialog";
+import { InvoicePreviewDialog } from "@/frontend/components/features/sales/invoice-preview-dialog";
 import { downloadCsv } from "@/frontend/utils/export-csv";
 import { cn } from "@/shared/utils/common.util";
 import { useRouter } from "next/navigation";
@@ -200,6 +203,12 @@ export default function StockPage() {
   const [activeTab, setActiveTab] = React.useState("stock");
   const [inProgressItem, setInProgressItem] = React.useState<StockPosition | null>(null);
   const [focusInvoiceId, setFocusInvoiceId] = React.useState<string | null>(null);
+  /** Invoice popped open over the stock table / dispatch queue. */
+  const [viewInvoiceId, setViewInvoiceId] = React.useState<string | null>(null);
+  /** Invoice the warehouse is closing out in full. */
+  const [completeInvoiceId, setCompleteInvoiceId] = React.useState<string | null>(
+    null
+  );
   const [pendingSelections, setPendingSelections] =
     React.useState<DispatchSelection[] | null>(null);
   const [dispatching, setDispatching] = React.useState(false);
@@ -272,9 +281,30 @@ export default function StockPage() {
     fetchPositions();
   }, [fetchPositions]);
 
+  // Keep an open in-progress panel showing live numbers after a dispatch posts,
+  // and drop it if the item no longer has a position at all.
+  React.useEffect(() => {
+    setInProgressItem((current) =>
+      current ? positions.find((p) => p.itemId === current.itemId) ?? null : null
+    );
+  }, [positions]);
+
+  /** A whole invoice just left the warehouse: everything on screen moved. */
+  const handleInvoiceCompleted = async (invoiceId: string) => {
+    setViewInvoiceId((current) => (current === invoiceId ? null : current));
+    await Promise.all([fetchPositions(), fetchData()]);
+    toast.success("Invoice marked complete — the goods are out and physical stock is updated");
+  };
+
   /** All pending lines flattened, for the per-item in-progress panel. */
   const pendingLines = React.useMemo<PendingDispatchLine[]>(
     () => dispatchInvoices.flatMap((invoice) => invoice.lines),
+    [dispatchInvoices]
+  );
+
+  /** Invoices that still owe goods — the ones "mark complete" applies to. */
+  const pendingInvoiceIds = React.useMemo(
+    () => new Set(dispatchInvoices.map((invoice) => invoice.invoiceId)),
     [dispatchInvoices]
   );
 
@@ -1063,6 +1093,8 @@ export default function StockPage() {
             availability={availability}
             loading={positionsLoading}
             focusInvoiceId={focusInvoiceId}
+            onViewInvoice={setViewInvoiceId}
+            onMarkComplete={setCompleteInvoiceId}
             onConfirm={(selections) => {
               if (selections.length === 0) {
                 toast.error("Nothing selected to dispatch");
@@ -1294,6 +1326,33 @@ export default function StockPage() {
         loading={positionsLoading}
         onOpenChange={(open) => !open && setInProgressItem(null)}
         onGoToDispatch={goToDispatch}
+        onViewInvoice={setViewInvoiceId}
+        onMarkComplete={setCompleteInvoiceId}
+      />
+
+      <InvoicePreviewDialog
+        invoiceId={viewInvoiceId}
+        organizationId={organizationId}
+        onOpenChange={(open) => !open && setViewInvoiceId(null)}
+        actions={
+          viewInvoiceId && pendingInvoiceIds.has(viewInvoiceId) ? (
+            <Button size="sm" onClick={() => setCompleteInvoiceId(viewInvoiceId)}>
+              <PackageCheck className="mr-2 h-4 w-4" />
+              Mark complete
+            </Button>
+          ) : null
+        }
+      />
+
+      <CompleteInvoiceDialog
+        invoiceId={completeInvoiceId}
+        organizationId={organizationId}
+        onOpenChange={(open) => !open && setCompleteInvoiceId(null)}
+        onCompleted={async () => {
+          const invoiceId = completeInvoiceId;
+          setCompleteInvoiceId(null);
+          if (invoiceId) await handleInvoiceCompleted(invoiceId);
+        }}
       />
 
       <ConfirmDispatchDialog

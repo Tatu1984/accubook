@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronRight,
   Search,
+  Eye,
 } from "lucide-react";
 import { Button } from "@/frontend/components/ui/button";
 import { Badge } from "@/frontend/components/ui/badge";
@@ -69,6 +70,10 @@ interface DispatchQueueProps {
   /** Invoice to auto-expand and scroll to, set when arriving from the stock table. */
   focusInvoiceId: string | null;
   onConfirm: (selections: DispatchSelection[]) => void;
+  /** Pops the invoice open over the queue, so the pick list stays put. */
+  onViewInvoice: (invoiceId: string) => void;
+  /** The whole order has left: ship every remaining line and close the invoice out. */
+  onMarkComplete: (invoiceId: string) => void;
 }
 
 interface LineState {
@@ -103,6 +108,8 @@ export function DispatchQueue({
   loading,
   focusInvoiceId,
   onConfirm,
+  onViewInvoice,
+  onMarkComplete,
 }: DispatchQueueProps) {
   const [search, setSearch] = React.useState("");
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({});
@@ -293,19 +300,20 @@ export function DispatchQueue({
                     </CardDescription>
                   </div>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    const picked = invoice.lines
-                      .map((line) => buildSelection(line, invoice))
-                      .filter((s): s is DispatchSelection => s !== null);
-                    onConfirm(picked);
-                  }}
-                >
-                  <Truck className="mr-2 h-4 w-4" />
-                  Confirm all
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onViewInvoice(invoice.invoiceId)}
+                  >
+                    <Eye className="mr-2 h-4 w-4" />
+                    View invoice
+                  </Button>
+                  <Button size="sm" onClick={() => onMarkComplete(invoice.invoiceId)}>
+                    <PackageCheck className="mr-2 h-4 w-4" />
+                    Mark complete
+                  </Button>
+                </div>
               </div>
             </CardHeader>
 
