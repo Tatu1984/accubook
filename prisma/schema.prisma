@@ -187,8 +187,83 @@ model Organization {
   recurringInvoices RecurringInvoice[]
   approvals         Approval[]
   apiKeys           ApiKey[]
+  documentExtractions DocumentExtraction[]
 
   @@map("organizations")
+}
+
+/**
+ * A vendor bill, customer invoice or voucher that arrived as a picture rather
+ * than as data — a phone photo, a scan, or a PDF attached to an email — plus
+ * whatever the extractor could read off it.
+ *
+ * The row exists from the moment the file lands, before anything has been read
+ * from it, because the file itself is the record of what the counterparty sent
+ * and has to survive a failed or disputed extraction. `extracted` is a
+ * proposal, never a posting: nothing reaches the ledger until a human confirms
+ * it, at which point `postedEntityId` points at the Bill or Invoice that was
+ * created and this row becomes the audit trail behind it.
+ *
+ * Extraction cost is recorded per document (`provider`, tokens, `costMicroUsd`)
+ * because it is a real per-page cost that gets billed on to the customer — the
+ * numbers here are what a per-extraction price has to be built from.
+ */
+model DocumentExtraction {
+  id             String   @id @default(cuid())
+  organizationId String
+
+  /** UPLOAD (drag-drop / phone photo) or EMAIL (swept from the configured mailbox). */
+  source         String   @default("UPLOAD")
+  /** Message id, sender, or original filename — where this file came from. */
+  sourceRef      String?
+
+  fileName       String
+  mimeType       String
+  fileSize       Int
+  /** Storage key; resolved by the storage driver, never a public URL. */
+  storageKey     String
+  pageCount      Int?
+
+  /** PENDING | PROCESSING | NEEDS_REVIEW | CONFIRMED | REJECTED | FAILED */
+  status         String   @default("PENDING")
+  /** PURCHASE_BILL | SALES_INVOICE | PAYMENT_VOUCHER | RECEIPT | UNKNOWN */
+  docType        String   @default("UNKNOWN")
+  /** INCOMING (we owe / vendor sent it) | OUTGOING (customer owes us). */
+  direction      String?
+
+  /** Extraction engine that produced `extracted`, e.g. "claude" or "pdf-text". */
+  provider       String?
+  model          String?
+  inputTokens    Int?
+  outputTokens   Int?
+  /** Cost of this extraction in millionths of a USD — the unit price is fractions of a cent. */
+  costMicroUsd   Int?
+  /** Milliseconds the extraction took, for spotting a provider going slow. */
+  durationMs     Int?
+
+  /** The reading, in this system's own invoice/bill shape. */
+  extracted      Json?
+  /** Per-field 0–1 confidence, same keys as `extracted`, to flag what needs eyes. */
+  confidence     Json?
+  /** Reviewer's corrected version — what actually gets posted. */
+  reviewed       Json?
+  error          String?
+
+  /** Set on confirm: "Bill" | "Invoice", and the id of the record created. */
+  postedEntityType String?
+  postedEntityId   String?
+
+  createdById    String?
+  reviewedById   String?
+  reviewedAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status])
+  @@index([organizationId, createdAt])
+  @@map("document_extractions")
 }
 
 model Branch {

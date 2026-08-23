@@ -50,6 +50,7 @@ const SEARCH_TARGETS: { label: string; href: string; keywords: string[] }[] = [
   { label: "Payments", href: "/purchases/payments", keywords: ["payment", "payments"] },
   { label: "Debit Notes", href: "/purchases/debit-notes", keywords: ["debit note", "dn"] },
   { label: "Parties", href: "/parties", keywords: ["party", "parties", "customer", "vendor", "supplier"] },
+  { label: "Document Inbox", href: "/documents", keywords: ["document", "documents", "scan", "ocr", "upload", "inbox", "extract"] },
   { label: "Items", href: "/inventory/items", keywords: ["item", "items", "product"] },
   { label: "Stock Summary", href: "/inventory/stock", keywords: ["stock"] },
   { label: "Stock Movements", href: "/inventory/movements", keywords: ["stock movement", "movement"] },

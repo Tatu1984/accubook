@@ -19,13 +19,13 @@
     "db:seed": "npx tsx prisma/seed.ts",
     "db:studio": "prisma studio",
     "test:e2e": "node scripts/e2e-cycle.mjs",
-    "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:all": "npm run test && npm run test:integration"
   },
   "prisma": {
     "seed": "npx tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.120.0",
     "@auth/prisma-adapter": "^2.11.1",
     "@hookform/resolvers": "^5.2.2",
     "@prisma/adapter-pg": "^7.1.0",
@@ -51,6 +51,7 @@
     "@sentry/nextjs": "^10.52.0",
     "@tanstack/react-query": "^5.90.12",
     "@tanstack/react-table": "^8.21.3",
+    "@vercel/blob": "^2.8.0",
     "bcryptjs": "^3.0.3",
     "bwip-js": "^4.8.0",
     "class-variance-authority": "^0.7.1",
@@ -74,6 +75,7 @@
     "recharts": "^2.15.4",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.4.0",
+    "unpdf": "^1.8.1",
     "zod": "^4.1.13",
     "zustand": "^5.0.9"
   },

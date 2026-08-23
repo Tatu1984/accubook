@@ -96,6 +96,11 @@ const navigation = [
     href: "/parties",
   },
   {
+    title: "Document Inbox",
+    icon: Inbox,
+    href: "/documents",
+  },
+  {
     title: "Inventory",
     icon: Package,
     children: [

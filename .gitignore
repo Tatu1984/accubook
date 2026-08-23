@@ -51,3 +51,6 @@ next-env.d.ts
 
 # MS Office lock files
 ~$*
+
+# Documents uploaded to the local storage driver (dev only — deployment uses Vercel Blob)
+/.uploads
