@@ -81,6 +81,21 @@ export function parseIndianDate(raw: string | null | undefined): string | null {
   return null;
 }
 
+/**
+ * The amount that follows a tax label on its own line, e.g. "CGST 9%: 1,530.00"
+ * or "CGST 9%: 1530". The rate itself ("9%") is stripped out of the snippet
+ * first so a whole-number amount is never mistaken for the percentage that
+ * precedes it.
+ */
+function taxAmountAfterLabel(text: string, label: RegExp): number | null {
+  const hit = text.match(label);
+  if (hit?.index === undefined) return null;
+  const line = text.slice(hit.index + hit[0].length).split("\n")[0].slice(0, 40);
+  const withoutRate = line.replace(/\d+(?:\.\d+)?\s*%/g, "");
+  const amount = withoutRate.match(/([\d,]+(?:\.\d{1,2})?)/);
+  return amount ? toAmount(amount[1]) : null;
+}
+
 /** First capture group of the first pattern that hits. */
 function firstMatch(text: string, patterns: RegExp[]): string | null {
   for (const pattern of patterns) {
@@ -125,9 +140,13 @@ export function readInvoiceText(
     document.docType = document.direction === "INCOMING" ? "PURCHASE_BILL" : "SALES_INVOICE";
     confidence.direction = 0.6;
   } else if (gstins.length > 0) {
+    // Without the organization's own GSTIN configured there is no way to tell
+    // which side of the deal it is on — this is a coin flip, not a reading,
+    // and has to be scored low enough that the review screen flags it rather
+    // than a reviewer trusting a confidently-labelled wrong guess.
     document.direction = "INCOMING";
     document.docType = "PURCHASE_BILL";
-    confidence.direction = 0.4;
+    confidence.direction = context.ownGstin ? 0.4 : 0.15;
   }
 
   const pan = compact.match(PAN)?.[0] ?? null;
@@ -174,12 +193,13 @@ export function readInvoiceText(
   document.subtotal = amountOf([
     /(?:taxable\s*(?:value|amount)|sub\s*-?\s*total|amount\s*before\s*tax)\s*[:.\-]?\s*(?:₹|rs\.?|inr)?\s*([\d,]+\.?\d{0,2})/i,
   ]);
-  // A tax line usually carries its rate before its amount — "CGST 9%: 1,530.00" —
-  // so the gap has to tolerate digits, while the amount itself is pinned by its
-  // two decimal places.
-  document.cgstAmount = amountOf([/\bcgst\b[^\n]{0,24}?([\d,]+\.\d{2})/i]);
-  document.sgstAmount = amountOf([/\bs?gst\b[^\n]{0,24}?([\d,]+\.\d{2})/i]);
-  document.igstAmount = amountOf([/\bigst\b[^\n]{0,24}?([\d,]+\.\d{2})/i]);
+  // A tax line usually carries its rate before its amount — "CGST 9%: 1,530.00",
+  // but a hand-typed one may print the amount as a whole number — "CGST 9%: 1530".
+  // Stripping the "9%" out of the line before hunting for a number means the
+  // rate itself never gets mistaken for the amount.
+  document.cgstAmount = taxAmountAfterLabel(compact, /\bcgst\b/i);
+  document.sgstAmount = taxAmountAfterLabel(compact, /\bs?gst\b/i);
+  document.igstAmount = taxAmountAfterLabel(compact, /\bigst\b/i);
   document.roundOff = amountOf([/round(?:ed)?\s*off\s*[:.\-]?\s*\(?(-?[\d,]+\.?\d{0,2})\)?/i]);
 
   if (/reverse\s*charge\s*[:\-]?\s*(yes|applicable|y\b)/i.test(compact)) {
@@ -195,7 +215,11 @@ export function readInvoiceText(
   document.partyPhone = compact.match(PHONE)?.[0] ?? null;
 
   // The supplier's name is nearly always the largest line at the top; take the
-  // first substantial line that is not a heading.
+  // first substantial line that is not a heading. A header block of labelled
+  // fields — "Bill Date: 12 Dec 2021", "Invoice No: 12345" — often sits beside
+  // or above the name in the original layout and survives OCR in that order,
+  // so a "Label: value" shaped line is excluded outright rather than treated
+  // as a candidate: a business name is never written that way.
   const headLines = compact
     .split("\n")
     .map((line) => line.trim())
@@ -206,6 +230,7 @@ export function readInvoiceText(
       line.length >= 4 &&
       line.length <= 70 &&
       !/^(tax\s*)?invoice|^bill of|^gstin|^original|^duplicate|^credit note|^debit note/i.test(line) &&
+      !/^[A-Za-z][A-Za-z ]{1,25}:\s*\S/.test(line) &&
       !GSTIN.test(line) &&
       /[A-Za-z]{3}/.test(line)
   );

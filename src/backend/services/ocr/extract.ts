@@ -1,5 +1,6 @@
 import { claudeIsConfigured, claudeProvider } from "./providers/claude";
 import { pdfTextProvider, readingIsThin } from "./providers/pdf-text";
+import { tesseractProvider } from "./providers/tesseract";
 import { emptyDocument } from "./schema";
 import {
   ExtractionError,
@@ -40,7 +41,7 @@ export function engineStatus() {
     mode,
     paidAvailable,
     /** True when a file will actually be read rather than left blank for typing. */
-    automatic: mode !== "manual" && (mode === "free" || paidAvailable || true),
+    automatic: mode !== "manual",
     model: paidAvailable ? process.env.OCR_MODEL || "claude-opus-5" : null,
   };
 }
@@ -69,7 +70,9 @@ export async function extractDocument(input: ExtractionInput): Promise<Extractio
     return claudeProvider.extract(input);
   }
 
-  // Free first.
+  // Free first: a PDF's own text layer, then — for a photo, a scan, or a PDF
+  // whose text layer came back thin — a local OCR pass. Neither costs
+  // anything; only what is still thin after both goes on to the paid engine.
   let free: ExtractionOutput | null = null;
   if (pdfTextProvider.supports(input)) {
     try {
@@ -79,6 +82,21 @@ export async function extractDocument(input: ExtractionInput): Promise<Extractio
       // A PDF that will not open for text is exactly the scan-in-a-wrapper
       // case the paid engine exists for; fall through rather than fail here.
       free = null;
+    }
+  }
+
+  if (tesseractProvider.supports(input)) {
+    try {
+      const ocr = await tesseractProvider.extract(input);
+      if (!readingIsThin(ocr)) return ocr;
+      // Both readings are thin; keep whichever one is less unsure rather than
+      // discarding one for the other outright.
+      if (!free || (ocr.confidence.overall ?? 0) > (free.confidence.overall ?? 0)) {
+        free = ocr;
+      }
+    } catch {
+      // A bad photo Tesseract cannot even lay out is the same signal as a
+      // thin reading: fall through with whatever `free` already holds.
     }
   }
 

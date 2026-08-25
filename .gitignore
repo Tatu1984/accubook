@@ -54,3 +54,7 @@ next-env.d.ts
 
 # Documents uploaded to the local storage driver (dev only — deployment uses Vercel Blob)
 /.uploads
+
+# Tesseract OCR language data — should only ever land in the OS temp dir
+# (see CACHE_PATH in providers/tesseract.ts), but this catches it if it doesn't.
+*.traineddata

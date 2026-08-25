@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   Loader2,
   CheckCircle2,
+  XCircle,
   AlertTriangle,
   Sparkles,
   Trash2,
@@ -159,6 +160,8 @@ export default function DocumentReviewPage() {
   const [posting, setPosting] = React.useState(false);
   const [rereading, setRereading] = React.useState(false);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
+  const [rejectOpen, setRejectOpen] = React.useState(false);
+  const [rejecting, setRejecting] = React.useState(false);
   const [dirty, setDirty] = React.useState(false);
 
   const base = `/api/organizations/${organizationId}/documents/extractions/${params.extractionId}`;
@@ -332,17 +335,23 @@ export default function DocumentReviewPage() {
 
   const reject = async () => {
     if (!organizationId) return;
-    const response = await fetch(base, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "REJECTED" }),
-    });
-    if (!response.ok) {
-      toast.error("Could not set that aside");
-      return;
+    setRejecting(true);
+    try {
+      const response = await fetch(base, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "REJECTED" }),
+      });
+      if (!response.ok) {
+        toast.error("Could not reject this document");
+        return;
+      }
+      setRejectOpen(false);
+      toast.success("Rejected — the file stays on record");
+      router.push("/documents");
+    } finally {
+      setRejecting(false);
     }
-    toast.success("Set aside — the file stays on record");
-    router.push("/documents");
   };
 
   if (loading || authLoading || !row) {
@@ -400,8 +409,9 @@ export default function DocumentReviewPage() {
                 )}
                 Read again
               </Button>
-              <Button variant="outline" size="sm" onClick={reject}>
-                Set aside
+              <Button variant="outline" size="sm" onClick={() => setRejectOpen(true)}>
+                <XCircle className="mr-2 h-4 w-4" />
+                Reject
               </Button>
               <Button size="sm" onClick={() => setConfirmOpen(true)}>
                 <CheckCircle2 className="mr-2 h-4 w-4" />
@@ -798,6 +808,34 @@ export default function DocumentReviewPage() {
                 </>
               ) : (
                 "Confirm and post"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={rejectOpen} onOpenChange={(open) => !rejecting && setRejectOpen(open)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reject this document?</DialogTitle>
+            <DialogDescription>
+              Nothing gets posted from it. The file and its reading stay on record — this only
+              takes it out of the queue waiting to be checked.
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRejectOpen(false)} disabled={rejecting}>
+              Keep checking
+            </Button>
+            <Button variant="destructive" onClick={reject} disabled={rejecting}>
+              {rejecting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Rejecting…
+                </>
+              ) : (
+                "Reject document"
               )}
             </Button>
           </DialogFooter>

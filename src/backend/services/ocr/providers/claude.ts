@@ -41,6 +41,26 @@ export function claudeModel(): string {
   return process.env.OCR_MODEL || DEFAULT_MODEL;
 }
 
+/** Reading a page is a single request; nothing here should hang the upload forever. */
+const REQUEST_TIMEOUT_MS = 60_000;
+const MAX_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 500;
+
+function isRetryable(error: unknown): boolean {
+  // The SDK throws APIError subclasses carrying the HTTP status; 429 (rate
+  // limited) and 5xx (including 529 "overloaded") are worth a retry, a 4xx
+  // like a bad request or an expired key never will be no matter how many
+  // times it's asked again.
+  const status = (error as { status?: number } | null)?.status;
+  if (typeof status === "number") return status === 429 || status >= 500;
+  // A network-level failure (no status at all) is retryable too.
+  return status === undefined;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 const SYSTEM_PROMPT = `You read Indian accounting documents — tax invoices, vendor bills, delivery challans, payment vouchers and cash receipts — and return exactly what is written on them.
 
 Read what the document says, not what it should say. If a figure is smudged, half-cut or ambiguous, give your best reading and lower its confidence rather than leaving it out; if a field is genuinely absent from the document, return null for it. Never compute a value the document does not state — a missing subtotal stays null even when the lines would add up to one.
@@ -115,32 +135,48 @@ export const claudeProvider: ExtractionProvider = {
     const client = new Anthropic();
     const model = claudeModel();
 
-    let response: Anthropic.Message;
-    try {
-      response = await client.messages.create({
-        model,
-        max_tokens: 8000,
-        system: SYSTEM_PROMPT,
-        output_config: {
-          // Reading a page is perception, not deliberation: extra reasoning
-          // buys little here and is billed per document.
-          effort: "low",
-          format: {
-            type: "json_schema",
-            schema: EXTRACTION_JSON_SCHEMA as unknown as Record<string, unknown>,
-          },
-        },
-        messages: [
+    let response: Anthropic.Message | undefined;
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        response = await client.messages.create(
           {
-            role: "user",
-            content: [documentBlock(input), { type: "text", text: userPrompt(input) }],
+            model,
+            max_tokens: 8000,
+            system: SYSTEM_PROMPT,
+            output_config: {
+              // Reading a page is perception, not deliberation: extra reasoning
+              // buys little here and is billed per document.
+              effort: "low",
+              format: {
+                type: "json_schema",
+                schema: EXTRACTION_JSON_SCHEMA as unknown as Record<string, unknown>,
+              },
+            },
+            messages: [
+              {
+                role: "user",
+                content: [documentBlock(input), { type: "text", text: userPrompt(input) }],
+              },
+            ],
           },
-        ],
-      });
-    } catch (error) {
+          { timeout: REQUEST_TIMEOUT_MS }
+        );
+        lastError = undefined;
+        break;
+      } catch (error) {
+        lastError = error;
+        if (attempt === MAX_ATTEMPTS || !isRetryable(error)) break;
+        await delay(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1));
+      }
+    }
+    if (lastError) {
       throw new ExtractionError(
-        error instanceof Error ? `Extraction failed: ${error.message}` : "Extraction failed"
+        lastError instanceof Error ? `Extraction failed: ${lastError.message}` : "Extraction failed"
       );
+    }
+    if (!response) {
+      throw new ExtractionError("Extraction failed");
     }
 
     if (response.stop_reason === "refusal") {
@@ -166,7 +202,11 @@ export const claudeProvider: ExtractionProvider = {
     try {
       payload = JSON.parse(text);
     } catch {
-      throw new ExtractionError("The extractor's reading could not be parsed");
+      throw new ExtractionError(
+        response.stop_reason === "max_tokens"
+          ? "The document was too long to read in one pass — split it and try again"
+          : "The extractor's reading could not be parsed"
+      );
     }
 
     const { fieldConfidence, ...rest } = (payload ?? {}) as Record<string, unknown>;
@@ -189,9 +229,12 @@ export const claudeProvider: ExtractionProvider = {
       const asserted = Object.values(confidence).filter(
         (v): v is number => typeof v === "number"
       );
+      // The model asserted nothing at all about how sure it was — that is not
+      // the same as a confident reading, and defaulting high here would hide
+      // exactly the documents a reviewer most needs to double-check.
       confidence.overall = asserted.length
         ? asserted.reduce((a, b) => a + b, 0) / asserted.length
-        : 0.85;
+        : 0.5;
     }
 
     const inputTokens = response.usage.input_tokens ?? 0;

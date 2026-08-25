@@ -83,6 +83,29 @@ describe("reading a printed invoice without a model", () => {
   });
 });
 
+describe("reading a non-GST bill with a labelled header block", () => {
+  // A metadata block — "Invoice No: …", "Bill Date: …" — sitting above or
+  // beside the title in the original layout survives OCR in that order, and
+  // used to get picked as the party name because it was simply the first
+  // substantial line on the page.
+  const MEDICAL_BILL = `Invoice No: 12345
+Bill Date: 12 Dec 2021
+Discharge Date: 12 Dec 2021
+Contact: 9876543210
+
+Apollo Hospital
+Apollo Hospital, 21 Greams Lane, Chennai
+
+Patient Information
+Patient Name: Suresh (Age: 25)
+`;
+
+  it("skips labelled fields and takes the actual title as the name", () => {
+    const reading = readInvoiceText(MEDICAL_BILL);
+    expect(reading.document.partyName).toBe("Apollo Hospital");
+  });
+});
+
 describe("Indian date parsing", () => {
   it("reads day-first numeric dates", () => {
     expect(parseIndianDate("03/04/2026")).toBe("2026-04-03");

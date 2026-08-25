@@ -195,7 +195,7 @@ export default function DocumentInboxPage() {
               <Sparkles className="h-3.5 w-3.5" />
               {engine.paidAvailable && engine.mode !== "free"
                 ? `Reading with ${engine.model}`
-                : "Free reading (digital PDFs only)"}
+                : "Free reading (PDFs and photos)"}
             </Badge>
           )}
           <Button onClick={() => fileInput.current?.click()} disabled={uploading}>

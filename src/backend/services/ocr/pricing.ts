@@ -14,6 +14,8 @@
  * costing what they cost.
  */
 
+import { logger } from "@/backend/utils/logger";
+
 export interface ModelRate {
   /** USD per million input tokens. */
   input: number;
@@ -28,7 +30,7 @@ export const MODEL_RATES: Record<string, ModelRate> = {
 };
 
 /** Free engines still get a row, so every document has a cost — zero is a cost. */
-export const FREE_PROVIDERS = new Set(["pdf-text", "manual"]);
+export const FREE_PROVIDERS = new Set(["pdf-text", "tesseract", "manual"]);
 
 /**
  * USD → INR for display. An indicative rate, overridable per deployment; the
@@ -53,7 +55,15 @@ export function costMicroUsd(
 ): number {
   if (!model) return 0;
   const rate = MODEL_RATES[model];
-  if (!rate) return 0;
+  if (!rate) {
+    // A model outside the rate table is either a free engine (fine) or a paid
+    // one whose rate was never added (a silent billing gap) — only the latter
+    // is worth a log, so free-provider names never end up warning.
+    if (!FREE_PROVIDERS.has(model)) {
+      logger.warn({ model }, "No rate on file for this model — extraction recorded as free");
+    }
+    return 0;
+  }
   const usd = (inputTokens / 1_000_000) * rate.input + (outputTokens / 1_000_000) * rate.output;
   return Math.round(usd * 1_000_000);
 }

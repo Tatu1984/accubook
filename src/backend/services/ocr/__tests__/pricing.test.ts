@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { costMicroUsd, microUsdToInr, summariseSpend } from "../pricing";
+import { describe, expect, it, vi } from "vitest";
+
+// pricing.ts logs a warning through the shared logger when a model has no
+// rate on file; that logger validates process.env at import time, which a
+// unit test has no reason to populate.
+vi.mock("@/backend/utils/logger", () => ({ logger: { warn: vi.fn(), error: vi.fn() } }));
+
+const { costMicroUsd, microUsdToInr, summariseSpend } = await import("../pricing");
 
 /**
  * Extraction is sold on: a pack of N documents is priced from what N documents

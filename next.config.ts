@@ -16,7 +16,9 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   // pino + thread-stream do worker-thread shenanigans Turbopack can't bundle.
   // Marking them external means they're loaded at runtime via require(), not bundled.
-  serverExternalPackages: ["pino", "pino-pretty", "thread-stream"],
+  // tesseract.js spawns its worker by reading worker-script/node/index.js off
+  // disk by path — bundling rewrites that path out from under it.
+  serverExternalPackages: ["pino", "pino-pretty", "thread-stream", "tesseract.js"],
   async headers() {
     return [
       {

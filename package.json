@@ -75,6 +75,7 @@
     "recharts": "^2.15.4",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.4.0",
+    "tesseract.js": "^7.0.0",
     "unpdf": "^1.8.1",
     "zod": "^4.1.13",
     "zustand": "^5.0.9"

@@ -7,6 +7,7 @@ import { getDocument } from "@/backend/services/documents/storage";
 import { extractDocument } from "@/backend/services/ocr/extract";
 import { claudeProvider } from "@/backend/services/ocr/providers/claude";
 import { ExtractionError } from "@/backend/services/ocr/provider";
+import { checkRateLimit, rateLimited } from "@/backend/utils/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,6 +31,15 @@ const reprocessSchema = z.object({
 export const POST = withOrgAuth<{ extractionId: string }>(
   async (request, { orgId, params }) => {
     try {
+      const rl = await checkRateLimit({
+        key: `document-extraction:org:${orgId}`,
+        limit: 60,
+        windowMs: 60 * 60 * 1000,
+      });
+      if (!rl.allowed) {
+        return rateLimited(rl, "Too many documents read in the last hour — try again shortly");
+      }
+
       const row = await prisma.documentExtraction.findFirst({
         where: { id: params.extractionId, organizationId: orgId },
       });

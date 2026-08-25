@@ -12,6 +12,7 @@ import {
 import { engineStatus, extractDocument } from "@/backend/services/ocr/extract";
 import { ExtractionError } from "@/backend/services/ocr/provider";
 import { summariseSpend } from "@/backend/services/ocr/pricing";
+import { checkRateLimit, rateLimited } from "@/backend/utils/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -127,6 +128,18 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
 
 export const POST = withOrgAuth(async (request, { orgId, userId }) => {
   try {
+    // A read is a billed request once it reaches the paid engine; cap uploads
+    // per org so a compromised session or a scripted client cannot run up
+    // spend unbounded. Generous for a person reviewing a stack of bills.
+    const rl = await checkRateLimit({
+      key: `document-extraction:org:${orgId}`,
+      limit: 60,
+      windowMs: 60 * 60 * 1000,
+    });
+    if (!rl.allowed) {
+      return rateLimited(rl, "Too many documents uploaded in the last hour — try again shortly");
+    }
+
     const form = await request.formData().catch(() => null);
     if (!form) return badRequest("Upload the document as multipart/form-data");
 
