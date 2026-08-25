@@ -133,10 +133,13 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
       return notFound("Employee not found");
     }
 
-    // Verify leave type exists
-    const leaveType = await prisma.leaveType.findUnique({
+    // Verify the leave type exists *and belongs to this organization* — an
+    // id from another tenant would otherwise attach their catalogue to our
+    // leave.
+    const leaveType = await prisma.leaveType.findFirst({
       where: {
         id: validatedData.leaveTypeId,
+        organizationId: orgId,
       },
     });
 

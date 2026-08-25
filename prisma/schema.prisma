@@ -165,6 +165,9 @@ model Organization {
   bankAccounts      BankAccount[]
   taxConfigs        TaxConfig[]
   employees         Employee[]
+  departments       Department[]
+  designations      Designation[]
+  leaveTypes        LeaveType[]
   payrollStructures PayrollStructure[]
   fiscalYears       FiscalYear[]
   budgets           Budget[]
@@ -1788,6 +1791,7 @@ model Employee {
 
 model Department {
   id          String   @id @default(cuid())
+  organizationId String
   name        String
   code        String?
   description String?
@@ -1796,13 +1800,18 @@ model Department {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  employees Employee[]
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employees    Employee[]
 
+  @@unique([organizationId, name])
+  @@unique([organizationId, code])
+  @@index([organizationId])
   @@map("departments")
 }
 
 model Designation {
   id          String   @id @default(cuid())
+  organizationId String
   name        String
   level       Int?
   description String?
@@ -1810,8 +1819,11 @@ model Designation {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  employees Employee[]
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employees    Employee[]
 
+  @@unique([organizationId, name])
+  @@index([organizationId])
   @@map("designations")
 }
 
@@ -1879,6 +1891,7 @@ model Leave {
 
 model LeaveType {
   id              String   @id @default(cuid())
+  organizationId  String
   name            String
   code            String
   annualQuota     Decimal  @db.Decimal(4, 1)
@@ -1889,8 +1902,12 @@ model LeaveType {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  leaves Leave[]
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  leaves       Leave[]
 
+  @@unique([organizationId, name])
+  @@unique([organizationId, code])
+  @@index([organizationId])
   @@map("leave_types")
 }
 

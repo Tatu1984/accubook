@@ -16,9 +16,12 @@ export const dynamic = "force-dynamic";
  * network entirely and popped a success toast, so departments appeared to save
  * and never existed.
  *
- * Department is a global table in the schema (no organizationId column), so
- * scoping is by the employees attached to it: a department is visible to an
- * organization when it has no employees yet, or has at least one of theirs.
+ * Departments belong to an organization (migration 17). They did not always:
+ * the table was global, and this endpoint scoped by the employees attached to
+ * a department — visible when it held one of yours, or when it held nobody at
+ * all. That second arm leaked every not-yet-staffed department into every
+ * other tenant's list, and disappeared again the moment someone was assigned,
+ * which is why it went unnoticed. Scope by the column now.
  */
 
 export const GET = withOrgAuth(async (request, { orgId }) => {
@@ -28,11 +31,8 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
 
     const departments = await prisma.department.findMany({
       where: {
+        organizationId: orgId,
         ...(includeInactive ? {} : { isActive: true }),
-        OR: [
-          { employees: { some: { organizationId: orgId } } },
-          { employees: { none: {} } },
-        ],
       },
       include: {
         employees: {
@@ -94,7 +94,7 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
 
     if (data.code) {
       const clash = await prisma.department.findFirst({
-        where: { code: data.code },
+        where: { organizationId: orgId, code: data.code },
         select: { id: true },
       });
       if (clash) {
@@ -110,7 +110,9 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
       if (!head) return badRequest("The selected department head was not found");
     }
 
-    const department = await prisma.department.create({ data });
+    const department = await prisma.department.create({
+      data: { ...data, organizationId: orgId },
+    });
     return NextResponse.json(department, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
