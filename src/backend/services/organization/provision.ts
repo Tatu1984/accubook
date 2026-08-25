@@ -119,6 +119,62 @@ export function fiscalYearBounds(
   };
 }
 
+/**
+ * The HR master sets every organization starts with.
+ *
+ * These three tables were global until migration 17, so a new organization
+ * inherited whatever the seed had put there. Now that each org owns its own
+ * rows, provisioning has to lay them down — otherwise the first person to open
+ * the HR screens finds three empty dropdowns and cannot record an employee or
+ * a leave at all.
+ *
+ * Indian statutory leave sits in here deliberately: maternity leave at 182
+ * days is the Maternity Benefit Act entitlement, and Loss of Pay has to exist
+ * as a type because payroll's LOP calculation resolves it by code.
+ */
+const DEFAULT_DEPARTMENTS = [
+  "Engineering",
+  "Finance",
+  "Sales",
+  "HR",
+  "Operations",
+  "Marketing",
+];
+
+const DEFAULT_DESIGNATIONS: { name: string; level: number }[] = [
+  { name: "Chief Executive Officer", level: 1 },
+  { name: "Chief Financial Officer", level: 1 },
+  { name: "Director", level: 2 },
+  { name: "Manager", level: 3 },
+  { name: "Senior Executive", level: 4 },
+  { name: "Executive", level: 5 },
+  { name: "Trainee", level: 6 },
+  { name: "Intern", level: 7 },
+];
+
+const DEFAULT_LEAVE_TYPES: {
+  name: string;
+  code: string;
+  annualQuota: number;
+  carryForward: boolean;
+  maxCarryForward?: number;
+  encashable: boolean;
+}[] = [
+  { name: "Casual Leave", code: "CL", annualQuota: 12, carryForward: false, encashable: false },
+  { name: "Sick Leave", code: "SL", annualQuota: 12, carryForward: false, encashable: false },
+  {
+    name: "Earned Leave",
+    code: "EL",
+    annualQuota: 15,
+    carryForward: true,
+    maxCarryForward: 30,
+    encashable: true,
+  },
+  { name: "Maternity Leave", code: "ML", annualQuota: 182, carryForward: false, encashable: false },
+  { name: "Paternity Leave", code: "PL", annualQuota: 15, carryForward: false, encashable: false },
+  { name: "Loss of Pay", code: "LOP", annualQuota: 0, carryForward: false, encashable: false },
+];
+
 export type ProvisionResult = {
   groupIds: Record<string, string>;
   ledgerIds: Record<string, string>;
@@ -244,6 +300,32 @@ export async function provisionOrganization(
     },
     select: { id: true },
   });
+
+  // 6. HR masters. Each org owns its own set since migration 17; without
+  //    these the employee and leave forms have nothing to offer.
+  for (const name of DEFAULT_DEPARTMENTS) {
+    await tx.department.upsert({
+      where: { organizationId_name: { organizationId, name } },
+      update: {},
+      create: { organizationId, name },
+    });
+  }
+
+  for (const designation of DEFAULT_DESIGNATIONS) {
+    await tx.designation.upsert({
+      where: { organizationId_name: { organizationId, name: designation.name } },
+      update: {},
+      create: { organizationId, ...designation },
+    });
+  }
+
+  for (const leaveType of DEFAULT_LEAVE_TYPES) {
+    await tx.leaveType.upsert({
+      where: { organizationId_name: { organizationId, name: leaveType.name } },
+      update: {},
+      create: { organizationId, ...leaveType },
+    });
+  }
 
   return {
     groupIds,

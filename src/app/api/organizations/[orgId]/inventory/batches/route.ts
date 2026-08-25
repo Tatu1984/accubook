@@ -1,9 +1,54 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { Prisma } from "@/generated/prisma";
 import { optional } from "@/backend/validators/common";
 import { prisma } from "@/backend/database/client";
-import { withOrgAuth, notFound, badRequest } from "@/backend/utils/with-org-auth";
+import { withOrgAuth, notFound, badRequest, conflict } from "@/backend/utils/with-org-auth";
+import { writeAudit } from "@/backend/utils/audit";
+import type { Tx } from "@/backend/utils/posting";
 import { logger } from "@/backend/utils/logger";
+
+/** A unique constraint rejected the insert. */
+function isUniqueViolation(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
+
+/**
+ * Add to a stock row, creating it if this is the first of that item to land in
+ * that warehouse.
+ *
+ * Deliberately raw rather than `stock.upsert`. Under the pg driver adapter
+ * Prisma resolves an upsert as a select followed by an insert, not a single
+ * `INSERT ... ON CONFLICT`, so two batches of the same item arriving at the
+ * same warehouse at once both see no row, both insert, and the loser raises
+ * P2002 — which in Postgres poisons the surrounding transaction, so the batch
+ * that was already written is rolled back too. `posting.ts` documents the same
+ * trap for ledgers, with an integration test that fails if you revert it to
+ * `upsert`.
+ *
+ * The `DO UPDATE` adds to whatever is already there rather than overwriting,
+ * so concurrent receipts accumulate instead of one clobbering the other.
+ */
+async function addToStock(
+  tx: Tx,
+  itemId: string,
+  warehouseId: string,
+  quantity: number,
+  avgCostIfNew: number
+): Promise<void> {
+  await tx.$executeRaw`
+    INSERT INTO "stocks" ("id", "itemId", "warehouseId", "quantity", "avgCost", "updatedAt")
+    VALUES (
+      ${randomUUID()}, ${itemId}, ${warehouseId},
+      ${quantity}::numeric, ${avgCostIfNew}::numeric, NOW()
+    )
+    ON CONFLICT ("itemId", "warehouseId")
+      DO UPDATE SET
+        "quantity" = "stocks"."quantity" + EXCLUDED."quantity",
+        "updatedAt" = NOW()
+  `;
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -184,7 +229,7 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
   }
 });
 
-export const POST = withOrgAuth(async (request, { orgId }) => {
+export const POST = withOrgAuth(async (request, { orgId, userId }) => {
   try {
     const body = await request.json();
     const validationResult = createBatchSchema.safeParse(body);
@@ -238,43 +283,49 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
       status = "EXPIRED";
     }
 
-    // Create batch
-    const batch = await prisma.batch.create({
-      data: {
-        itemId: data.itemId,
-        warehouseId: data.warehouseId,
-        batchNumber: data.batchNumber,
-        serialNumber: data.serialNumber,
-        manufacturingDate: data.manufacturingDate,
-        expiryDate: data.expiryDate,
-        quantity: data.quantity,
-        costPrice: data.costPrice,
-        sellingPrice: data.sellingPrice,
-        status,
-      },
-      include: {
-        item: { select: { name: true, sku: true } },
-        warehouse: { select: { name: true } },
-      },
-    });
-
-    // Update stock
-    await prisma.stock.upsert({
-      where: {
-        itemId_warehouseId: {
+    // The batch row and the stock it represents are one fact. Written
+    // separately, a failure between them leaves a batch nobody can account for
+    // and a warehouse that is short by exactly its quantity, with nothing in
+    // the books to say why.
+    const batch = await prisma.$transaction(async (tx) => {
+      const created = await tx.batch.create({
+        data: {
           itemId: data.itemId,
           warehouseId: data.warehouseId,
+          batchNumber: data.batchNumber,
+          serialNumber: data.serialNumber,
+          manufacturingDate: data.manufacturingDate,
+          expiryDate: data.expiryDate,
+          quantity: data.quantity,
+          costPrice: data.costPrice,
+          sellingPrice: data.sellingPrice,
+          status,
         },
-      },
-      update: {
-        quantity: { increment: data.quantity },
-      },
-      create: {
-        itemId: data.itemId,
-        warehouseId: data.warehouseId,
-        quantity: data.quantity,
-        avgCost: data.costPrice,
-      },
+        include: {
+          item: { select: { name: true, sku: true } },
+          warehouse: { select: { name: true } },
+        },
+      });
+
+      await addToStock(tx, data.itemId, data.warehouseId, data.quantity, data.costPrice);
+
+      await writeAudit(tx, {
+        organizationId: orgId,
+        userId,
+        action: "CREATE",
+        entityType: "Batch",
+        entityId: created.id,
+        newData: {
+          batchNumber: created.batchNumber,
+          itemId: created.itemId,
+          warehouseId: created.warehouseId,
+          quantity: data.quantity,
+          costPrice: data.costPrice,
+          status: created.status,
+        },
+      });
+
+      return created;
     });
 
     return NextResponse.json({
@@ -287,12 +338,18 @@ export const POST = withOrgAuth(async (request, { orgId }) => {
       message: "Batch created successfully",
     }, { status: 201 });
   } catch (error) {
+    // The pre-check above catches the ordinary duplicate. This catches the one
+    // it cannot see: a second request that passed its own check before this one
+    // committed. Same answer to the caller, arrived at a different way.
+    if (isUniqueViolation(error)) {
+      return conflict("Batch number already exists for this item in this warehouse");
+    }
     logger.error({ err: error }, "Error creating batch");
     return NextResponse.json({ error: "Failed to create batch" }, { status: 500 });
   }
 });
 
-export const PATCH = withOrgAuth(async (request, { orgId }) => {
+export const PATCH = withOrgAuth(async (request, { orgId, userId }) => {
   try {
     const body = await request.json();
     const { batchId, ...updateData } = body;
@@ -321,27 +378,47 @@ export const PATCH = withOrgAuth(async (request, { orgId }) => {
     const data = validationResult.data;
     const oldQuantity = Number(batch.quantity);
 
-    // Update batch
-    const updatedBatch = await prisma.batch.update({
-      where: { id: batchId },
-      data,
-    });
-
-    // Update stock if quantity changed
-    if (data.quantity !== undefined && data.quantity !== oldQuantity) {
-      const quantityDiff = data.quantity - oldQuantity;
-      await prisma.stock.update({
-        where: {
-          itemId_warehouseId: {
-            itemId: batch.itemId,
-            warehouseId: batch.warehouseId,
-          },
-        },
-        data: {
-          quantity: { increment: quantityDiff },
-        },
+    // Same rule as create: the correction to the batch and the correction to
+    // stock are one fact. A quantity edit that updates the batch and then fails
+    // to move stock silently puts the two permanently out of agreement.
+    const updatedBatch = await prisma.$transaction(async (tx) => {
+      const updated = await tx.batch.update({
+        where: { id: batchId },
+        data,
       });
-    }
+
+      if (data.quantity !== undefined && data.quantity !== oldQuantity) {
+        const quantityDiff = data.quantity - oldQuantity;
+        await tx.stock.update({
+          where: {
+            itemId_warehouseId: {
+              itemId: batch.itemId,
+              warehouseId: batch.warehouseId,
+            },
+          },
+          data: {
+            quantity: { increment: quantityDiff },
+          },
+        });
+      }
+
+      await writeAudit(tx, {
+        organizationId: orgId,
+        userId,
+        action: "UPDATE",
+        entityType: "Batch",
+        entityId: batchId,
+        oldData: {
+          quantity: oldQuantity,
+          costPrice: Number(batch.costPrice),
+          sellingPrice: batch.sellingPrice === null ? null : Number(batch.sellingPrice),
+          status: batch.status,
+        },
+        newData: data,
+      });
+
+      return updated;
+    });
 
     return NextResponse.json({
       id: updatedBatch.id,

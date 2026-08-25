@@ -16,16 +16,10 @@ const updateDepartmentSchema = z.object({
   isActive: optional(z.boolean()),
 });
 
-/** A department is reachable by this org when it holds one of their employees (or none at all). */
+/** A department is reachable by the organization that owns it, and no other. */
 async function assertVisible(departmentId: string, orgId: string) {
   return prisma.department.findFirst({
-    where: {
-      id: departmentId,
-      OR: [
-        { employees: { some: { organizationId: orgId } } },
-        { employees: { none: {} } },
-      ],
-    },
+    where: { id: departmentId, organizationId: orgId },
     include: { _count: { select: { employees: true } } },
   });
 }
@@ -41,7 +35,11 @@ export const PATCH = withOrgAuth<{ departmentId: string }>(
 
       if (data.code && data.code !== existing.code) {
         const clash = await prisma.department.findFirst({
-          where: { code: data.code, NOT: { id: params.departmentId } },
+          where: {
+            organizationId: orgId,
+            code: data.code,
+            NOT: { id: params.departmentId },
+          },
           select: { id: true },
         });
         if (clash) return badRequest(`Department code ${data.code} already exists`);

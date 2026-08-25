@@ -103,28 +103,9 @@ async function main() {
 
   console.log("Voucher types created");
 
-  // Create leave types
-  const leaveTypes = [
-    { name: "Casual Leave", code: "CL", annualQuota: 12, carryForward: false, encashable: false },
-    { name: "Sick Leave", code: "SL", annualQuota: 12, carryForward: false, encashable: false },
-    { name: "Earned Leave", code: "EL", annualQuota: 15, carryForward: true, maxCarryForward: 30, encashable: true },
-    { name: "Maternity Leave", code: "ML", annualQuota: 182, carryForward: false, encashable: false },
-    { name: "Paternity Leave", code: "PL", annualQuota: 15, carryForward: false, encashable: false },
-    { name: "Loss of Pay", code: "LOP", annualQuota: 0, carryForward: false, encashable: false },
-  ];
-
-  for (const lt of leaveTypes) {
-    await prisma.leaveType.upsert({
-      where: { id: lt.code },
-      update: {},
-      create: {
-        id: lt.code,
-        ...lt,
-      },
-    });
-  }
-
-  console.log("Leave types created");
+  // Leave types, departments and designations are per-organization since
+  // migration 17 and are laid down by provisionOrganization below, which every
+  // org goes through — seeded, self-registered or created through the API.
 
   // Refuse to seed the well-known demo admin into a production-flagged DB.
   // Set ALLOW_PROD_SEED=true to override (e.g. for first-time bootstrap).
@@ -259,21 +240,6 @@ async function main() {
 
   console.log("Default warehouse created");
 
-  // Create departments
-  const departments = ["Engineering", "Finance", "Sales", "HR", "Operations", "Marketing"];
-
-  for (const dept of departments) {
-    await prisma.department.upsert({
-      where: { id: dept.toLowerCase() },
-      update: {},
-      create: {
-        id: dept.toLowerCase(),
-        name: dept,
-      },
-    });
-  }
-
-  console.log("Departments created");
 
   // Create tax configurations (GST rates)
   const taxConfigs = [
@@ -348,31 +314,6 @@ async function main() {
 
   console.log("Item categories created");
 
-  // Create designations
-  const designations = [
-    { name: "Chief Executive Officer", level: 1 },
-    { name: "Chief Financial Officer", level: 1 },
-    { name: "Director", level: 2 },
-    { name: "Manager", level: 3 },
-    { name: "Senior Executive", level: 4 },
-    { name: "Executive", level: 5 },
-    { name: "Trainee", level: 6 },
-    { name: "Intern", level: 7 },
-  ];
-
-  for (const desig of designations) {
-    await prisma.designation.upsert({
-      where: { id: desig.name.toLowerCase().replace(/ /g, "-") },
-      update: {},
-      create: {
-        id: desig.name.toLowerCase().replace(/ /g, "-"),
-        name: desig.name,
-        level: desig.level,
-      },
-    });
-  }
-
-  console.log("Designations created");
 
   // Create sample parties (customers & vendors)
   const parties = [

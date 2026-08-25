@@ -325,3 +325,14 @@ export const notFound = (message = "Not found") =>
 
 export const badRequest = (message = "Bad request", details?: unknown) =>
   NextResponse.json({ error: message, ...(details ? { details } : {}) }, { status: 400 });
+
+/**
+ * A unique constraint rejected the write — someone else got there first.
+ *
+ * Distinct from `badRequest`: the request was well-formed and would have
+ * succeeded a moment earlier. A client seeing 409 knows to re-read and retry,
+ * where a 500 tells it the server is broken and a 400 tells it to stop sending
+ * this shape of request. Both are wrong for a lost race.
+ */
+export const conflict = (message = "Conflict") =>
+  NextResponse.json({ error: message }, { status: 409 });

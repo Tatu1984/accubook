@@ -16,18 +16,22 @@ export const dynamic = "force-dynamic";
  * ("Casual Leave (9 available)") that mapped to no row in the database and
  * could never produce a valid request.
  *
- * LeaveType is a global catalogue in the schema rather than an org-scoped
- * table; this route sits under the organization purely so it inherits the
- * same authentication and permission checks as the rest of HR.
+ * LeaveType was a global catalogue rather than an org-scoped table until
+ * migration 17, and this route read it with no scoping at all — so every
+ * organization saw, and could edit against, every other organization's leave
+ * types. Each org now owns its own set.
  */
 
-export const GET = withOrgAuth(async (request) => {
+export const GET = withOrgAuth(async (request, { orgId }) => {
   try {
     const { searchParams } = new URL(request.url);
     const includeInactive = searchParams.get("includeInactive") === "true";
 
     const leaveTypes = await prisma.leaveType.findMany({
-      where: includeInactive ? {} : { isActive: true },
+      where: {
+        organizationId: orgId,
+        ...(includeInactive ? {} : { isActive: true }),
+      },
       orderBy: { name: "asc" },
     });
 
@@ -50,20 +54,22 @@ const createLeaveTypeSchema = z.object({
   encashable: z.boolean().default(false),
 });
 
-export const POST = withOrgAuth(async (request) => {
+export const POST = withOrgAuth(async (request, { orgId }) => {
   try {
     const body = await request.json();
     const data = createLeaveTypeSchema.parse(body);
 
     const existing = await prisma.leaveType.findFirst({
-      where: { code: data.code },
+      where: { organizationId: orgId, code: data.code },
       select: { id: true },
     });
     if (existing) {
       return badRequest(`Leave type code ${data.code} already exists`);
     }
 
-    const leaveType = await prisma.leaveType.create({ data });
+    const leaveType = await prisma.leaveType.create({
+      data: { ...data, organizationId: orgId },
+    });
     return NextResponse.json(leaveType, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
