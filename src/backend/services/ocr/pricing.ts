@@ -30,7 +30,7 @@ export const MODEL_RATES: Record<string, ModelRate> = {
 };
 
 /** Free engines still get a row, so every document has a cost — zero is a cost. */
-export const FREE_PROVIDERS = new Set(["pdf-text", "tesseract", "manual"]);
+export const FREE_PROVIDERS = new Set(["pdf-text", "tesseract", "groq", "manual"]);
 
 /**
  * USD → INR for display. An indicative rate, overridable per deployment; the

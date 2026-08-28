@@ -60,7 +60,9 @@ interface ExtractionRow {
 interface EngineStatus {
   mode: string;
   paidAvailable: boolean;
+  freeAiAvailable: boolean;
   model: string | null;
+  freeAiModel: string | null;
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -193,9 +195,17 @@ export default function DocumentInboxPage() {
           {engine && (
             <Badge variant="outline" className="gap-1.5">
               <Sparkles className="h-3.5 w-3.5" />
-              {engine.paidAvailable && engine.mode !== "free"
-                ? `Reading with ${engine.model}`
-                : "Free reading (PDFs and photos)"}
+              {engine.mode === "free"
+                ? "Free reading (PDFs and photos)"
+                : engine.mode === "claude"
+                  ? engine.paidAvailable
+                    ? `Reading with ${engine.model}`
+                    : "Free reading (PDFs and photos)"
+                  : engine.freeAiAvailable
+                    ? `Reading with ${engine.freeAiModel} (free)`
+                    : engine.paidAvailable
+                      ? `Reading with ${engine.model}`
+                      : "Free reading (PDFs and photos)"}
             </Badge>
           )}
           <Button onClick={() => fileInput.current?.click()} disabled={uploading}>
