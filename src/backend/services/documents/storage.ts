@@ -9,17 +9,33 @@ import { randomUUID } from "node:crypto";
  * can only be settled against the picture the vendor actually sent — so it is
  * stored whole and never overwritten.
  *
- * Two drivers: Vercel Blob in deployment (the app already runs there, and blob
- * URLs carry an unguessable suffix), and the local filesystem for development
- * so the feature works before any storage account exists. Neither URL is ever
- * handed to a browser: files are served through an org-scoped API route, so a
- * leaked link cannot cross a tenant boundary.
+ * Two drivers: Pinata (IPFS pinning) in deployment, and the local filesystem
+ * for development so the feature works before any storage account exists.
+ * Neither URL is ever handed to a browser: files are served through an
+ * org-scoped API route, so a leaked link cannot cross a tenant boundary.
+ *
+ * For the Pinata driver, the "storage key" stored in the database is the
+ * IPFS CID returned by the pin — content-addressed, so it also happens to
+ * be a de-duplication key across identical uploads.
  */
 
-export type StorageDriver = "vercel-blob" | "local";
+export type StorageDriver = "pinata" | "local";
 
 export function storageDriver(): StorageDriver {
-  return process.env.BLOB_READ_WRITE_TOKEN ? "vercel-blob" : "local";
+  return process.env.PINATA_JWT ? "pinata" : "local";
+}
+
+const PINATA_API_BASE = "https://api.pinata.cloud";
+
+function pinataGatewayUrl(cid: string): string {
+  const gateway = process.env.PINATA_GATEWAY || "gateway.pinata.cloud";
+  return `https://${gateway}/ipfs/${cid}`;
+}
+
+function pinataJwt(): string {
+  const jwt = process.env.PINATA_JWT;
+  if (!jwt) throw new Error("PINATA_JWT is not set");
+  return jwt;
 }
 
 const LOCAL_ROOT = resolve(process.cwd(), ".uploads");
@@ -40,32 +56,49 @@ function localPathFor(key: string): string {
   return path;
 }
 
+/**
+ * Stores the file and returns the key to persist in the database.
+ *
+ * `key` is a hint (the local driver uses it verbatim as the file's path);
+ * the Pinata driver ignores it as an address and returns the pinned CID
+ * instead, since that's the only key that can address the file on IPFS.
+ */
 export async function putDocument(
   key: string,
   body: Buffer,
-  contentType: string
-): Promise<void> {
-  if (storageDriver() === "vercel-blob") {
-    const { put } = await import("@vercel/blob");
-    await put(key, body, {
-      access: "public",
-      contentType,
-      addRandomSuffix: false,
-      token: process.env.BLOB_READ_WRITE_TOKEN,
+  contentType: string,
+  fileName?: string
+): Promise<string> {
+  if (storageDriver() === "pinata") {
+    const form = new FormData();
+    form.append(
+      "file",
+      new Blob([new Uint8Array(body)], { type: contentType }),
+      fileName || key
+    );
+    form.append("pinataMetadata", JSON.stringify({ name: fileName || key }));
+
+    const response = await fetch(`${PINATA_API_BASE}/pinning/pinFileToIPFS`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${pinataJwt()}` },
+      body: form,
     });
-    return;
+    if (!response.ok) {
+      throw new Error(`Pinata upload failed (${response.status}): ${await response.text()}`);
+    }
+    const result = (await response.json()) as { IpfsHash: string };
+    return result.IpfsHash;
   }
 
   const path = localPathFor(key);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, body);
+  return key;
 }
 
 export async function getDocument(key: string): Promise<Buffer> {
-  if (storageDriver() === "vercel-blob") {
-    const { head } = await import("@vercel/blob");
-    const meta = await head(key, { token: process.env.BLOB_READ_WRITE_TOKEN });
-    const response = await fetch(meta.url);
+  if (storageDriver() === "pinata") {
+    const response = await fetch(pinataGatewayUrl(key));
     if (!response.ok) throw new Error(`Stored file could not be read (${response.status})`);
     return Buffer.from(await response.arrayBuffer());
   }
@@ -74,9 +107,11 @@ export async function getDocument(key: string): Promise<Buffer> {
 }
 
 export async function deleteDocument(key: string): Promise<void> {
-  if (storageDriver() === "vercel-blob") {
-    const { del } = await import("@vercel/blob");
-    await del(key, { token: process.env.BLOB_READ_WRITE_TOKEN });
+  if (storageDriver() === "pinata") {
+    await fetch(`${PINATA_API_BASE}/pinning/unpin/${key}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${pinataJwt()}` },
+    }).catch(() => undefined);
     return;
   }
   await unlink(localPathFor(key)).catch(() => undefined);

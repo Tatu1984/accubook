@@ -161,8 +161,12 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
     const sourceRef = (form.get("sourceRef") as string | null) ?? file.name;
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const storageKey = buildStorageKey(orgId, file.name || "document");
-    await putDocument(storageKey, buffer, mimeType);
+    const storageKey = await putDocument(
+      buildStorageKey(orgId, file.name || "document"),
+      buffer,
+      mimeType,
+      file.name || "document"
+    );
 
     const org = await prisma.organization.findUnique({
       where: { id: orgId },
