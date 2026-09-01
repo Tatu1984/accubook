@@ -16,6 +16,9 @@ import { checkRateLimit, rateLimited } from "@/backend/utils/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// Upload (now a network hop to Pinata) plus synchronous OCR can run past
+// Vercel's low default function timeout on a slow page or a cold model.
+export const maxDuration = 60;
 
 /**
  * The document inbox.
@@ -161,12 +164,8 @@ export const POST = withOrgAuth(async (request, { orgId, userId }) => {
     const sourceRef = (form.get("sourceRef") as string | null) ?? file.name;
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const storageKey = await putDocument(
-      buildStorageKey(orgId, file.name || "document"),
-      buffer,
-      mimeType,
-      file.name || "document"
-    );
+    const storageKey = buildStorageKey(orgId, file.name || "document");
+    await putDocument(storageKey, buffer, mimeType);
 
     const org = await prisma.organization.findUnique({
       where: { id: orgId },
