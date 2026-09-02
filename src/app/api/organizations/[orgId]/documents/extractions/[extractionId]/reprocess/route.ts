@@ -5,7 +5,7 @@ import { withOrgAuth, badRequest, notFound } from "@/backend/utils/with-org-auth
 import { logger } from "@/backend/utils/logger";
 import { getDocument } from "@/backend/services/documents/storage";
 import { extractDocument } from "@/backend/services/ocr/extract";
-import { claudeProvider } from "@/backend/services/ocr/providers/claude";
+import { groqProvider, groqIsConfigured } from "@/backend/services/ocr/providers/groq";
 import { ExtractionError } from "@/backend/services/ocr/provider";
 import { checkRateLimit, rateLimited } from "@/backend/utils/rate-limit";
 
@@ -16,17 +16,17 @@ export const maxDuration = 60;
 /**
  * Read it again.
  *
- * Two reasons this exists: a free reading that came back thin can be escalated
- * to the paid engine on the reviewer's say-so (`engine: "claude"`), and a
- * document uploaded before an extractor was configured can be picked up later
- * without re-uploading the file.
+ * Two reasons this exists: a free reading that came back thin can be re-tried
+ * against Groq's vision model on the reviewer's say-so (`engine: "groq"`), and
+ * a document uploaded before an extractor was configured can be picked up
+ * later without re-uploading the file.
  *
  * Corrections already typed are left alone — a re-read replaces the machine's
  * reading, never the human's.
  */
 
 const reprocessSchema = z.object({
-  engine: z.enum(["auto", "claude"]).default("auto"),
+  engine: z.enum(["auto", "groq"]).default("auto"),
 });
 
 export const POST = withOrgAuth<{ extractionId: string }>(
@@ -70,10 +70,16 @@ export const POST = withOrgAuth<{ extractionId: string }>(
 
       const startedAt = Date.now();
       try {
+        if (engine === "groq" && !groqProvider.supports(input)) {
+          return badRequest(
+            groqIsConfigured()
+              ? `${row.mimeType} cannot be read again — Groq only reads JPEG, PNG, GIF or WebP photos. Enter this document by hand instead.`
+              : "Reading again is not set up for this environment — enter the document by hand instead."
+          );
+        }
+
         const result =
-          engine === "claude"
-            ? await claudeProvider.extract(input)
-            : await extractDocument(input);
+          engine === "groq" ? await groqProvider.extract(input) : await extractDocument(input);
 
         const updated = await prisma.documentExtraction.update({
           where: { id: row.id },

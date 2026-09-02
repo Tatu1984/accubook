@@ -318,7 +318,7 @@ export default function DocumentReviewPage() {
       const response = await fetch(`${base}/reprocess`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ engine: "claude" }),
+        body: JSON.stringify({ engine: "groq" }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || "Could not read it again");

@@ -38,6 +38,9 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
     const { searchParams } = new URL(request.url);
     const view = searchParams.get("view");
     const status = searchParams.get("status");
+    // A tab can ask for more than one status at once — "To check" includes a
+    // document still being read, not just one already sitting for review.
+    const statuses = status ? status.split(",").filter(Boolean) : [];
     const docType = searchParams.get("docType");
     const limit = Math.min(Number(searchParams.get("limit") ?? 50) || 50, 200);
 
@@ -77,7 +80,11 @@ export const GET = withOrgAuth(async (request, { orgId }) => {
 
     const where = {
       organizationId: orgId,
-      ...(status ? { status } : {}),
+      ...(statuses.length === 1
+        ? { status: statuses[0] }
+        : statuses.length > 1
+          ? { status: { in: statuses } }
+          : {}),
       ...(docType ? { docType } : {}),
     };
 

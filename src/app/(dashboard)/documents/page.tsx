@@ -121,7 +121,15 @@ export default function DocumentInboxPage() {
     if (!organizationId) return;
     setLoading(true);
     try {
-      const query = tab === "ALL" ? "" : `?status=${tab}`;
+      // A document still being read belongs on the "To check" tab too — it is
+      // exactly as un-checked as one that has finished, and hiding it there
+      // makes a fresh upload look like it vanished until extraction completes.
+      const query =
+        tab === "ALL"
+          ? ""
+          : tab === "NEEDS_REVIEW"
+            ? "?status=NEEDS_REVIEW,PROCESSING"
+            : `?status=${tab}`;
       const [listRes, usageRes] = await Promise.all([
         fetch(`/api/organizations/${organizationId}/documents/extractions${query}`),
         fetch(`/api/organizations/${organizationId}/documents/extractions?view=usage`),
@@ -179,7 +187,7 @@ export default function DocumentInboxPage() {
     }
   };
 
-  const needsReview = counts.NEEDS_REVIEW ?? 0;
+  const needsReview = (counts.NEEDS_REVIEW ?? 0) + (counts.PROCESSING ?? 0);
 
   return (
     <div className="space-y-6">
