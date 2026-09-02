@@ -347,7 +347,7 @@ graph TB
     AB --> BANK["Banking<br/>statement import · payment links"]
     AB --> PAY["Razorpay<br/>subscriptions · webhooks"]
     AB --> MAIL["Email<br/>transactional · document delivery"]
-    AB --> AI["Anthropic API<br/>document extraction"]
+    AB --> AI["Groq API<br/>document extraction"]
     AB --> SMS["SMS / WhatsApp<br/>invoice delivery, reminders"]
 
     style AB fill:#d6e4f7,stroke:#3b5b8c,stroke-width:3px
@@ -403,7 +403,7 @@ graph TB
     APP --> EXT
 
     subgraph EXT_T["External"]
-        EXT["Razorpay · Resend/SES · Anthropic · GST IRP · e-way bill · SMS"]
+        EXT["Razorpay · Resend/SES · Groq · GST IRP · e-way bill · SMS"]
     end
 
     SCHED["Scheduler"] -->|"Bearer CRON_SECRET"| APP
@@ -1468,7 +1468,7 @@ GSTR-1, GSTR-3B and Form 16 differ from a P&L in a way that changes the design: 
 
 ## 20. Documents, OCR and AI
 
-**[VERIFIED-REPO]** Already shipped: `DocumentExtraction` (org-scoped), Tesseract.js, `unpdf`, and the Anthropic SDK.
+**[VERIFIED-REPO]** Already shipped: `DocumentExtraction` (org-scoped), `unpdf` (PDF text layer), and Groq's free vision model for photos and scans. There is no paid/LLM escalation tier — a reading that comes back thin is handed to the reviewer as-is rather than re-run against a paid model.
 
 ```mermaid
 graph LR

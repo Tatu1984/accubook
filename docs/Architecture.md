@@ -198,7 +198,7 @@ Everything in this section was measured on 26 August 2026 at commit `f371d13`. T
 | Errors | Sentry | `@sentry/nextjs@^10.52.0` |
 | Object storage | Vercel Blob | `@vercel/blob@^2.8.0` |
 | Cache / rate limit | Upstash Redis (REST) | via `fetch`, no SDK |
-| OCR / documents | Tesseract.js, unpdf, Anthropic SDK | `^7.0.0`, `^1.8.1`, `^0.120.0` |
+| OCR / documents | unpdf, Groq SDK | `^1.8.1`, current |
 | Exports | ExcelJS, qrcode, bwip-js | — |
 | Test | Vitest, Playwright | `^4.1.5`, `^1.59.1` |
 
@@ -333,7 +333,7 @@ graph TB
         UP[(Upstash Redis<br/>rate limit only · 4 routes)]
     end
     subgraph External
-        AN[Anthropic API — OCR]
+        AN[Groq API — OCR]
         RE[Resend — email, optional]
         SE[Sentry]
     end
@@ -386,7 +386,7 @@ Derived from the shipped code **[VERIFIED-REPO]**, not invented:
 | Payroll | `Employee`, `PayrollStructure`, `Payslip`, `Attendance`, `Leave`, `post-month.ts` | Idempotent monthly posting — tests exist for double-post |
 | Banking | `BankAccount`, `BankTransaction`, `BankReconciliation`, `statement-import.ts`, `reconcile.ts` | Bulk import → async (§26.6) |
 | Approvals | `ApprovalWorkflow`, `ApprovalWorkflowStep`, `Approval` | `approve` is not expressible as an HTTP method — handled in-handler |
-| Documents / OCR | `DocumentExtraction`, `services/ocr/*`, Tesseract + Anthropic + pdf-text | Long-running, costly, must be async and metered (§25) |
+| Documents / OCR | `DocumentExtraction`, `services/ocr/*`, Groq + pdf-text | Long-running, costly, must be async and metered (§25) |
 | Migration from Tally | `services/migration/tally.ts` (30 s transaction) | Bulk import architecture (§26.6) |
 | Reporting | `services/reports/registers.ts`, `ReportTemplate` | Async generation at scale (§29) |
 | API keys | `ApiKey` + `verify-api-key.ts` + `api-scope.ts` | Per-key rate limits and scopes (§31, §38) |
@@ -3537,7 +3537,7 @@ graph TB
     subgraph EXT[External]
         RZP[Razorpay]
         RES[Resend]
-        ANT[Anthropic — OCR]
+        ANT[Groq — OCR]
         GST[GST IRP / e-way bill]
     end
     APP --> EXT
@@ -3643,7 +3643,7 @@ Rules: databases in subnets with **no route to the internet**; app→DB allowed 
 
 ### 47.1 Current state
 
-**[VERIFIED-REPO]** All secrets are environment variables validated by Zod at import: `DATABASE_URL`, `AUTH_SECRET`/`NEXTAUTH_SECRET` (min 32 chars), `CRON_SECRET` (min 32, with a comment saying "rotate quarterly"), `RESEND_API_KEY`, `UPSTASH_*`, `SENTRY_DSN`, `BLOB_READ_WRITE_TOKEN`, `ANTHROPIC_API_KEY`.
+**[VERIFIED-REPO]** All secrets are environment variables validated by Zod at import: `DATABASE_URL`, `AUTH_SECRET`/`NEXTAUTH_SECRET` (min 32 chars), `CRON_SECRET` (min 32, with a comment saying "rotate quarterly"), `RESEND_API_KEY`, `UPSTASH_*`, `SENTRY_DSN`, `BLOB_READ_WRITE_TOKEN`, `GROQ_API_KEY`.
 
 **[JUDGEMENT]** Centralised, validated, fail-fast configuration is a genuinely good pattern and better than scattered `process.env` access. The gaps are **rotation**, **access control** and **audit** — not storage format.
 
@@ -3657,7 +3657,7 @@ Rules: databases in subnets with **no route to the internet**; app→DB allowed 
 | `CRON_SECRET` | 90 d | secret manager | can trigger jobs |
 | Razorpay keys + webhook secret | on compromise | secret manager | payments |
 | Storage token | 90 d | secret manager | documents |
-| `ANTHROPIC_API_KEY` | 90 d | secret manager | cost |
+| `GROQ_API_KEY` | 90 d | secret manager | cost |
 | Per-tenant placement DSNs | 90 d | secret manager, one entry per placement | that placement |
 
 ### 47.3 Recommendation
@@ -4159,7 +4159,7 @@ graph TB
     subgraph EXT["External"]
         RZ["Razorpay — subscriptions + webhooks"]
         RE["Resend — transactional email"]
-        AI["Anthropic — OCR extraction"]
+        AI["Groq — OCR extraction"]
         GS["GST IRP · e-way bill"]
     end
 ```
@@ -4218,7 +4218,7 @@ sequenceDiagram
 | Secret store | credentials | ✅ env → St3 manager | platform → Secrets Manager | n/a | deploy blocked |
 | Email | transactional | ✅ | Resend → SES | provider | queued, retried |
 | Payments | subscriptions | ✅ | Razorpay | provider | signups blocked |
-| OCR | document reading | ✅ | Anthropic + Tesseract | rate/cost caps | kill switch |
+| OCR | document reading | ✅ | Groq (free tier) | rate/cost caps | kill switch |
 | GST IRP / e-way | statutory | ✅ | Govt APIs | n/a | **queue + retry** |
 | Errors | error aggregation | ✅ | Sentry | provider | blind |
 | Logs | structured logs | ✅ | Pino → drain | sampling | blind |
